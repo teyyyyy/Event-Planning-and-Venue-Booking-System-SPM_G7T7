@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 *.pyc
 .env
+# Keep environment files out of version control, including frontend-local ones.
+.env.*
+!.env.example
