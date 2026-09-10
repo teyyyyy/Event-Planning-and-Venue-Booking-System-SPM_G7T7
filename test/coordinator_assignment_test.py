@@ -28,12 +28,12 @@ def main():
         raise AssertionError(f"Expected 3 coordinators, found {len(coordinators)}")
 
     for number in range(1, 8):
-        event = client.table("events").insert({
-            "event_title": f"Sequential Assignment Test {number}",
+        event = client.table("Event Details").insert({
+            "event_name": f"Sequential Assignment Test {number}",
             "event_date": (date.today() + timedelta(days=number)).isoformat(),
-            "event_status": "Pending assignment",
-            "event_organiser_id": organiser_id,
-        }).select("id,event_title").execute().data[0]
+            "status": "Pending assignment",
+            "organiser_id": organiser_id,
+        }).select("id,event_name").execute().data[0]
 
         before = active_workloads(client, coordinators)
         expected = min(coordinators, key=lambda item: (before[item["id"]], item["name"]))
@@ -41,10 +41,10 @@ def main():
 
         if result["assigned_coordinator_id"] != expected["id"]:
             raise AssertionError(
-                f"{event['event_title']}: expected {expected['name']} based on {before}, "
+                f"{event['event_name']}: expected {expected['name']} based on {before}, "
                 f"got {result['coordinator_name']}"
             )
-        print(f"PASS {number}/7: {event['event_title']} -> {result['coordinator_name']} | before: {before}")
+        print(f"PASS {number}/7: {event['event_name']} -> {result['coordinator_name']} | before: {before}")
 
     print("All 7 assignments selected the coordinator with the lowest active workload.")
 

@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timezone
 from typing import Any
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -21,6 +20,8 @@ class EventStatusUpdate(BaseModel):
     event_status: str
 
 EVENT_STATUSES = {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
+EVENT_TABLE = "Event Details"
+INACTIVE_STATUSES = {"draft", "complete", "completed", "cancelled", "rejected"}
 
 def db() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -28,24 +29,27 @@ def db() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 def coordinator_records(client: Client) -> list[dict[str, Any]]:
-    users = client.table("users").select("id,name,role,email").execute().data or []
+    users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return [user for user in users if str(user.get("role", "")).strip().lower() == "event coordinator"]
 
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
-    coordinator_id = assignment.get("assigned_coordinator_id") if assignment else None
+    coordinator_id = assignment.get("coordinator_id") if assignment else None
     coordinator = users.get(str(coordinator_id)) if coordinator_id else None
-    return {"id": request["id"], "event_title": request["event_title"], "event_date": request["event_date"], "event_status": request["event_status"], "event_organiser_id": request["event_organiser_id"], "assigned_coordinator_id": assignment["assigned_coordinator_id"] if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
+    return {"id": request["id"], "event_title": request.get("event_name"), "event_date": request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
 
 def active_workloads(client: Client, coordinators: list[dict[str, Any]]) -> dict[str, int]:
-    workloads = {item["id"]: 0 for item in coordinators}
-    assignments = client.table("events").select("assigned_coordinator_id,event_status").not_.is_("assigned_coordinator_id", "null").execute().data or []
-    inactive = {"draft", "complete", "cancelled", "rejected"}
-    for assignment in assignments:
-        coordinator_id = assignment.get("assigned_coordinator_id")
-        event_status = str(assignment.get("event_status") or "").strip().lower()
-        if coordinator_id in workloads and event_status not in inactive:
-            workloads[coordinator_id] += 1
-    return workloads
+    current = {item["id"]: item for item in coordinator_records(client)}
+    return {item["id"]: int(current.get(item["id"], {}).get("active_event_count") or 0) for item in coordinators}
+
+def adjust_workload(client: Client, coordinator_id: str, amount: int):
+    user = client.table("users").select("active_event_count").eq("id", coordinator_id).maybe_single().execute().data
+    if not user:
+        raise HTTPException(400, "Coordinator not found.")
+    current = int(user.get("active_event_count") or 0)
+    client.table("users").update({"active_event_count": max(0, current + amount)}).eq("id", coordinator_id).execute()
+
+def is_active_status(status: Any) -> bool:
+    return str(status or "").strip().lower() not in INACTIVE_STATUSES
 
 @router.get("/api/health")
 def health_check(): return {"status": "ok", "service": "event-coordinator-assignment"}
@@ -57,11 +61,15 @@ def assign_coordinator_endpoint(event_id: str):
 @router.patch("/api/events/{event_id}/coordinator")
 def reassign_coordinator(event_id: str, assignment: CoordinatorAssignment):
     client = db()
-    event = client.table("events").select("*").eq("id", event_id).maybe_single().execute().data
+    event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
     if not event: raise HTTPException(404, "Event request not found.")
     coordinator = next((item for item in coordinator_records(client) if item["id"] == assignment.coordinator_id), None)
     if not coordinator: raise HTTPException(400, "Select an available event coordinator.")
-    updated = client.table("events").update({"assigned_coordinator_id": coordinator["id"], "assigned_at": datetime.now(timezone.utc).isoformat()}).eq("id", event_id).select("*").execute().data[0]
+    previous_id = event.get("coordinator_id")
+    if previous_id != coordinator["id"] and is_active_status(event.get("status")):
+        if previous_id: adjust_workload(client, previous_id, -1)
+        adjust_workload(client, coordinator["id"], 1)
+    updated = client.table(EVENT_TABLE).update({"coordinator_id": coordinator["id"]}).eq("id", event_id).select("*").execute().data[0]
     return view(updated, updated, {str(coordinator["id"]): coordinator})
 
 @router.patch("/api/events/{event_id}/status")
@@ -69,34 +77,41 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
     if status_update.event_status not in EVENT_STATUSES:
         raise HTTPException(400, "Invalid event status.")
     client = db()
-    event = client.table("events").select("*").eq("id", event_id).maybe_single().execute().data
+    event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
     if not event: raise HTTPException(404, "Event request not found.")
-    updated = client.table("events").update({"event_status": status_update.event_status}).eq("id", event_id).select("*").execute().data[0]
-    users = client.table("users").select("id,name,role,email").execute().data or []
-    return view(updated, updated if updated.get("assigned_coordinator_id") else None, {str(user["id"]): user for user in users})
+    old_active = is_active_status(event.get("status"))
+    new_active = is_active_status(status_update.event_status)
+    coordinator_id = event.get("coordinator_id")
+    if coordinator_id and old_active != new_active:
+        adjust_workload(client, coordinator_id, 1 if new_active else -1)
+    updated = client.table(EVENT_TABLE).update({"status": status_update.event_status}).eq("id", event_id).select("*").execute().data[0]
+    users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
+    return view(updated, updated if updated.get("coordinator_id") else None, {str(user["id"]): user for user in users})
 
 def assign_event(event_id: str):
     client = db()
-    request = client.table("events").select("*").eq("id", event_id).maybe_single().execute().data
+    request = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
     if not request: raise HTTPException(404, "Event request not found.")
     coordinators = coordinator_records(client)
     if len(coordinators) != 3: raise HTTPException(500, "Exactly 3 event coordinators are required.")
     workloads = active_workloads(client, coordinators)
     selected = min(coordinators, key=lambda item: (workloads[item["id"]], item["name"]))
-    updated = client.table("events").update({"assigned_coordinator_id": selected["id"], "assigned_at": datetime.now(timezone.utc).isoformat(), "event_status": "Under review"}).eq("id", event_id).select("*").execute().data[0]
-    return view(updated, {"assigned_coordinator_id": selected["id"]}, {str(item["id"]): item for item in coordinators})
+    updated = client.table(EVENT_TABLE).update({"coordinator_id": selected["id"], "status": "Under review"}).eq("id", event_id).select("*").execute().data[0]
+    if not request.get("coordinator_id") and is_active_status("Under review"):
+        adjust_workload(client, selected["id"], 1)
+    return view(updated, {"coordinator_id": selected["id"]}, {str(item["id"]): item for item in coordinators})
 
 @router.get("/api/event-organisers/{organiser_id}/requests")
 def organiser_events(organiser_id: str):
     client = db(); users = client.table("users").select("id,name,role,email").execute().data or []
-    requests = client.table("events").select("*").eq("event_organiser_id", organiser_id).order("event_date").execute().data or []
-    return [view(item, item if item.get("assigned_coordinator_id") else None, {str(user["id"]): user for user in users}) for item in requests]
+    requests = client.table(EVENT_TABLE).select("*").eq("organiser_id", organiser_id).order("event_date").execute().data or []
+    return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in requests]
 
 @router.get("/api/events")
 def all_events():
     client = db(); users = coordinator_records(client)
-    events = client.table("events").select("*").order("event_date").execute().data or []
-    return [view(item, item if item.get("assigned_coordinator_id") else None, {str(user["id"]): user for user in users}) for item in events]
+    events = client.table(EVENT_TABLE).select("*").order("event_date").execute().data or []
+    return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in events]
 
 @router.get("/api/coordinators")
 def coordinators(): return sorted(coordinator_records(db()), key=lambda user: user.get("name", "").lower())
