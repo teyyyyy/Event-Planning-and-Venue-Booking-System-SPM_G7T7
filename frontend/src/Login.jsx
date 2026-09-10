@@ -56,10 +56,6 @@ export default function Login() {
         <button type="submit" className="auth-submit" disabled={busy}>
           {busy ? 'Signing in…' : 'Sign in'}
         </button>
-
-        <p className="auth-hint">
-          Accounts are provisioned in Supabase. Ask the team for a test login.
-        </p>
       </form>
     </div>
   );
