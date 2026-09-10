@@ -58,7 +58,7 @@ export default function Login() {
         </button>
 
         <p className="auth-hint">
-          Demo account: <code>demo@gather.app</code> / <code>password123</code>
+          Accounts are provisioned in Supabase. Ask the team for a test login.
         </p>
       </form>
     </div>
