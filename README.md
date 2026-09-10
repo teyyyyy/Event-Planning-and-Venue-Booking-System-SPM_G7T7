@@ -29,17 +29,21 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-The API health check is available at `http://localhost:8000/api/health`.
+The backend exposes the event-organiser and coordinator-assignment routers; it
+reads `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` from the repo-root `.env`.
 
 ## Authentication
 
 Accounts live in **Supabase Auth** (`auth.users`). The React app talks to Supabase
 directly via `@supabase/supabase-js`:
 
-- `frontend/src/supabaseClient.js` — creates the client from the `VITE_SUPABASE_*` env vars
+- `frontend/src/utils/supabase.js` — creates the client from the `VITE_SUPABASE_*` env vars
 - `frontend/src/AuthContext.jsx` — `login` (`signInWithPassword`), `logout`
   (`signOut`), and `onAuthStateChange` to keep React state in sync
 - `frontend/src/Login.jsx` — sign-in form
+- `frontend/src/App.jsx` — gates the app: unauthenticated users see the login
+  screen, authenticated users get the organiser / coordinator views with a log-out
+  button
 
 The session (JWT + refresh token) is persisted in `localStorage` and refreshed
 automatically by the client.
@@ -52,8 +56,8 @@ confirmed). A registration flow can be added later.
 
 ### FastAPI backend
 
-The Python backend is no longer part of the auth flow. It stays for future
-event / venue / booking APIs; when those land, verify the Supabase JWT that
-`frontend/src/api.js` sends as a `Bearer` token (using the project's JWT secret /
-`SUPABASE_SERVICE_ROLE_KEY`). The old SQLite `users` table and `gather.db` are
-unused.
+The Python backend is not part of the auth flow — the browser authenticates with
+Supabase directly. The backend serves app data (event requests, coordinator
+assignment) via the Supabase service-role key. `frontend/src/api.js` is a helper
+that forwards the signed-in user's Supabase JWT as a `Bearer` token for when those
+routes need to verify the caller.

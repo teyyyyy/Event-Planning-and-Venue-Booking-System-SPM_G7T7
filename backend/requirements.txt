@@ -1,6 +1,4 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
-pydantic[email]
-bcrypt
-pyjwt
+supabase
+python-dotenv

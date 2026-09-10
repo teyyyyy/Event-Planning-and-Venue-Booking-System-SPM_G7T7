@@ -6,7 +6,7 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './utils/supabase';
 
 const AuthContext = createContext(null);
 
