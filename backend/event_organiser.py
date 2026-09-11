@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from supabase import Client, create_client
+from coordinator_assignment import assign_event
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -49,6 +50,10 @@ def organiser_can_edit(event: dict[str, Any], organiser_id: str) -> bool:
     )
 
 
+def organiser_owns_event(event: dict[str, Any], organiser_id: str) -> bool:
+    return str(event.get("organiser_id")) == organiser_id
+
+
 def validate_request(request: EventRequest) -> None:
     try:
         event_date = date.fromisoformat(request.event_date)
@@ -89,7 +94,7 @@ def create_submitted_event_request(organiser_id: str, request: EventRequest):
     created = client.table(EVENT_TABLE).insert(payload).execute().data
     if not created:
         raise HTTPException(500, "Event request could not be submitted.")
-    return created[0]
+    return assign_event(created[0]["id"])
 
 
 @router.put("/api/event-organisers/{organiser_id}/requests/{event_id}")
@@ -113,7 +118,9 @@ def submit_event_request(organiser_id: str, event_id: str):
     event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
     if not event:
         raise HTTPException(404, "Event request not found.")
-    if not organiser_can_edit(event, organiser_id) or str(event.get("status", "")).lower() != "draft":
+    if not organiser_owns_event(event, organiser_id) or str(event.get("status", "")).strip().lower() != "draft":
         raise HTTPException(400, "Only completed draft requests can be submitted.")
     updated = client.table(EVENT_TABLE).update({"status": "Submitted"}).eq("id", event_id).select("*").execute().data
-    return updated[0]
+    if not updated:
+        raise HTTPException(500, "Event request could not be submitted.")
+    return assign_event(event_id)

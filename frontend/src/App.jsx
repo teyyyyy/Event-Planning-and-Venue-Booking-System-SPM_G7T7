@@ -6,28 +6,30 @@ import EventOrganiser from './event_organiser';
 
 function AuthedApp() {
   const { user, logout } = useAuth();
-  const [activeRole, setActiveRole] = useState('organiser');
+  const isCoordinator = user.role.trim().toLowerCase().includes('coordinator');
+  const [activeRole, setActiveRole] = useState(isCoordinator ? 'coordinator' : 'organiser');
+  const [editingEvent, setEditingEvent] = useState(null);
 
   return (
     <>
       <div className="role-tabs" role="tablist" aria-label="User role views">
-        <button
+        {!isCoordinator && <button
           className={activeRole === 'organiser' ? 'active' : ''}
           onClick={() => setActiveRole('organiser')}
         >
-          Event organiser
-        </button>
+          Create event
+        </button>}
         <button
           className={activeRole === 'coordinator' ? 'active' : ''}
           onClick={() => setActiveRole('coordinator')}
         >
-          Coordinator assignment
+          {isCoordinator ? 'Event management' : 'Event status'}
         </button>
         <button className="logout-tab" onClick={logout} title={user.email}>
           Log out
         </button>
       </div>
-      {activeRole === 'organiser' ? <EventOrganiser /> : <CoordinatorAssignment />}
+      {activeRole === 'organiser' ? <EventOrganiser user={user} editingEvent={editingEvent} onEditComplete={() => setEditingEvent(null)} /> : <CoordinatorAssignment user={user} onEditEvent={(event) => { setEditingEvent(event); setActiveRole('organiser'); }} />}
     </>
   );
 }
