@@ -19,3 +19,334 @@
 .auth-submit:disabled{opacity:.6;cursor:default}
 .auth-hint{margin:8px 0 0;color:#8a95a8;font-size:12px;text-align:center}
 .auth-hint code{background:#eef3fa;padding:1px 5px;border-radius:5px;font-size:11px}
+
+/* =========================================================
+   EVENT COORDINATOR WORKSPACE
+   ========================================================= */
+
+.coordinator-workspace{
+  min-height:100vh;
+  display:flex;
+  background:
+    radial-gradient(circle at 75% 30%,#e8efff,transparent 35%),
+    #f5f7fb;
+}
+
+.coordinator-sidebar{
+  width:238px;
+  min-height:100vh;
+  padding:34px 28px;
+  background:#cfe3fa;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  flex-shrink:0;
+}
+
+.coordinator-main{
+  width:calc(100% - 238px);
+  min-width:0;
+}
+
+
+/* Left-side navigation */
+
+.coordinator-side-nav{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:26px;
+}
+
+.coordinator-nav-button{
+  width:100%;
+  border:0;
+  background:transparent;
+  color:#768298;
+  padding:11px 12px;
+  border-radius:5px;
+  text-align:left;
+  font:12px 'DM Sans',sans-serif;
+  cursor:pointer;
+}
+
+.coordinator-nav-button:hover{
+  background:rgba(255,255,255,.4);
+}
+
+.coordinator-nav-button.active{
+  background:#192541;
+  color:#fff;
+}
+
+
+/* Coordinator logout */
+
+.coordinator-logout{
+  border:0;
+  background:transparent;
+  color:#768298;
+  padding:11px 12px;
+  text-align:left;
+  font:12px 'DM Sans',sans-serif;
+  cursor:pointer;
+}
+
+
+/* =========================================================
+   REMOVE DUPLICATE SIDEBAR FROM EXISTING COORDINATOR PAGE
+   ========================================================= */
+
+/*
+   coordinator_assignment.jsx already creates its own .shell
+   and aside.
+
+   When rendered inside CoordinatorWorkspace, hide its
+   internal sidebar so there is only one left sidebar.
+*/
+
+.embedded-existing-page .shell{
+  display:block;
+  min-height:100vh;
+}
+
+.embedded-existing-page .shell > aside{
+  display:none;
+}
+
+.embedded-existing-page .shell > .content{
+  width:100%;
+  max-width:none;
+}
+
+
+/* =========================================================
+   EQUIPMENT REQUEST PAGE
+   ========================================================= */
+
+.equipment-page{
+  width:100%;
+  padding:42px 5.5vw;
+}
+
+.equipment-page-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  border-bottom:1px solid #dce3ed;
+  padding-bottom:26px;
+}
+
+
+/* =========================================================
+   EQUIPMENT REQUEST SUB-TABS
+   ========================================================= */
+
+.equipment-sub-tabs{
+  display:flex;
+  justify-content:flex-end;
+  gap:4px;
+  margin:18px 0 0;
+}
+
+.equipment-sub-tabs button{
+  border:0;
+  background:#fff;
+  color:#768298;
+  padding:8px 12px;
+  font:12px 'DM Sans',sans-serif;
+  cursor:pointer;
+  border:1px solid #dfe5ee;
+}
+
+.equipment-sub-tabs button:first-child{
+  border-radius:6px 0 0 6px;
+}
+
+.equipment-sub-tabs button:last-child{
+  border-radius:0 6px 6px 0;
+}
+
+.equipment-sub-tabs button.active{
+  background:#192541;
+  color:#fff;
+  border-color:#192541;
+}
+
+
+/* =========================================================
+   EQUIPMENT ROWS
+   ========================================================= */
+
+.equipment-request-items{
+  margin-top:26px;
+}
+
+.equipment-items-heading{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:20px;
+  margin-bottom:16px;
+}
+
+.equipment-items-heading h3{
+  margin:0 0 5px;
+  color:#1c2940;
+}
+
+.equipment-items-heading p{
+  margin:0;
+  color:#68758a;
+  font-size:13px;
+}
+
+.equipment-item-card{
+  padding:20px 0;
+  border-top:1px solid #edf0f5;
+}
+
+.equipment-item-card h4{
+  margin:0 0 12px;
+  color:#1c2940;
+  font-weight:500;
+}
+
+.availability-hint{
+  display:block;
+  margin-top:4px;
+  color:#68758a;
+  font-size:11px;
+}
+
+.field-error{
+  display:block;
+  margin-top:4px;
+  color:#b23b3b;
+  font-size:11px;
+}
+
+.field-warning{
+  display:block;
+  margin-top:8px;
+  color:#a36c2c;
+  font-size:12px;
+}
+
+.optional-label{
+  font-weight:400;
+  color:#8b98ab;
+}
+
+.remove-equipment{
+  margin-top:12px;
+  padding:0;
+  border:0;
+  background:transparent;
+  color:#b76f5a;
+  font:12px 'DM Sans',sans-serif;
+  cursor:pointer;
+  border-bottom:1px solid #f19c83;
+}
+
+
+/* =========================================================
+   REQUEST VIEW
+   ========================================================= */
+
+.request-table-wrapper{
+  overflow:auto;
+  margin-top:18px;
+  border:1px solid #dfe5ee;
+  border-radius:8px;
+  background:#fff;
+}
+
+.request-table{
+  width:100%;
+  min-width:700px;
+  border-collapse:collapse;
+  text-align:left;
+}
+
+.request-table th{
+  color:#8390a3;
+  background:#f8faff;
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.request-table th,
+.request-table td{
+  padding:16px 18px;
+  border-bottom:1px solid #edf0f5;
+}
+
+.request-table td{
+  font-size:13px;
+}
+
+.request-table tr:last-child td{
+  border-bottom:0;
+}
+
+.empty-state{
+  text-align:center;
+  color:#8b98ab;
+  padding:42px;
+}
+
+.page-error{
+  margin-top:18px;
+  padding:10px 12px;
+  border-radius:6px;
+  background:#fdecec;
+  color:#b23b3b;
+  font-size:13px;
+}
+
+
+/* =========================================================
+   MOBILE
+   ========================================================= */
+
+@media(max-width:700px){
+
+  .coordinator-sidebar{
+    width:72px;
+    padding:28px 12px;
+  }
+
+  .coordinator-sidebar .side-label{
+    display:none;
+  }
+
+  .coordinator-main{
+    width:calc(100% - 72px);
+  }
+
+  .coordinator-nav-button{
+    padding:10px 6px;
+    font-size:10px;
+  }
+
+  .equipment-page{
+    padding:28px 22px;
+  }
+
+  .equipment-page-header{
+    display:block;
+  }
+
+  .equipment-sub-tabs{
+    justify-content:flex-start;
+    flex-wrap:wrap;
+  }
+
+  .equipment-items-heading{
+    align-items:flex-start;
+    flex-direction:column;
+  }
+}
