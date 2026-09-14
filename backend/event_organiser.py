@@ -15,7 +15,7 @@ router = APIRouter()
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL", "")).rstrip("/").removesuffix("/rest/v1")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 EVENT_TABLE = "Event Details"
-EDITABLE_ORGANISER_STATUSES = {"submitted"}
+EDITABLE_ORGANISER_STATUSES = {"draft", "submitted"}
 
 
 class EventRequest(BaseModel):
@@ -47,6 +47,10 @@ def organiser_can_edit(event: dict[str, Any], organiser_id: str) -> bool:
         str(event.get("organiser_id")) == organiser_id
         and str(event.get("status", "")).strip().lower() in EDITABLE_ORGANISER_STATUSES
     )
+
+
+def organiser_owns_event(event: dict[str, Any], organiser_id: str) -> bool:
+    return str(event.get("organiser_id")) == organiser_id
 
 
 def validate_request(request: EventRequest) -> None:
@@ -101,7 +105,13 @@ def update_event_request(organiser_id: str, event_id: str, request: EventRequest
         raise HTTPException(404, "Event request not found.")
     if not organiser_can_edit(event, organiser_id):
         raise HTTPException(403, "This event request cannot be updated during its current status.")
-    updated = client.table(EVENT_TABLE).update(request_data(request)).eq("id", event_id).select("*").execute().data
+    response = (
+        client.table(EVENT_TABLE)
+        .update(request_data(request))
+        .eq("id", event_id)
+        .execute()
+    )
+    updated = response.data
     if not updated:
         raise HTTPException(500, "Event request could not be updated.")
     return updated[0]
@@ -113,7 +123,13 @@ def submit_event_request(organiser_id: str, event_id: str):
     event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
     if not event:
         raise HTTPException(404, "Event request not found.")
-    if not organiser_can_edit(event, organiser_id) or str(event.get("status", "")).lower() != "draft":
+    if not organiser_owns_event(event, organiser_id) or str(event.get("status", "")).strip().lower() != "draft":
         raise HTTPException(400, "Only completed draft requests can be submitted.")
-    updated = client.table(EVENT_TABLE).update({"status": "Submitted"}).eq("id", event_id).select("*").execute().data
+    response = (
+        client.table(EVENT_TABLE)
+        .update({"status": "Submitted"})
+        .eq("id", event_id)
+        .execute()
+    )
+    updated = response.data
     return updated[0]
