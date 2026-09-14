@@ -350,3 +350,224 @@
     flex-direction:column;
   }
 }
+
+/* =========================================================
+   EQUIPMENT REQUEST VIEW DETAILS
+   ========================================================= */
+
+.request-equipment-list{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+  min-width:260px;
+}
+
+.request-equipment-item{
+  padding-bottom:12px;
+  border-bottom:1px solid #edf0f5;
+}
+
+.request-equipment-item:last-child{
+  padding-bottom:0;
+  border-bottom:0;
+}
+
+.request-equipment-name{
+  color:#1c2940;
+  font-weight:600;
+  font-size:13px;
+}
+
+.request-quantity{
+  margin-left:6px;
+  color:#68758a;
+  font-weight:500;
+}
+
+.request-requirement{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  margin-top:5px;
+  color:#68758a;
+  font-size:12px;
+  line-height:1.45;
+}
+
+.request-requirement span{
+  color:#8b98ab;
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+
+.request-requirement em{
+  color:#9aa5b5;
+}
+
+.request-status{
+  display:inline-block;
+  padding:5px 10px;
+  border-radius:999px;
+  font-size:11px;
+  white-space:nowrap;
+}
+
+.request-status-submitted{
+  background:#eef2f8;
+  color:#53647d;
+}
+
+.request-status-updated{
+  background:#e5f1ff;
+  color:#416b9d;
+}
+
+.request-update-time{
+  color:#1c2940;
+  font-size:12px;
+  white-space:nowrap;
+}
+
+.request-time-note{
+  margin-top:4px;
+  color:#8b98ab;
+  font-size:10px;
+}
+
+/* =========================================================
+   EQUIPMENT REQUEST - TSS UPDATE DISPLAY
+   ========================================================= */
+
+/* Person who last updated the request */
+
+.request-updated-by{
+  display:flex;
+  flex-direction:column;
+  gap:3px;
+  min-width:150px;
+}
+
+.request-updated-by strong{
+  color:#1c2940;
+  font-size:12px;
+  font-weight:600;
+}
+
+
+/* Cancelled equipment item */
+
+.request-cancelled{
+  display:inline-block;
+  margin-left:8px;
+  padding:3px 7px;
+  border-radius:999px;
+  background:#fdecec;
+  color:#b23b3b;
+  font-size:10px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:.03em;
+}
+
+/* =========================================================
+   EQUIPMENT UPDATE - ADD / EVENT CONFIRM
+   ========================================================= */
+
+.equipment-update-item-heading{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:18px;
+}
+
+.equipment-update-item-heading h3{
+  margin:0;
+}
+
+.new-equipment-badge{
+  display:inline-block;
+  margin-left:8px;
+  padding:3px 7px;
+  border-radius:999px;
+  background:#e5f1ff;
+  color:#416b9d;
+  font-size:9px;
+  font-weight:600;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  vertical-align:middle;
+}
+
+.equipment-update-add-row{
+  padding:20px 0 4px;
+}
+
+.equipment-update-last-updated{
+  margin-top:18px;
+  padding-top:16px;
+  border-top:1px solid #edf0f5;
+  color:#8b98ab;
+  font-size:11px;
+}
+
+.equipment-update-last-updated strong{
+  color:#53647d;
+}
+
+.equipment-update-final-actions{
+  position:sticky;
+  bottom:18px;
+  z-index:2;
+
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:24px;
+
+  margin:28px 0;
+  padding:20px 22px;
+
+  border:1px solid #d9e0eb;
+  border-radius:8px;
+
+  background:#fff;
+
+  box-shadow:
+    0 10px 35px rgba(25,37,65,.12);
+}
+
+.equipment-update-final-actions strong{
+  color:#1c2940;
+  font-size:14px;
+}
+
+.equipment-update-final-actions p{
+  margin:5px 0 0;
+  color:#68758a;
+  font-size:12px;
+}
+
+.equipment-update-final-actions .primary:disabled{
+  opacity:.55;
+  cursor:not-allowed;
+}
+
+
+@media(max-width:700px){
+
+  .equipment-update-item-heading{
+    align-items:flex-start;
+  }
+
+  .equipment-update-final-actions{
+    position:static;
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .equipment-update-final-actions .primary{
+    width:100%;
+  }
+}

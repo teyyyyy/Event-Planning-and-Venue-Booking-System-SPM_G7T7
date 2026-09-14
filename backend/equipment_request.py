@@ -28,10 +28,17 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get(
 )
 
 
+# ================================================================
+# Supabase table names
+# ================================================================
+
 EVENT_TABLE = "Event Details"
 EQUIPMENT_TABLE = "Equipment"
 REQUEST_TABLE = "Equipment Request"
 REQUEST_ITEM_TABLE = "Equipment Request Item"
+RESERVATION_TABLE = "Equipment Reservation"
+RESERVATION_ITEM_TABLE = "Equipment Reservation Item"
+USER_TABLE = "users"
 
 
 router = APIRouter(
@@ -40,11 +47,22 @@ router = APIRouter(
 )
 
 
+# ================================================================
+# Database connection
+# ================================================================
+
 def db() -> Client:
-    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+
+    if (
+        not SUPABASE_URL
+        or not SUPABASE_SERVICE_ROLE_KEY
+    ):
         raise HTTPException(
-            500,
-            "Backend Supabase credentials are not configured."
+            status_code=500,
+            detail=(
+                "Backend Supabase credentials "
+                "are not configured."
+            )
         )
 
     return create_client(
@@ -58,14 +76,28 @@ def db() -> Client:
 # ================================================================
 
 class EquipmentRequestItemInput(BaseModel):
-    equipment_id: str = Field(min_length=1)
-    requested_quantity: int = Field(gt=0)
+
+    equipment_id: str = Field(
+        min_length=1
+    )
+
+    # Coordinator cannot submit quantity 0.
+    # Quantity 0 is only allowed later when Technical Support
+    # updates/cancels an equipment item.
+    requested_quantity: int = Field(
+        gt=0
+    )
+
     technical_requirements: str = ""
 
 
 class EquipmentRequestInput(BaseModel):
+
     event_id: int
-    items: List[EquipmentRequestItemInput]
+
+    items: List[
+        EquipmentRequestItemInput
+    ]
 
 
 # ================================================================
@@ -77,81 +109,136 @@ def get_coordinator_event(
     coordinator_id: str,
     event_id: int
 ):
+
     result = (
         client
         .table(EVENT_TABLE)
         .select("*")
-        .eq("id", event_id)
-        .eq("coordinator_id", coordinator_id)
+        .eq(
+            "id",
+            event_id
+        )
+        .eq(
+            "coordinator_id",
+            coordinator_id
+        )
         .execute()
     )
 
     rows = result.data or []
 
-    print("\n[DEBUG] get_coordinator_event")
-    print("Coordinator ID:", coordinator_id)
-    print("Event ID:", event_id)
-    print("Matching rows:", rows)
-
     if not rows:
         raise HTTPException(
-            404,
-            "Event not found or is not assigned to this coordinator."
+            status_code=404,
+            detail=(
+                "Event not found or is not assigned "
+                "to this coordinator."
+            )
         )
 
     return rows[0]
 
 
-def event_datetimes(event: dict):
-    event_date = event.get("event_date")
-    start_time = event.get("start_time")
-    end_time = event.get("end_time")
+def event_datetimes(
+    event: dict
+):
 
-    print("\n[DEBUG] event_datetimes")
-    print("Event ID:", event.get("id"))
-    print("Event date:", event_date)
-    print("Start time:", start_time)
-    print("End time:", end_time)
+    event_date = event.get(
+        "event_date"
+    )
+
+    start_time = event.get(
+        "start_time"
+    )
+
+    end_time = event.get(
+        "end_time"
+    )
+
 
     if not event_date:
         raise HTTPException(
-            400,
-            "This event does not have an event date."
-        )
-
-    if not start_time or not end_time:
-        raise HTTPException(
-            400,
-            (
-                "This event does not have a complete start and end time. "
-                "Equipment availability cannot be checked until the event "
-                "time is set."
+            status_code=400,
+            detail=(
+                "This event does not have "
+                "an event date."
             )
         )
 
-    try:
-        start_datetime = datetime.fromisoformat(
-            f"{event_date}T{start_time}"
+
+    if (
+        not start_time
+        or not end_time
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This event does not have a complete "
+                "start and end time. Equipment availability "
+                "cannot be checked until the event time is set."
+            )
         )
 
-        end_datetime = datetime.fromisoformat(
-            f"{event_date}T{end_time}"
+
+    try:
+
+        start_datetime = (
+            datetime.fromisoformat(
+                f"{event_date}T{start_time}"
+            )
+        )
+
+        end_datetime = (
+            datetime.fromisoformat(
+                f"{event_date}T{end_time}"
+            )
         )
 
     except ValueError as error:
+
         raise HTTPException(
-            400,
-            "The event has an invalid date or time."
+            status_code=400,
+            detail=(
+                "The event has an invalid "
+                "date or time."
+            )
         ) from error
 
-    return start_datetime, end_datetime
+
+    if (
+        end_datetime
+        <= start_datetime
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "The event end time must be "
+                "after the start time."
+            )
+        )
+
+
+    return (
+        start_datetime,
+        end_datetime
+    )
 
 
 def calculate_availability(
     client: Client,
     event: dict
 ):
-    start_datetime, end_datetime = event_datetimes(event)
+
+    start_datetime, end_datetime = (
+        event_datetimes(
+            event
+        )
+    )
+
+
+    # ------------------------------------------------------------
+    # Equipment catalogue
+    # ------------------------------------------------------------
 
     equipment_rows = (
         client
@@ -162,21 +249,33 @@ def calculate_availability(
             "total_quantity,"
             "under_maintenance_count"
         )
-        .order("equipment_name")
+        .order(
+            "equipment_name"
+        )
         .execute()
         .data
         or []
     )
 
-    print("\n[DEBUG] calculate_availability")
-    print("Equipment rows:", equipment_rows)
 
     reserved_by_equipment = {}
 
+
+    # ------------------------------------------------------------
+    # Existing overlapping reservations
+    #
+    # Current prototype behaviour:
+    # If reservation tables are not ready yet, availability
+    # still works from catalogue minus maintenance.
+    # ------------------------------------------------------------
+
     try:
+
         overlapping_items = (
             client
-            .table("equipment_reservation_item")
+            .table(
+                RESERVATION_ITEM_TABLE
+            )
             .select(
                 "reservation_id,"
                 "equipment_id,"
@@ -197,23 +296,27 @@ def calculate_availability(
             or []
         )
 
-        print(
-            "Overlapping reservation items:",
-            overlapping_items
-        )
 
         reservation_ids = list({
             row["reservation_id"]
             for row in overlapping_items
         })
 
+
         active_reservation_ids = set()
 
+
         if reservation_ids:
-            headers = (
+
+            reservation_headers = (
                 client
-                .table("equipment_reservation")
-                .select("reservation_id,status")
+                .table(
+                    RESERVATION_TABLE
+                )
+                .select(
+                    "reservation_id,"
+                    "status"
+                )
                 .in_(
                     "reservation_id",
                     reservation_ids
@@ -223,81 +326,140 @@ def calculate_availability(
                 or []
             )
 
-            print(
-                "Reservation headers:",
-                headers
-            )
 
             active_reservation_ids = {
+
                 row["reservation_id"]
-                for row in headers
+
+                for row
+                in reservation_headers
+
                 if str(
-                    row.get("status", "")
-                ).strip().lower() != "cancelled"
+                    row.get(
+                        "status",
+                        ""
+                    )
+                ).strip().lower()
+                != "cancelled"
             }
 
+
         for row in overlapping_items:
-            if row["reservation_id"] not in active_reservation_ids:
+
+            if (
+                row["reservation_id"]
+                not in active_reservation_ids
+            ):
                 continue
 
-            equipment_id = row["equipment_id"]
 
-            reserved_by_equipment[equipment_id] = (
+            equipment_id = (
+                row[
+                    "equipment_id"
+                ]
+            )
+
+
+            reserved_by_equipment[
+                equipment_id
+            ] = (
+
                 reserved_by_equipment.get(
                     equipment_id,
                     0
                 )
-                + int(row["reserved_quantity"])
+
+                + int(
+                    row[
+                        "reserved_quantity"
+                    ]
+                )
             )
 
-    except Exception as error:
-        print(
-            "[DEBUG] Reservation availability query skipped/error:",
-            repr(error)
-        )
 
+    except Exception:
+
+        # This keeps the equipment request feature working
+        # before the reservation service is fully implemented.
+        #
+        # Later, when Equipment Reservation is complete,
+        # this can be replaced with narrower exception handling.
         reserved_by_equipment = {}
+
+
+    # ------------------------------------------------------------
+    # Calculate availability
+    # ------------------------------------------------------------
 
     availability = []
 
+
     for equipment in equipment_rows:
-        equipment_id = equipment["equipment_id"]
+
+        equipment_id = (
+            equipment[
+                "equipment_id"
+            ]
+        )
+
 
         total_quantity = int(
-            equipment.get("total_quantity") or 0
+            equipment.get(
+                "total_quantity"
+            )
+            or 0
         )
 
-        maintenance = int(
+
+        maintenance_quantity = int(
             equipment.get(
                 "under_maintenance_count"
-            ) or 0
+            )
+            or 0
         )
 
-        reserved = reserved_by_equipment.get(
-            equipment_id,
-            0
+
+        reserved_quantity = (
+            reserved_by_equipment.get(
+                equipment_id,
+                0
+            )
         )
 
-        available = max(
+
+        available_quantity = max(
+
             total_quantity
-            - maintenance
-            - reserved,
+            - maintenance_quantity
+            - reserved_quantity,
+
             0
         )
+
 
         availability.append({
-            "equipment_id": equipment_id,
-            "equipment_name": equipment["equipment_name"],
-            "total_quantity": total_quantity,
-            "under_maintenance_count": maintenance,
-            "reserved_quantity": reserved,
-            "available_quantity": available,
+
+            "equipment_id":
+                equipment_id,
+
+            "equipment_name":
+                equipment[
+                    "equipment_name"
+                ],
+
+            "total_quantity":
+                total_quantity,
+
+            "under_maintenance_count":
+                maintenance_quantity,
+
+            "reserved_quantity":
+                reserved_quantity,
+
+            "available_quantity":
+                available_quantity,
         })
 
-    print(
-        "Final availability:",
-        availability
-    )
 
     return availability
 
@@ -312,41 +474,9 @@ def calculate_availability(
 def coordinator_events(
     coordinator_id: str
 ):
+
     client = db()
 
-    print("\n======================================")
-    print("[DEBUG] GET COORDINATOR EVENTS")
-    print("Coordinator ID received:", coordinator_id)
-    print("======================================")
-
-    all_events_result = (
-        client
-        .table(EVENT_TABLE)
-        .select(
-            "id,"
-            "event_name,"
-            "event_date,"
-            "start_time,"
-            "end_time,"
-            "status,"
-            "coordinator_id"
-        )
-        .execute()
-    )
-
-    all_events = all_events_result.data or []
-
-    print("All Event Details rows:")
-
-    for event in all_events:
-        print(
-            "ID:",
-            event.get("id"),
-            "| Name:",
-            event.get("event_name"),
-            "| Coordinator:",
-            event.get("coordinator_id")
-        )
 
     result = (
         client
@@ -364,31 +494,30 @@ def coordinator_events(
             "coordinator_id",
             coordinator_id
         )
-        .order("event_date")
+        .order(
+            "event_date"
+        )
         .execute()
     )
 
-    rows = result.data or []
 
-    print("\nAssigned events returned:")
-    print(rows)
-    print("Number of assigned events:", len(rows))
-    print("======================================\n")
-
-    return rows
+    return (
+        result.data
+        or []
+    )
 
 
 # ================================================================
 # GET equipment catalogue
 # ================================================================
 
-@router.get("/equipment")
+@router.get(
+    "/equipment"
+)
 def equipment_catalogue():
+
     client = db()
 
-    print("\n======================================")
-    print("[DEBUG] GET EQUIPMENT")
-    print("======================================")
 
     result = (
         client
@@ -399,22 +528,21 @@ def equipment_catalogue():
             "total_quantity,"
             "under_maintenance_count"
         )
-        .order("equipment_name")
+        .order(
+            "equipment_name"
+        )
         .execute()
     )
 
-    rows = result.data or []
 
-    print("Equipment returned:")
-    print(rows)
-    print("Number of equipment rows:", len(rows))
-    print("======================================\n")
-
-    return rows
+    return (
+        result.data
+        or []
+    )
 
 
 # ================================================================
-# GET availability
+# GET availability for a coordinator's assigned event
 # ================================================================
 
 @router.get(
@@ -425,19 +553,16 @@ def equipment_availability(
     coordinator_id: str,
     event_id: int
 ):
+
     client = db()
 
-    print("\n======================================")
-    print("[DEBUG] GET EQUIPMENT AVAILABILITY")
-    print("Coordinator ID:", coordinator_id)
-    print("Event ID:", event_id)
-    print("======================================")
 
     event = get_coordinator_event(
         client,
         coordinator_id,
         event_id
     )
+
 
     return calculate_availability(
         client,
@@ -446,7 +571,7 @@ def equipment_availability(
 
 
 # ================================================================
-# CREATE request
+# CREATE equipment request
 # ================================================================
 
 @router.post(
@@ -456,14 +581,13 @@ def create_equipment_request(
     coordinator_id: str,
     request: EquipmentRequestInput
 ):
+
     client = db()
 
-    print("\n======================================")
-    print("[DEBUG] CREATE EQUIPMENT REQUEST")
-    print("Coordinator:", coordinator_id)
-    print("Event ID:", request.event_id)
-    print("Items:", request.items)
-    print("======================================")
+
+    # ------------------------------------------------------------
+    # Verify event belongs to coordinator
+    # ------------------------------------------------------------
 
     event = get_coordinator_event(
         client,
@@ -471,108 +595,242 @@ def create_equipment_request(
         request.event_id
     )
 
+
+    # ------------------------------------------------------------
+    # Request must contain equipment
+    # ------------------------------------------------------------
+
     if not request.items:
+
         raise HTTPException(
-            400,
-            "At least one equipment item is required."
+            status_code=400,
+            detail=(
+                "At least one equipment item "
+                "is required."
+            )
         )
+
+
+    # ------------------------------------------------------------
+    # Prevent duplicate equipment types
+    # ------------------------------------------------------------
 
     equipment_ids = [
-        item.equipment_id.strip()
-        for item in request.items
+
+        item
+        .equipment_id
+        .strip()
+
+        for item
+        in request.items
     ]
 
-    if len(equipment_ids) != len(set(equipment_ids)):
+
+    if (
+        len(equipment_ids)
+        != len(
+            set(
+                equipment_ids
+            )
+        )
+    ):
+
         raise HTTPException(
-            400,
-            "The same equipment type cannot be added twice."
+            status_code=400,
+            detail=(
+                "The same equipment type "
+                "cannot be added twice."
+            )
         )
 
-    availability_rows = calculate_availability(
-        client,
-        event
+
+    # ------------------------------------------------------------
+    # Re-check availability on backend
+    # ------------------------------------------------------------
+
+    availability_rows = (
+        calculate_availability(
+            client,
+            event
+        )
     )
 
+
     availability_map = {
-        item["equipment_id"]: item
-        for item in availability_rows
+
+        item["equipment_id"]:
+            item
+
+        for item
+        in availability_rows
     }
 
+
     for item in request.items:
-        equipment_id = item.equipment_id.strip()
 
-        if not equipment_id:
-            raise HTTPException(
-                400,
-                "Equipment is required."
-            )
-
-        equipment_info = availability_map.get(
-            equipment_id
+        equipment_id = (
+            item
+            .equipment_id
+            .strip()
         )
 
-        if not equipment_info:
+
+        if not equipment_id:
+
             raise HTTPException(
-                400,
-                "Selected equipment does not exist."
+                status_code=400,
+                detail=(
+                    "Equipment is required."
+                )
             )
 
-        available = equipment_info[
-            "available_quantity"
-        ]
 
-        if item.requested_quantity > available:
+        equipment_info = (
+            availability_map.get(
+                equipment_id
+            )
+        )
+
+
+        if not equipment_info:
+
             raise HTTPException(
-                400,
-                (
+                status_code=400,
+                detail=(
+                    "Selected equipment "
+                    "does not exist."
+                )
+            )
+
+
+        available = int(
+            equipment_info[
+                "available_quantity"
+            ]
+        )
+
+
+        if (
+            item.requested_quantity
+            > available
+        ):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
                     f"{equipment_info['equipment_name']} "
                     f"has only {available} available."
                 )
             )
 
+
+    # ------------------------------------------------------------
+    # Create request header
+    # ------------------------------------------------------------
+
     header = (
         client
         .table(REQUEST_TABLE)
         .insert({
-            "event_id": request.event_id,
-            "status": "Submitted",
-            "created_by": coordinator_id,
+
+            "event_id":
+                request.event_id,
+
+            "status":
+                "Submitted",
+
+            "created_by":
+                coordinator_id,
+
         })
         .execute()
         .data
     )
 
+
     if not header:
+
         raise HTTPException(
-            500,
-            "Equipment request could not be created."
+            status_code=500,
+            detail=(
+                "Equipment request "
+                "could not be created."
+            )
         )
 
-    request_id = header[0]["request_id"]
+
+    request_id = (
+        header[0][
+            "request_id"
+        ]
+    )
+
+
+    # ------------------------------------------------------------
+    # Prepare request items
+    #
+    # IMPORTANT:
+    # No original_* values are stored.
+    # Supabase stores only the current request values.
+    # ------------------------------------------------------------
 
     item_rows = []
 
+
     for item in request.items:
+
+        technical_requirements = (
+            item
+            .technical_requirements
+            .strip()
+
+            if item.technical_requirements
+
+            else ""
+        )
+
+
         item_rows.append({
-            "request_id": request_id,
-            "equipment_id": item.equipment_id.strip(),
-            "requested_quantity": item.requested_quantity,
+
+            "request_id":
+                request_id,
+
+            "equipment_id":
+                item
+                .equipment_id
+                .strip(),
+
+            "requested_quantity":
+                item.requested_quantity,
+
             "technical_requirements":
-                item.technical_requirements.strip()
-                if item.technical_requirements
-                else "",
+                technical_requirements,
         })
 
+
+    # ------------------------------------------------------------
+    # Insert items
+    # ------------------------------------------------------------
+
     try:
+
         created_items = (
             client
-            .table(REQUEST_ITEM_TABLE)
-            .insert(item_rows)
+            .table(
+                REQUEST_ITEM_TABLE
+            )
+            .insert(
+                item_rows
+            )
             .execute()
             .data
         )
 
+
     except Exception as error:
+
+        # Remove header if item insertion fails,
+        # so an empty request header is not left behind.
         client.table(
             REQUEST_TABLE
         ).delete().eq(
@@ -580,27 +838,43 @@ def create_equipment_request(
             request_id
         ).execute()
 
+
         raise HTTPException(
-            500,
-            "Equipment request items could not be saved."
+            status_code=500,
+            detail=(
+                "Equipment request items "
+                "could not be saved."
+            )
         ) from error
 
-    print(
-        "[DEBUG] Created request:",
-        request_id
-    )
 
     return {
+
         "message":
-            "Equipment request submitted successfully.",
-        "request_id": request_id,
-        "event_id": request.event_id,
-        "items": created_items,
+            (
+                "Equipment request "
+                "submitted successfully."
+            ),
+
+        "request_id":
+            request_id,
+
+        "event_id":
+            request.event_id,
+
+        "items":
+            created_items,
     }
 
 
 # ================================================================
-# GET previous requests
+# GET previous equipment requests
+#
+# Used by Event Coordinator Equipment Request View.
+# Returns final/current values from Supabase.
+#
+# If Technical Support has updated the request, the response also
+# contains updated_by and updated_by_name.
 # ================================================================
 
 @router.get(
@@ -609,17 +883,26 @@ def create_equipment_request(
 def get_equipment_requests(
     coordinator_id: str
 ):
+
     client = db()
 
-    print("\n======================================")
-    print("[DEBUG] GET EQUIPMENT REQUESTS")
-    print("Coordinator:", coordinator_id)
-    print("======================================")
+
+    # ------------------------------------------------------------
+    # Request headers
+    # ------------------------------------------------------------
 
     headers = (
         client
         .table(REQUEST_TABLE)
-        .select("*")
+        .select(
+            "request_id,"
+            "event_id,"
+            "status,"
+            "created_by,"
+            "updated_by,"
+            "created_at,"
+            "updated_at"
+        )
         .eq(
             "created_by",
             coordinator_id
@@ -633,24 +916,33 @@ def get_equipment_requests(
         or []
     )
 
-    print(
-        "Request headers:",
-        headers
-    )
 
     if not headers:
         return []
 
+
+    # ------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------
+
     event_ids = list({
+
         row["event_id"]
-        for row in headers
+
+        for row
+        in headers
     })
+
 
     event_rows = (
         client
         .table(EVENT_TABLE)
         .select(
-            "id,event_name,event_date"
+            "id,"
+            "event_name,"
+            "event_date,"
+            "start_time,"
+            "end_time"
         )
         .in_(
             "id",
@@ -661,42 +953,86 @@ def get_equipment_requests(
         or []
     )
 
+
     event_map = {
-        row["id"]: row
-        for row in event_rows
+
+        row["id"]:
+            row
+
+        for row
+        in event_rows
     }
 
+
+    # ------------------------------------------------------------
+    # Request items
+    # ------------------------------------------------------------
+
     request_ids = [
-        row["request_id"]
-        for row in headers
+
+        row[
+            "request_id"
+        ]
+
+        for row
+        in headers
     ]
+
 
     item_rows = (
         client
-        .table(REQUEST_ITEM_TABLE)
-        .select("*")
+        .table(
+            REQUEST_ITEM_TABLE
+        )
+        .select(
+            "request_item_id,"
+            "request_id,"
+            "equipment_id,"
+            "requested_quantity,"
+            "technical_requirements,"
+            "updated_by,"
+            "created_at,"
+            "updated_at"
+        )
         .in_(
             "request_id",
             request_ids
+        )
+        .order(
+            "request_item_id"
         )
         .execute()
         .data
         or []
     )
 
+
+    # ------------------------------------------------------------
+    # Equipment names
+    # ------------------------------------------------------------
+
     equipment_ids = list({
+
         row["equipment_id"]
-        for row in item_rows
+
+        for row
+        in item_rows
     })
+
 
     equipment_map = {}
 
+
     if equipment_ids:
+
         equipment_rows = (
             client
-            .table(EQUIPMENT_TABLE)
+            .table(
+                EQUIPMENT_TABLE
+            )
             .select(
-                "equipment_id,equipment_name"
+                "equipment_id,"
+                "equipment_name"
             )
             .in_(
                 "equipment_id",
@@ -707,79 +1043,282 @@ def get_equipment_requests(
             or []
         )
 
+
         equipment_map = {
+
             row["equipment_id"]:
                 row["equipment_name"]
-            for row in equipment_rows
+
+            for row
+            in equipment_rows
         }
+
+
+    # ------------------------------------------------------------
+    # Technical Support updater names
+    # ------------------------------------------------------------
+
+    updater_ids = set()
+
+
+    for header in headers:
+
+        updated_by = (
+            header.get(
+                "updated_by"
+            )
+        )
+
+
+        if updated_by:
+
+            updater_ids.add(
+                updated_by
+            )
+
+
+    # Item updater is also included in case the header and item
+    # data ever become different.
+    for item in item_rows:
+
+        updated_by = (
+            item.get(
+                "updated_by"
+            )
+        )
+
+
+        if updated_by:
+
+            updater_ids.add(
+                updated_by
+            )
+
+
+    user_map = {}
+
+
+    if updater_ids:
+
+        user_rows = (
+            client
+            .table(
+                USER_TABLE
+            )
+            .select(
+                "id,"
+                "name"
+            )
+            .in_(
+                "id",
+                list(
+                    updater_ids
+                )
+            )
+            .execute()
+            .data
+            or []
+        )
+
+
+        user_map = {
+
+            row["id"]:
+                row["name"]
+
+            for row
+            in user_rows
+        }
+
+
+    # ------------------------------------------------------------
+    # Build API result
+    # ------------------------------------------------------------
 
     results = []
 
+
     for header in headers:
-        event = event_map.get(
-            header["event_id"],
-            {}
+
+        event = (
+            event_map.get(
+                header[
+                    "event_id"
+                ],
+                {}
+            )
         )
 
-        items = []
+
+        request_items = []
+
 
         for item in item_rows:
+
             if (
-                item["request_id"]
-                != header["request_id"]
+                item[
+                    "request_id"
+                ]
+                != header[
+                    "request_id"
+                ]
             ):
                 continue
 
-            items.append({
+
+            item_updated_by = (
+                item.get(
+                    "updated_by"
+                )
+            )
+
+
+            request_items.append({
+
                 "request_item_id":
-                    item["request_item_id"],
+                    item[
+                        "request_item_id"
+                    ],
+
                 "equipment_id":
-                    item["equipment_id"],
+                    item[
+                        "equipment_id"
+                    ],
+
                 "equipment_name":
                     equipment_map.get(
-                        item["equipment_id"],
-                        item["equipment_id"]
+                        item[
+                            "equipment_id"
+                        ],
+                        item[
+                            "equipment_id"
+                        ]
                     ),
+
                 "requested_quantity":
-                    item["requested_quantity"],
+                    item[
+                        "requested_quantity"
+                    ],
+
                 "technical_requirements":
+                    (
+                        item.get(
+                            "technical_requirements"
+                        )
+                        or ""
+                    ),
+
+                "updated_by":
+                    item_updated_by,
+
+                "updated_by_name":
+                    (
+                        user_map.get(
+                            item_updated_by
+                        )
+                        if item_updated_by
+                        else None
+                    ),
+
+                "created_at":
                     item.get(
-                        "technical_requirements",
-                        ""
+                        "created_at"
+                    ),
+
+                "updated_at":
+                    (
+                        item.get(
+                            "updated_at"
+                        )
+                        or item.get(
+                            "created_at"
+                        )
                     ),
             })
 
+
+        header_updated_by = (
+            header.get(
+                "updated_by"
+            )
+        )
+
+
         results.append({
+
             "request_id":
-                header["request_id"],
+                header[
+                    "request_id"
+                ],
+
             "event_id":
-                header["event_id"],
+                header[
+                    "event_id"
+                ],
+
             "event_name":
                 event.get(
                     "event_name",
                     "Unknown event"
                 ),
+
             "event_date":
                 event.get(
                     "event_date",
                     ""
                 ),
+
+            "start_time":
+                event.get(
+                    "start_time"
+                ),
+
+            "end_time":
+                event.get(
+                    "end_time"
+                ),
+
             "status":
                 header.get(
                     "status",
-                    ""
+                    "Submitted"
                 ),
+
+            "created_by":
+                header.get(
+                    "created_by"
+                ),
+
             "created_at":
                 header.get(
                     "created_at"
                 ),
+
+            "updated_by":
+                header_updated_by,
+
+            "updated_by_name":
+                (
+                    user_map.get(
+                        header_updated_by
+                    )
+                    if header_updated_by
+                    else None
+                ),
+
+            "updated_at":
+                (
+                    header.get(
+                        "updated_at"
+                    )
+                    or header.get(
+                        "created_at"
+                    )
+                ),
+
             "items":
-                items,
+                request_items,
         })
 
-    print(
-        "Final requests returned:",
-        results
-    )
 
     return results

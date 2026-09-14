@@ -19,25 +19,39 @@ function newEquipmentRow() {
 }
 
 
+function formatDateTime(value) {
+
+  if (!value) {
+    return '—';
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime()
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleString(
+    'en-SG',
+    {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }
+  );
+}
+
+
 export default function EquipmentRequest({
   user
 }) {
-
-  console.log(
-    '[DEBUG] EquipmentRequest user:',
-    user
-  );
-
-  console.log(
-    '[DEBUG] user.id being used:',
-    user?.id
-  );
-
-  console.log(
-    '[DEBUG] API base URL:',
-    API
-  );
-
 
   const [
     activeTab,
@@ -120,7 +134,7 @@ export default function EquipmentRequest({
 
 
   // ============================================================
-  // Load initial data
+  // Load assigned events and equipment
   // ============================================================
 
   useEffect(() => {
@@ -128,7 +142,6 @@ export default function EquipmentRequest({
     async function loadInitialData() {
 
       setLoading(true);
-
       setPageError('');
 
 
@@ -141,38 +154,13 @@ export default function EquipmentRequest({
           `${API}/equipment`;
 
 
-        console.log(
-          '[DEBUG] Events URL:',
-          eventsUrl
-        );
-
-        console.log(
-          '[DEBUG] Equipment URL:',
-          equipmentUrl
-        );
-
-
         const [
           eventResponse,
           equipmentResponse
         ] = await Promise.all([
-
           fetch(eventsUrl),
-
           fetch(equipmentUrl),
-
         ]);
-
-
-        console.log(
-          '[DEBUG] Events response status:',
-          eventResponse.status
-        );
-
-        console.log(
-          '[DEBUG] Equipment response status:',
-          equipmentResponse.status
-        );
 
 
         const eventResult =
@@ -183,91 +171,54 @@ export default function EquipmentRequest({
           await equipmentResponse.json();
 
 
-        console.log(
-          '[DEBUG] Events API response:',
-          eventResult
-        );
+        if (eventResponse.ok) {
+
+          setEvents(
+            Array.isArray(eventResult)
+              ? eventResult
+              : []
+          );
+
+        } else {
+
+          setEvents([]);
+
+        }
 
 
-        console.log(
-          '[DEBUG] Is events response an array?',
-          Array.isArray(
-            eventResult
-          )
-        );
+        if (equipmentResponse.ok) {
 
+          setEquipment(
+            Array.isArray(equipmentResult)
+              ? equipmentResult
+              : []
+          );
 
-        console.log(
-          '[DEBUG] Number of events:',
-          Array.isArray(eventResult)
-            ? eventResult.length
-            : 'not an array'
-        );
+        } else {
 
+          setEquipment([]);
 
-        console.log(
-          '[DEBUG] Equipment API response:',
-          equipmentResult
-        );
-
-
-        console.log(
-          '[DEBUG] Is equipment response an array?',
-          Array.isArray(
-            equipmentResult
-          )
-        );
-
-
-        console.log(
-          '[DEBUG] Number of equipment rows:',
-          Array.isArray(equipmentResult)
-            ? equipmentResult.length
-            : 'not an array'
-        );
+        }
 
 
         if (!eventResponse.ok) {
 
-          throw new Error(
+          setPageError(
             eventResult.detail ||
-            'Unable to load your assigned events.'
+            'Unable to load assigned events.'
           );
 
-        }
+        } else if (!equipmentResponse.ok) {
 
-
-        if (!equipmentResponse.ok) {
-
-          throw new Error(
+          setPageError(
             equipmentResult.detail ||
-            'Unable to load the equipment catalogue.'
+            'Unable to load equipment catalogue.'
           );
 
         }
-
-
-        setEvents(
-          Array.isArray(eventResult)
-            ? eventResult
-            : []
-        );
-
-
-        setEquipment(
-          Array.isArray(equipmentResult)
-            ? equipmentResult
-            : []
-        );
 
 
       } catch (error) {
-
-        console.error(
-          '[DEBUG] Initial load error:',
-          error
-        );
-
 
         setPageError(
           error.message ||
@@ -293,35 +244,7 @@ export default function EquipmentRequest({
 
 
   // ============================================================
-  // Log state whenever it changes
-  // ============================================================
-
-  useEffect(() => {
-
-    console.log(
-      '[DEBUG] events state updated:',
-      events
-    );
-
-  }, [
-    events
-  ]);
-
-
-  useEffect(() => {
-
-    console.log(
-      '[DEBUG] equipment state updated:',
-      equipment
-    );
-
-  }, [
-    equipment
-  ]);
-
-
-  // ============================================================
-  // Availability
+  // Load availability
   // ============================================================
 
   useEffect(() => {
@@ -350,32 +273,14 @@ export default function EquipmentRequest({
           `/equipment-availability`;
 
 
-        console.log(
-          '[DEBUG] Availability URL:',
-          availabilityUrl
-        );
-
-
         const response =
           await fetch(
             availabilityUrl
           );
 
 
-        console.log(
-          '[DEBUG] Availability response status:',
-          response.status
-        );
-
-
         const result =
           await response.json();
-
-
-        console.log(
-          '[DEBUG] Availability response:',
-          result
-        );
 
 
         if (!response.ok) {
@@ -402,24 +307,12 @@ export default function EquipmentRequest({
         );
 
 
-        console.log(
-          '[DEBUG] Availability map:',
-          availabilityMap
-        );
-
-
         setAvailability(
           availabilityMap
         );
 
 
       } catch (error) {
-
-        console.error(
-          '[DEBUG] Availability error:',
-          error
-        );
-
 
         setAvailability({});
 
@@ -473,32 +366,14 @@ export default function EquipmentRequest({
         `/equipment-requests`;
 
 
-      console.log(
-        '[DEBUG] Requests URL:',
-        requestsUrl
-      );
-
-
       const response =
         await fetch(
           requestsUrl
         );
 
 
-      console.log(
-        '[DEBUG] Requests response status:',
-        response.status
-      );
-
-
       const result =
         await response.json();
-
-
-      console.log(
-        '[DEBUG] Requests response:',
-        result
-      );
 
 
       if (!response.ok) {
@@ -519,12 +394,6 @@ export default function EquipmentRequest({
 
 
     } catch (error) {
-
-      console.error(
-        '[DEBUG] Requests error:',
-        error
-      );
-
 
       setNotice({
 
@@ -581,7 +450,7 @@ export default function EquipmentRequest({
 
 
   // ============================================================
-  // Change item
+  // Change rows
   // ============================================================
 
   function changeItem(
@@ -589,16 +458,6 @@ export default function EquipmentRequest({
     field,
     value
   ) {
-
-    console.log(
-      '[DEBUG] changeItem:',
-      {
-        index,
-        field,
-        value
-      }
-    );
-
 
     setItems(
 
@@ -805,7 +664,7 @@ export default function EquipmentRequest({
 
 
   // ============================================================
-  // Submit
+  // Submit request
   // ============================================================
 
   async function submitRequest(
@@ -813,40 +672,6 @@ export default function EquipmentRequest({
   ) {
 
     event.preventDefault();
-
-
-    const payload = {
-
-      event_id:
-        Number(eventId),
-
-      items:
-        items.map(
-          (item) => ({
-
-            equipment_id:
-              item.equipment_id,
-
-            requested_quantity:
-              Number(
-                item.requested_quantity
-              ),
-
-            technical_requirements:
-              item
-                .technical_requirements
-                .trim(),
-
-          })
-        ),
-
-    };
-
-
-    console.log(
-      '[DEBUG] Submit payload:',
-      payload
-    );
 
 
     if (!eventId) {
@@ -926,6 +751,36 @@ export default function EquipmentRequest({
     }
 
 
+    const payload = {
+
+      event_id:
+        Number(
+          eventId
+        ),
+
+      items:
+        items.map(
+          (item) => ({
+
+            equipment_id:
+              item.equipment_id,
+
+            requested_quantity:
+              Number(
+                item.requested_quantity
+              ),
+
+            technical_requirements:
+              item
+                .technical_requirements
+                .trim(),
+
+          })
+        ),
+
+    };
+
+
     setSubmitting(
       true
     );
@@ -938,18 +793,13 @@ export default function EquipmentRequest({
         `/equipment-requests`;
 
 
-      console.log(
-        '[DEBUG] Submit URL:',
-        submitUrl
-      );
-
-
       const response =
         await fetch(
           submitUrl,
           {
 
-            method: 'POST',
+            method:
+              'POST',
 
             headers: {
 
@@ -967,20 +817,8 @@ export default function EquipmentRequest({
         );
 
 
-      console.log(
-        '[DEBUG] Submit response status:',
-        response.status
-      );
-
-
       const result =
         await response.json();
-
-
-      console.log(
-        '[DEBUG] Submit response:',
-        result
-      );
 
 
       if (!response.ok) {
@@ -995,7 +833,8 @@ export default function EquipmentRequest({
 
       setNotice({
 
-        type: 'success',
+        type:
+          'success',
 
         text:
           `Equipment request #${result.request_id} was submitted successfully.`,
@@ -1016,15 +855,10 @@ export default function EquipmentRequest({
 
     } catch (error) {
 
-      console.error(
-        '[DEBUG] Submit error:',
-        error
-      );
-
-
       setNotice({
 
-        type: 'error',
+        type:
+          'error',
 
         text:
           error.message ||
@@ -1100,7 +934,6 @@ export default function EquipmentRequest({
       <div className="equipment-sub-tabs">
 
         <button
-
           type="button"
 
           className={
@@ -1115,7 +948,6 @@ export default function EquipmentRequest({
                 'submission'
               )
           }
-
         >
 
           Equipment Request Submission
@@ -1124,7 +956,6 @@ export default function EquipmentRequest({
 
 
         <button
-
           type="button"
 
           className={
@@ -1136,7 +967,6 @@ export default function EquipmentRequest({
           onClick={
             openRequestView
           }
-
         >
 
           Equipment Request View
@@ -1162,6 +992,7 @@ export default function EquipmentRequest({
 
           <form
             className="request-form"
+
             onSubmit={
               submitRequest
             }
@@ -1187,7 +1018,6 @@ export default function EquipmentRequest({
               <div className="form-actions">
 
                 <button
-
                   className="primary"
 
                   type="submit"
@@ -1197,7 +1027,6 @@ export default function EquipmentRequest({
                     checkingAvailability ||
                     !formIsValid()
                   }
-
                 >
 
                   {
@@ -1220,28 +1049,18 @@ export default function EquipmentRequest({
                 Event
 
                 <select
-
                   value={
                     eventId
                   }
 
                   onChange={
-                    (event) => {
-
-                      console.log(
-                        '[DEBUG] Selected event:',
-                        event.target.value
-                      );
-
+                    (event) =>
                       setEventId(
                         event.target.value
-                      );
-
-                    }
+                      )
                   }
 
                   required
-
                 >
 
                   <option value="">
@@ -1254,7 +1073,6 @@ export default function EquipmentRequest({
                       (event) => (
 
                         <option
-
                           key={
                             event.id
                           }
@@ -1262,7 +1080,6 @@ export default function EquipmentRequest({
                           value={
                             event.id
                           }
-
                         >
 
                           {
@@ -1293,7 +1110,7 @@ export default function EquipmentRequest({
 
                 <p className="field-warning">
 
-                  No assigned events were returned by the backend.
+                  No assigned events are currently available.
 
                 </p>
 
@@ -1321,7 +1138,6 @@ export default function EquipmentRequest({
 
 
                 <button
-
                   type="button"
 
                   className="secondary"
@@ -1329,7 +1145,6 @@ export default function EquipmentRequest({
                   onClick={
                     addEquipmentRow
                   }
-
                 >
 
                   + Add equipment
@@ -1364,6 +1179,7 @@ export default function EquipmentRequest({
 
                       <div
                         className="equipment-item-card"
+
                         key={
                           index
                         }
@@ -1382,7 +1198,6 @@ export default function EquipmentRequest({
                             Equipment type
 
                             <select
-
                               value={
                                 item.equipment_id
                               }
@@ -1402,7 +1217,6 @@ export default function EquipmentRequest({
                               }
 
                               required
-
                             >
 
                               <option value="">
@@ -1433,7 +1247,6 @@ export default function EquipmentRequest({
                                     return (
 
                                       <option
-
                                         key={
                                           equipmentItem
                                             .equipment_id
@@ -1447,7 +1260,6 @@ export default function EquipmentRequest({
                                         disabled={
                                           alreadySelected
                                         }
-
                                       >
 
                                         {
@@ -1471,7 +1283,7 @@ export default function EquipmentRequest({
 
                                 <span className="field-warning">
 
-                                  No equipment was returned by the backend.
+                                  No equipment is currently available.
 
                                 </span>
 
@@ -1486,12 +1298,13 @@ export default function EquipmentRequest({
                             Requested quantity
 
                             <input
-
                               type="number"
 
                               min="1"
 
                               step="1"
+
+                              inputMode="numeric"
 
                               value={
                                 item.requested_quantity
@@ -1514,7 +1327,6 @@ export default function EquipmentRequest({
                               placeholder="Enter quantity"
 
                               required
-
                             />
 
 
@@ -1564,7 +1376,6 @@ export default function EquipmentRequest({
 
 
                             <textarea
-
                               rows="4"
 
                               value={
@@ -1589,7 +1400,6 @@ export default function EquipmentRequest({
                               placeholder={
                                 'Example: Wireless microphones, HDMI connection, floor-standing speakers.'
                               }
-
                             />
 
                           </label>
@@ -1601,7 +1411,6 @@ export default function EquipmentRequest({
                           items.length > 1 && (
 
                             <button
-
                               type="button"
 
                               className="remove-equipment"
@@ -1612,7 +1421,6 @@ export default function EquipmentRequest({
                                     index
                                   )
                               }
-
                             >
 
                               Remove equipment
@@ -1653,8 +1461,8 @@ export default function EquipmentRequest({
 
 
                 <p>
-                  View equipment requests that
-                  you have previously submitted.
+                  View your submitted equipment requests,
+                  requirements and latest status.
                 </p>
 
               </div>
@@ -1705,11 +1513,19 @@ export default function EquipmentRequest({
                               </th>
 
                               <th>
-                                Equipment
+                                Equipment Details
                               </th>
 
                               <th>
                                 Status
+                              </th>
+
+                              <th>
+                                Updated By
+                              </th>
+
+                              <th>
+                                Last Updated
                               </th>
 
                             </tr>
@@ -1733,29 +1549,173 @@ export default function EquipmentRequest({
                                       #{request.request_id}
                                     </td>
 
+
                                     <td>
-                                      {request.event_name}
+
+                                      <strong>
+                                        {request.event_name}
+                                      </strong>
+
                                     </td>
+
 
                                     <td>
                                       {request.event_date}
                                     </td>
 
+
+                                    <td>
+
+                                      <div className="request-equipment-list">
+
+                                        {
+                                          request.items?.map(
+                                            (item) => (
+
+                                              <div
+                                                className="request-equipment-item"
+
+                                                key={
+                                                  item.request_item_id
+                                                }
+                                              >
+
+                                                <div className="request-equipment-name">
+
+                                                  {
+                                                    item.equipment_name
+                                                  }
+
+                                                  <span className="request-quantity">
+
+                                                    × {
+                                                      item.requested_quantity
+                                                    }
+
+                                                  </span>
+
+                                                  {
+                                                    Number(
+                                                      item.requested_quantity
+                                                    ) === 0 && (
+
+                                                      <span className="request-cancelled">
+                                                        Cancelled
+                                                      </span>
+
+                                                    )
+                                                  }
+
+                                                </div>
+
+
+                                                <div className="request-requirement">
+
+                                                  <span>
+                                                    Technical requirements
+                                                  </span>
+
+
+                                                  {
+                                                    item.technical_requirements
+                                                      ?.trim()
+                                                      ? (
+                                                          item.technical_requirements
+                                                        )
+                                                      : (
+                                                          <em>
+                                                            None
+                                                          </em>
+                                                        )
+                                                  }
+
+                                                </div>
+
+                                              </div>
+
+                                            )
+                                          )
+                                        }
+
+                                      </div>
+
+                                    </td>
+
+
+                                    <td>
+
+                                      <span
+                                        className={
+                                          `request-status request-status-${request.status
+                                            ?.toLowerCase()
+                                            .replaceAll(
+                                              ' ',
+                                              '-'
+                                            )}`
+                                        }
+                                      >
+
+                                        {request.status}
+
+                                      </span>
+
+                                    </td>
+
+
                                     <td>
 
                                       {
-                                        request.items
-                                          ?.map(
-                                            (item) =>
-                                              `${item.equipment_name} × ${item.requested_quantity}`
-                                          )
-                                          .join(', ')
+                                        request.updated_by
+                                          ? (
+                                              <div className="request-updated-by">
+
+                                                <strong>
+                                                  {
+                                                    request.updated_by_name
+                                                    || 'Technical Support Staff'
+                                                  }
+                                                </strong>
+
+                                                <div className="request-time-note">
+                                                  {request.updated_by}
+                                                </div>
+
+                                              </div>
+                                            )
+                                          : (
+                                              <span className="request-time-note">
+                                                —
+                                              </span>
+                                            )
                                       }
 
                                     </td>
 
+
                                     <td>
-                                      {request.status}
+
+                                      <div className="request-update-time">
+
+                                        {
+                                          formatDateTime(
+                                            request.updated_at
+                                            || request.created_at
+                                          )
+                                        }
+
+                                      </div>
+
+
+                                      <div className="request-time-note">
+
+                                        {
+                                          request.status === 'Updated'
+                                            ? 'Updated'
+                                            : 'Submitted'
+                                        }
+
+                                      </div>
+
                                     </td>
 
                                   </tr>
@@ -1790,7 +1750,9 @@ export default function EquipmentRequest({
               className={
                 `notice ${notice.type}`
               }
+
               role="alertdialog"
+
               aria-modal="true"
             >
 
@@ -1825,7 +1787,9 @@ export default function EquipmentRequest({
 
                 <button
                   className="primary"
+
                   type="button"
+
                   onClick={
                     () =>
                       setNotice(null)

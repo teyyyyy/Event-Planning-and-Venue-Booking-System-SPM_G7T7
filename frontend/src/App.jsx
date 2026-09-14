@@ -5,17 +5,48 @@ import Login from './Login';
 import CoordinatorAssignment from './coordinator_assignment';
 import EventOrganiser from './event_organiser';
 import EquipmentRequest from './EquipmentRequest';
+import EquipmentUpdate from './EquipmentUpdate';
 
 
 function AuthedApp() {
 
   const { user, logout } = useAuth();
 
-  const isCoordinator =
+
+  const normalizedRole =
     user.role
       .trim()
-      .toLowerCase()
-      .includes('coordinator');
+      .toLowerCase();
+
+
+  const isCoordinator =
+    normalizedRole ===
+    'event coordinator';
+
+
+  const isTechnicalSupport =
+    normalizedRole ===
+    'technical support staff';
+
+
+  const isOrganiser =
+    normalizedRole ===
+    'event organiser';
+
+
+  // ============================================================
+  // TECHNICAL SUPPORT STAFF VIEW
+  // ============================================================
+
+  if (isTechnicalSupport) {
+
+    return (
+      <TechnicalSupportWorkspace
+        user={user}
+        logout={logout}
+      />
+    );
+  }
 
 
   // ============================================================
@@ -35,14 +66,214 @@ function AuthedApp() {
 
   // ============================================================
   // EVENT ORGANISER VIEW
-  // Existing behaviour stays basically the same
+  // ============================================================
+
+  if (isOrganiser) {
+
+    return (
+      <OrganiserWorkspace
+        user={user}
+        logout={logout}
+      />
+    );
+  }
+
+
+  // ============================================================
+  // UNKNOWN ROLE FALLBACK
   // ============================================================
 
   return (
-    <OrganiserWorkspace
-      user={user}
-      logout={logout}
-    />
+
+    <div className="auth-screen">
+
+      <div className="auth-card">
+
+        <h2>
+          Access unavailable
+        </h2>
+
+        <p>
+          Your account does not have a recognised role.
+        </p>
+
+        <button
+          type="button"
+          className="primary"
+          onClick={logout}
+        >
+          Log out
+        </button>
+
+      </div>
+
+    </div>
+  );
+}
+
+
+// ================================================================
+// Technical Support Staff workspace
+// ================================================================
+
+function TechnicalSupportWorkspace({
+  user,
+  logout
+}) {
+
+  const [
+    activeSection,
+    setActiveSection
+  ] = useState('equipment-update');
+
+
+  function openEquipmentUpdate() {
+
+    setActiveSection(
+      'equipment-update'
+    );
+  }
+
+
+  /*
+   * Later when EquipmentReservation.jsx is created,
+   * you can add:
+   *
+   * function openEquipmentReservation() {
+   *   setActiveSection('equipment-reservation');
+   * }
+   */
+
+
+  return (
+
+    <div className="coordinator-workspace">
+
+
+      {/* ========================================================
+          LEFT SIDEBAR
+      ======================================================== */}
+
+      <aside className="coordinator-sidebar">
+
+        <div>
+
+          <div className="logo">
+            G
+          </div>
+
+
+          <div className="side-label">
+            TECHNICAL SUPPORT
+          </div>
+
+
+          <nav className="coordinator-side-nav">
+
+            <button
+
+              type="button"
+
+              className={
+                activeSection === 'equipment-update'
+                  ? 'coordinator-nav-button active'
+                  : 'coordinator-nav-button'
+              }
+
+              onClick={
+                openEquipmentUpdate
+              }
+
+            >
+
+              Equipment Update
+
+            </button>
+
+
+            {/*
+              Later, when Equipment Reservation is ready:
+
+              <button
+
+                type="button"
+
+                className={
+                  activeSection === 'equipment-reservation'
+                    ? 'coordinator-nav-button active'
+                    : 'coordinator-nav-button'
+                }
+
+                onClick={
+                  () =>
+                    setActiveSection(
+                      'equipment-reservation'
+                    )
+                }
+
+              >
+
+                Equipment Reservation
+
+              </button>
+            */}
+
+          </nav>
+
+        </div>
+
+
+        <button
+          type="button"
+          className="coordinator-logout"
+          onClick={logout}
+          title={user.email}
+        >
+
+          Log out
+
+        </button>
+
+      </aside>
+
+
+      {/* ========================================================
+          RIGHT SIDE
+      ======================================================== */}
+
+      <div className="coordinator-main">
+
+
+        {/* EQUIPMENT UPDATE */}
+
+        {
+          activeSection === 'equipment-update' && (
+
+            <EquipmentUpdate
+              user={user}
+            />
+
+          )
+        }
+
+
+        {/*
+          Later, when EquipmentReservation.jsx exists:
+
+          {
+            activeSection === 'equipment-reservation' && (
+
+              <EquipmentReservation
+                user={user}
+              />
+
+            )
+          }
+        */}
+
+      </div>
+
+    </div>
   );
 }
 
@@ -231,8 +462,10 @@ function CoordinatorWorkspace({
                 }
 
                 onEditComplete={
-                  () =>
-                    setEditingEvent(null)
+                  () => {
+                    setEditingEvent(null);
+                    setEventMode('management');
+                  }
                 }
 
               />
