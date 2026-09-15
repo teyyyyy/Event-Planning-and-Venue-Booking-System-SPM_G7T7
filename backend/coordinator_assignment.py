@@ -35,7 +35,7 @@ def coordinator_records(client: Client) -> list[dict[str, Any]]:
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
     coordinator_id = assignment.get("coordinator_id") if assignment else None
     coordinator = users.get(str(coordinator_id)) if coordinator_id else None
-    return {"id": request["id"], "event_title": request.get("event_name"), "event_date": request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
+    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
 
 def active_workloads(client: Client, coordinators: list[dict[str, Any]]) -> dict[str, int]:
     current = {item["id"]: item for item in coordinator_records(client)}
@@ -53,6 +53,14 @@ def is_active_status(status: Any) -> bool:
 
 @router.get("/api/health")
 def health_check(): return {"status": "ok", "service": "event-coordinator-assignment"}
+
+@router.get("/api/users/{user_id}/role")
+def user_role(user_id: str):
+    client = db()
+    user = client.table("users").select("id,name,role,email").eq("id", user_id).maybe_single().execute().data
+    if not user:
+        raise HTTPException(404, "User profile not found.")
+    return user
 
 @router.post("/api/events/{event_id}/assign-coordinator")
 def assign_coordinator_endpoint(event_id: str):

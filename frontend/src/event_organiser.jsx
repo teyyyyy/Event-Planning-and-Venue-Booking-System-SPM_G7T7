@@ -34,6 +34,18 @@ export default function EventOrganiser() {
 
   useEffect(() => { loadRequests().catch((error) => setMessage(error.message)); }, []);
 
+  useEffect(() => {
+    if (!editingEvent) return;
+    setEditingId(editingEvent.id);
+    setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [
+      key,
+      key === 'event_name'
+        ? (editingEvent.event_name ?? editingEvent.event_title ?? '')
+        : (editingEvent[key] ?? ''),
+    ])));
+    onEditComplete?.();
+  }, [editingEvent, onEditComplete]);
+
   function change(event) { setForm({ ...form, [event.target.name]: event.target.value }); }
 
   function editRequest(request) {

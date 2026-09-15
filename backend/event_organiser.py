@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from supabase import Client, create_client
+from coordinator_assignment import assign_event
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -93,7 +94,7 @@ def create_submitted_event_request(organiser_id: str, request: EventRequest):
     created = client.table(EVENT_TABLE).insert(payload).execute().data
     if not created:
         raise HTTPException(500, "Event request could not be submitted.")
-    return created[0]
+    return assign_event(created[0]["id"])
 
 
 @router.put("/api/event-organisers/{organiser_id}/requests/{event_id}")
