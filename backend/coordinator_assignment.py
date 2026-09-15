@@ -77,7 +77,13 @@ def reassign_coordinator(event_id: str, assignment: CoordinatorAssignment):
     if previous_id != coordinator["id"] and is_active_status(event.get("status")):
         if previous_id: adjust_workload(client, previous_id, -1)
         adjust_workload(client, coordinator["id"], 1)
-    updated = client.table(EVENT_TABLE).update({"coordinator_id": coordinator["id"]}).eq("id", event_id).select("*").execute().data[0]
+    response = (
+        client.table(EVENT_TABLE)
+        .update({"coordinator_id": coordinator["id"]})
+        .eq("id", event_id)
+        .execute()
+    )
+    updated = response.data[0]
     return view(updated, updated, {str(coordinator["id"]): coordinator})
 
 @router.patch("/api/events/{event_id}/status")
@@ -92,7 +98,13 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
     coordinator_id = event.get("coordinator_id")
     if coordinator_id and old_active != new_active:
         adjust_workload(client, coordinator_id, 1 if new_active else -1)
-    updated = client.table(EVENT_TABLE).update({"status": status_update.event_status}).eq("id", event_id).select("*").execute().data[0]
+    response = (
+        client.table(EVENT_TABLE)
+        .update({"status": status_update.event_status})
+        .eq("id", event_id)
+        .execute()
+    )
+    updated = response.data[0]
     users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return view(updated, updated if updated.get("coordinator_id") else None, {str(user["id"]): user for user in users})
 
@@ -104,7 +116,13 @@ def assign_event(event_id: str):
     if len(coordinators) != 3: raise HTTPException(500, "Exactly 3 event coordinators are required.")
     workloads = active_workloads(client, coordinators)
     selected = min(coordinators, key=lambda item: (workloads[item["id"]], item["name"]))
-    updated = client.table(EVENT_TABLE).update({"coordinator_id": selected["id"], "status": "Under review"}).eq("id", event_id).select("*").execute().data[0]
+    response = (
+        client.table(EVENT_TABLE)
+        .update({"coordinator_id": selected["id"], "status": "Under review"})
+        .eq("id", event_id)
+        .execute()
+    )
+    updated = response.data[0]
     if not request.get("coordinator_id") and is_active_status("Under review"):
         adjust_workload(client, selected["id"], 1)
     return view(updated, {"coordinator_id": selected["id"]}, {str(item["id"]): item for item in coordinators})
