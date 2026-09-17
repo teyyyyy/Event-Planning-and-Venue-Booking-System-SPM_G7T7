@@ -28,6 +28,10 @@ def db() -> Client:
         raise HTTPException(500, "Backend Supabase credentials are not configured.")
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
+def fetch_one(query) -> dict[str, Any] | None:
+    result = query.maybe_single().execute()
+    return result.data if result else None
+
 def coordinator_records(client: Client) -> list[dict[str, Any]]:
     users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return [user for user in users if str(user.get("role", "")).strip().lower() == "event coordinator"]
@@ -42,7 +46,7 @@ def active_workloads(client: Client, coordinators: list[dict[str, Any]]) -> dict
     return {item["id"]: int(current.get(item["id"], {}).get("active_event_count") or 0) for item in coordinators}
 
 def adjust_workload(client: Client, coordinator_id: str, amount: int):
-    user = client.table("users").select("active_event_count").eq("id", coordinator_id).maybe_single().execute().data
+    user = fetch_one(client.table("users").select("active_event_count").eq("id", coordinator_id))
     if not user:
         raise HTTPException(400, "Coordinator not found.")
     current = int(user.get("active_event_count") or 0)
@@ -57,7 +61,7 @@ def health_check(): return {"status": "ok", "service": "event-coordinator-assign
 @router.get("/api/users/{user_id}/role")
 def user_role(user_id: str):
     client = db()
-    user = client.table("users").select("id,name,role,email").eq("id", user_id).maybe_single().execute().data
+    user = fetch_one(client.table("users").select("id,name,role,email").eq("id", user_id))
     if not user:
         raise HTTPException(404, "User profile not found.")
     return user
@@ -69,7 +73,7 @@ def assign_coordinator_endpoint(event_id: str):
 @router.patch("/api/events/{event_id}/coordinator")
 def reassign_coordinator(event_id: str, assignment: CoordinatorAssignment):
     client = db()
-    event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
+    event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
     if not event: raise HTTPException(404, "Event request not found.")
     coordinator = next((item for item in coordinator_records(client) if item["id"] == assignment.coordinator_id), None)
     if not coordinator: raise HTTPException(400, "Select an available event coordinator.")
@@ -91,7 +95,7 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
     if status_update.event_status not in EVENT_STATUSES:
         raise HTTPException(400, "Invalid event status.")
     client = db()
-    event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
+    event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
     if not event: raise HTTPException(404, "Event request not found.")
     old_active = is_active_status(event.get("status"))
     new_active = is_active_status(status_update.event_status)
@@ -110,7 +114,7 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
 
 def assign_event(event_id: str):
     client = db()
-    request = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
+    request = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
     if not request: raise HTTPException(404, "Event request not found.")
     coordinators = coordinator_records(client)
     if len(coordinators) != 3: raise HTTPException(500, "Exactly 3 event coordinators are required.")

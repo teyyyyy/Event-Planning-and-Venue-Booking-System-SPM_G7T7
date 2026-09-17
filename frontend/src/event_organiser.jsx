@@ -11,7 +11,7 @@ const today = new Date().toISOString().split('T')[0];
 
 function formTime(value) { return String(value ?? '').slice(0, 5); }
 
-export default function EventOrganiser() {
+export default function EventOrganiser({ editingEvent, onEditComplete }) {
   const [requests, setRequests] = useState([]);
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
