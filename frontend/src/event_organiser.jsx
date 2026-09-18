@@ -11,12 +11,13 @@ const today = new Date().toISOString().split('T')[0];
 
 function formTime(value) { return String(value ?? '').slice(0, 5); }
 
-export default function EventOrganiser() {
+export default function EventOrganiser({ editingEvent, onEditComplete }) {
   const [requests, setRequests] = useState([]);
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState(null);
+  const [discardConfirmation, setDiscardConfirmation] = useState(null);
   const [loadingAction, setLoadingAction] = useState(null);
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
   const isSubmitting = loadingAction !== null;
@@ -155,6 +156,29 @@ export default function EventOrganiser() {
     }
   }
 
+  function discardDraft(request) {
+    if (isSubmitting) return;
+    setDiscardConfirmation(request);
+  }
+
+  async function confirmDiscardDraft() {
+    if (isSubmitting || !discardConfirmation) return;
+    const request = discardConfirmation;
+    setDiscardConfirmation(null);
+    setLoadingAction('discard');
+    try {
+      const response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/requests/${request.id}`, { method: 'DELETE' });
+      const result = await response.json();
+      if (!response.ok) { setNotice({ type: 'error', text: result.detail || 'Could not discard draft.' }); return; }
+      await loadRequests();
+      setNotice({ type: 'success', title: 'Draft discarded', text: 'The event draft was removed from your draft list.' });
+    } catch (error) {
+      setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
+    } finally {
+      setLoadingAction(null);
+    }
+  }
+
   return <main className="shell organiser-shell">
     <aside><div className="logo">G</div><div className="side-label">EVENT ORGANISER</div></aside>
     <section className="content">
@@ -164,8 +188,9 @@ export default function EventOrganiser() {
         <div className="form-grid"><label>Event name<input name="event_name" value={form.event_name} onChange={change} required /></label><label>Event type<select name="event_type" value={form.event_type} onChange={change} required><option value="">Select event type</option>{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Proposed date<input name="event_date" type="date" min={today} value={form.event_date} onChange={change} required /></label><label>Capacity<select name="event_capacity" value={form.event_capacity} onChange={change} required><option value="">Select capacity</option>{capacityOptions.map(({ label, value }) => <option key={value} value={value}>{label}</option>)}</select></label><label>Start time<select name="start_time" value={form.start_time} onChange={change} required><option value="">Select start time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label>End time<select name="end_time" value={form.end_time} onChange={change} required><option value="">Select end time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label className="wide">Description and planning requirements<textarea name="description" value={form.description} onChange={change} required rows="6" placeholder="Include the purpose, venue requirements, accessibility needs, equipment requirements, and registration needs." /></label></div>
       </form>
       {message && <p className="message">{message}</p>}
-      <div className="table-wrap"><table><thead><tr><th>Event</th><th>Type</th><th>Date and time</th><th>Status</th><th>Actions</th></tr></thead><tbody>{isLoadingRequests ? <tr><td className="empty" colSpan="5">Loading events for this organiser...</td></tr> : requests.length ? requests.map((request) => <tr key={request.id}><td><strong>{request.event_name}</strong><br /><small>{request.event_capacity} attendee capacity</small></td><td>{request.event_type}</td><td>{request.event_date}<br />{request.start_time} - {request.end_time}</td><td><span className="pill">{request.status}</span></td><td>{String(request.status).toLowerCase() === 'submitted' && <button className="assign" onClick={() => editRequest(request)}>Edit</button>}{String(request.status).toLowerCase() === 'draft' && <><button className="assign" onClick={() => submitRequest(request.id)}>Submit</button><button className="assign" onClick={() => editRequest(request)}>Edit</button></>}</td></tr>) : <tr><td className="empty" colSpan="5">No submitted event requests found for this organiser.</td></tr>}</tbody></table></div>
-      {isSubmitting && <div className="loading-backdrop" role="status" aria-live="polite"><span className="loading-spinner" /> <span>{loadingAction === 'draft' ? 'Saving draft...' : loadingAction === 'row-submit' ? 'Submitting event...' : loadingAction === 'edit' ? 'Saving changes...' : 'Submitting event...'}</span></div>}
+      <div className="table-wrap"><table><thead><tr><th>Event</th><th>Type</th><th>Date and time</th><th>Status</th><th>Actions</th></tr></thead><tbody>{isLoadingRequests ? <tr><td className="empty" colSpan="5">Loading events for this organiser...</td></tr> : requests.length ? requests.map((request) => <tr key={request.id}><td><strong>{request.event_name}</strong><br /><small>{request.event_capacity} attendee capacity</small></td><td>{request.event_type}</td><td>{request.event_date}<br />{request.start_time} - {request.end_time}</td><td><span className="pill">{request.status}</span></td><td>{String(request.status).toLowerCase() === 'submitted' && <button className="assign" onClick={() => editRequest(request)}>Edit</button>}{String(request.status).toLowerCase() === 'draft' && <><button className="assign" onClick={() => submitRequest(request.id)}>Submit</button><button className="assign" onClick={() => editRequest(request)}>Edit</button><button className="assign" onClick={() => discardDraft(request)}>Discard</button></>}</td></tr>) : <tr><td className="empty" colSpan="5">No submitted event requests found for this organiser.</td></tr>}</tbody></table></div>
+      {isSubmitting && <div className="loading-backdrop" role="status" aria-live="polite"><span className="loading-spinner" /> <span>{loadingAction === 'draft' ? 'Saving draft...' : loadingAction === 'row-submit' ? 'Submitting event...' : loadingAction === 'edit' ? 'Saving changes...' : 'Discarding draft...'}</span></div>}
+      {discardConfirmation && <><div className="notice-backdrop" /> <div className="notice warning" role="alertdialog" aria-modal="true" aria-labelledby="discard-title"><div className="notice-icon">!</div><div><h2 id="discard-title">Discard draft?</h2><p>Discard “{discardConfirmation.event_name}”? This cannot be undone.</p><div className="notice-actions"><button className="secondary" onClick={() => setDiscardConfirmation(null)}>Cancel</button><button className="primary" onClick={confirmDiscardDraft}>Discard</button></div></div></div></>}
       {notice && <><div className="notice-backdrop" /> <div className={`notice ${notice.type}`} role="alertdialog" aria-modal="true" aria-labelledby="notice-title"><div className="notice-icon">{notice.type === 'success' ? '✓' : '!'}</div><div><h2 id="notice-title">{notice.title || (notice.type === 'success' ? 'Submission successful' : 'Submission unsuccessful')}</h2><p>{notice.text}</p><button className="primary" onClick={() => setNotice(null)}>Close</button></div></div></>}
     </section>
   </main>;
