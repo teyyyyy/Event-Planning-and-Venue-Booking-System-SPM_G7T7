@@ -3,12 +3,25 @@ import { useAuth } from './AuthContext';
 import Login from './Login';
 import CoordinatorAssignment from './coordinator_assignment';
 import EventOrganiser from './event_organiser';
+import VenueApproval from './venue_approval';
 
 function AuthedApp() {
   const { user, logout } = useAuth();
+  const isVenueStaff = user.role.trim().toLowerCase() === 'venue staff';
   const isCoordinator = user.role.trim().toLowerCase().includes('coordinator');
   const [activeRole, setActiveRole] = useState(isCoordinator ? 'coordinator' : 'organiser');
   const [editingEvent, setEditingEvent] = useState(null);
+
+  if (isVenueStaff) {
+    return (
+      <>
+        <div className="role-tabs">
+          <button className="logout-tab" onClick={logout} title={user.email}>Log out</button>
+        </div>
+        <VenueApproval />
+      </>
+    );
+  }
 
   return (
     <>

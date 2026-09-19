@@ -5,7 +5,7 @@ const EVENT_STATUSES = ['Under review', 'Approved', 'Planning', 'Confirmed', 'Co
 
 function EventRows({ events, onAssign, onStatusChange, onSubmit, onEdit, coordinators, canManage = false }) {
   return events.length ? events.map((event) => <tr key={event.id}>
-    <td>{event.event_title}</td><td>{event.event_date}</td>
+    <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
     <td>{canManage ? <select aria-label={`Status for ${event.event_title}`} value={event.event_status || ''} onChange={(e) => onStatusChange(event.id, e.target.value)}>{EVENT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select> : <span className="pill">{event.event_status}</span>}</td>
     <td>{canManage ? <select aria-label={`Coordinator for ${event.event_title}`} value={event.assigned_coordinator_id || ''} onChange={(e) => onAssign(event.id, e.target.value)}>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select> : event.coordinator_name ? <span>{event.coordinator_name}<br /><small>{event.coordinator_email || 'Email unavailable'}</small></span> : <button className="assign" onClick={() => onAssign(event.id)}>Assign coordinator</button>}</td>
     {!canManage && <td>{String(event.event_status).toLowerCase() === 'draft' && <button className="assign" onClick={() => onSubmit(event.id)}>Submit</button>}{['submitted', 'under review', 'approved', 'planning', 'confirmed'].includes(String(event.event_status).toLowerCase()) && <button className="assign" onClick={() => onEdit(event.id)}>Edit</button>}</td>}
