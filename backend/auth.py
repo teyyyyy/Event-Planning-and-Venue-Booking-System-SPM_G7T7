@@ -5,6 +5,7 @@ from fastapi import Depends, Header, HTTPException
 from coordinator_assignment import db
 
 COORDINATOR_ROLE = "event coordinator"
+VENUE_STAFF_ROLE = "venue staff"
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
@@ -34,6 +35,12 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
 def require_coordinator(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if str(user.get("role", "")).strip().lower() != COORDINATOR_ROLE:
         raise HTTPException(403, "Event coordinator access required.")
+    return user
+
+
+def require_venue_staff(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != VENUE_STAFF_ROLE:
+        raise HTTPException(403, "Venue staff access required.")
     return user
 
 

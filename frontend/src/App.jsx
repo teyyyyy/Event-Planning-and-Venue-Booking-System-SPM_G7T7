@@ -6,6 +6,7 @@ import EventOrganiser from './event_organiser';
 import EquipmentRequest from './EquipmentRequest';
 import EquipmentUpdate from './EquipmentUpdate';
 import EquipmentAvailability from './EquipmentAvailability';
+import VenueApproval from './venue_approval';
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -13,10 +14,12 @@ function AuthedApp() {
   const isCoordinator = normalizedRole === 'event coordinator';
   const isTechnicalSupport = normalizedRole === 'technical support staff';
   const isOrganiser = normalizedRole === 'event organiser';
+  const isVenueStaff = normalizedRole === 'venue staff';
 
   if (isTechnicalSupport) return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator) return <CoordinatorWorkspace user={user} logout={logout} />;
   if (isOrganiser) return <OrganiserWorkspace user={user} logout={logout} />;
+  if (isVenueStaff) return <VenueStaffWorkspace logout={logout} email={user.email} />;
 
   return (
     <div className="auth-screen">
@@ -26,6 +29,18 @@ function AuthedApp() {
         <button type="button" className="primary" onClick={logout}>Log out</button>
       </div>
     </div>
+  );
+}
+
+// Venue Staff workspace
+function VenueStaffWorkspace({ logout, email }) {
+  return (
+    <>
+      <div className="role-tabs">
+        <button className="logout-tab" onClick={logout} title={email}>Log out</button>
+      </div>
+      <VenueApproval />
+    </>
   );
 }
 

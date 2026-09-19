@@ -23,6 +23,7 @@ class EventRequest(BaseModel):
     event_name: str
     event_type: str
     event_date: str
+    event_end_date: str | None = None  # blank = single-day event
     event_capacity: int
     description: str
     start_time: str
@@ -40,7 +41,9 @@ def db() -> Client:
 
 
 def request_data(request: EventRequest) -> dict[str, Any]:
-    return request.model_dump()
+    data = request.model_dump()
+    data["event_end_date"] = request.event_end_date or request.event_date
+    return data
 
 
 def organiser_can_edit(event: dict[str, Any], organiser_id: str) -> bool:
@@ -57,6 +60,7 @@ def organiser_owns_event(event: dict[str, Any], organiser_id: str) -> bool:
 def validate_request(request: EventRequest) -> None:
     try:
         event_date = date.fromisoformat(request.event_date)
+        event_end_date = date.fromisoformat(request.event_end_date or request.event_date)
         start_time = time.fromisoformat(request.start_time)
         end_time = time.fromisoformat(request.end_time)
     except ValueError as error:
@@ -65,7 +69,9 @@ def validate_request(request: EventRequest) -> None:
         raise HTTPException(400, "Event date cannot be in the past.")
     if start_time.minute or start_time.second or end_time.minute or end_time.second:
         raise HTTPException(400, "Event times must use one-hour blocks.")
-    if end_time <= start_time:
+    if event_end_date < event_date:
+        raise HTTPException(400, "End date cannot be before the start date.")
+    if event_end_date == event_date and end_time <= start_time:
         raise HTTPException(400, "End time must be later than the start time.")
 
 
