@@ -22,6 +22,7 @@ class VenueResponse(BaseModel):
 class VenueBookingCreate(BaseModel):
     event_id: int
     venue_id: int
+    coordinator_id: str
     start_datetime: datetime
     end_datetime: datetime
 
@@ -44,23 +45,21 @@ def create_venue_booking(booking: VenueBookingCreate):
     """Submits a new venue booking request."""
     supabase = get_supabase()
     
-    # Structure the payload to match your database schema
     new_request = {
         "event_id": booking.event_id,
         "venue_id": booking.venue_id,
+        "coordinator_id": booking.coordinator_id,
         "start_datetime": booking.start_datetime.isoformat(),
         "end_datetime": booking.end_datetime.isoformat(),
         "status": "Pending" 
     }
     
     try:
-        # Assuming your table is named 'Venue_Booking_Requests'
-        response = supabase.table('Venue_Booking_Requests').insert(new_request).execute()
+        response = supabase.table('Venue Booking Requests').insert(new_request).execute()
         
         if not response.data:
             raise HTTPException(status_code=400, detail="Failed to create venue booking request.")
             
-        # The frontend expects request_id in the response body to show success
         return {"request_id": response.data[0].get("request_id")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

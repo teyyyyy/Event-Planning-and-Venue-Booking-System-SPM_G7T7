@@ -2,6 +2,15 @@ import React, { useEffect, useState, useMemo } from "react";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
+function format12HourTime(time24) {
+  if (!time24) return "";
+  let [hours, minutes] = time24.split(":");
+  hours = parseInt(hours, 10);
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12; // Converts 0 to 12 for midnight
+  return `${hours}:${minutes} ${ampm}`;
+}
+
 function VenueDetail({ venue, onClose }) {
   return (
     <div className="equipment-item-card" style={{ marginBottom: "24px" }}>
@@ -65,22 +74,28 @@ export default function VenueRequest({ user }) {
     (item) => item.venue_id === selectedVenueId,
   );
 
-  // Automatically apply event details to filters when an event is selected
-  // Automatically apply event details to filters when an event is selected
+  // Automatically apply event details to filters and forms when an event is selected
   useEffect(() => {
     if (selectedEvent) {
       setFilterCapacity(selectedEvent.event_capacity || "");
       setFilterLayout(selectedEvent.layout_required || "");
-
-      // Explicitly check for the number 1 to prevent string "0" from evaluating to true
       setFilterAccessible(Number(selectedEvent.accessibility_required) === 1);
-
       setFilterFacilities(selectedEvent.facilities_required || []);
+
+      if (selectedEvent.start_datetime) {
+        setStartDatetime(selectedEvent.start_datetime.slice(0, 16));
+      }
+      if (selectedEvent.end_datetime) {
+        setEndDatetime(selectedEvent.end_datetime.slice(0, 16));
+      }
     } else {
+      // Clear everything if no event is selected
       setFilterCapacity("");
       setFilterLayout("");
       setFilterAccessible(false);
       setFilterFacilities([]);
+      setStartDatetime("");
+      setEndDatetime("");
     }
   }, [selectedEvent]);
 
@@ -190,6 +205,7 @@ export default function VenueRequest({ user }) {
       const payload = {
         event_id: Number(eventId),
         venue_id: selectedVenueId,
+        coordinator_id: user.id,
         start_datetime: startDatetime,
         end_datetime: endDatetime,
       };
@@ -344,7 +360,13 @@ export default function VenueRequest({ user }) {
                       </td>
                       <td>{selectedEvent.event_date}</td>
                       <td>
-                        {selectedEvent.start_time} - {selectedEvent.end_time}
+                        {format12HourTime(
+                          selectedEvent.start_datetime.slice(11, 16),
+                        )}{" "}
+                        -{" "}
+                        {format12HourTime(
+                          selectedEvent.end_datetime.slice(11, 16),
+                        )}
                       </td>
                       <td>
                         {selectedEvent.event_capacity ||
