@@ -166,7 +166,7 @@ def coordinator_events(coordinator_id: str):
     client = db()
 
     assigned_events = client.table(EVENT_TABLE).select(
-        'id,event_name,event_date,start_time,end_time,status,coordinator_id'
+        '*'
     ).eq('coordinator_id', coordinator_id).order('event_date').execute().data or []
 
     if not assigned_events:
