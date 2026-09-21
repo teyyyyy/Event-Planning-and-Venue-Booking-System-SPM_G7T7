@@ -230,7 +230,6 @@ export default function VenueRequest({ user }) {
       const reqEnd = new Date(endDatetime);
 
       // 2. Check for time overlaps
-      // 2. Check for time overlaps
       const hasOverlap = existingBookings.some((booking) => {
         // 1. Take "2026-10-10 13:05:00+00"
         // 2. Grab just the first 16 characters: "2026-10-10 13:05"
@@ -255,7 +254,7 @@ export default function VenueRequest({ user }) {
           text: "This venue is already booked for the selected time period. Please choose a different time or venue.",
         });
         setSubmitting(false);
-        return; // Abort submission
+        return; 
       }
 
       // 3. If no overlaps, proceed with submitting the booking
