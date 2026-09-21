@@ -23,7 +23,7 @@ function VenueDetail({ venue, onClose }) {
         }}
       >
         <h2 style={{ margin: 0 }}>{venue.name}</h2>
-        <button type="button" className="secondary" onClick={onClose}>
+        <button type="button" className="primary" onClick={onClose}>
           Select Different Venue
         </button>
       </div>
@@ -51,6 +51,7 @@ export default function VenueRequest({ user }) {
   const [activeTab, setActiveTab] = useState("request");
   const [venues, setVenues] = useState([]);
   const [events, setEvents] = useState([]);
+  const [submittedRequests, setSubmittedRequests] = useState([]);
 
   // 2. Form State
   const [eventId, setEventId] = useState("");
@@ -168,6 +169,19 @@ export default function VenueRequest({ user }) {
             eventData.detail || "Unable to load assigned events.",
           );
         setEvents(Array.isArray(eventData) ? eventData : []);
+
+        const submittedRequestsRes = await fetch(
+          `${API}/venue-booking-requests/coordinators/${user.id}`,
+        );
+        const submittedRequestsData = await submittedRequestsRes.json();
+        if (!submittedRequestsRes.ok)
+          throw new Error(
+            submittedRequestsData.detail ||
+              "Unable to load submitted requests.",
+          );
+        setSubmittedRequests(
+          Array.isArray(submittedRequestsData) ? submittedRequestsData : [],
+        );
       }
     } catch (error) {
       setPageError(error.message);
@@ -204,7 +218,7 @@ export default function VenueRequest({ user }) {
     try {
       // 1. Fetch approved bookings for this venue to check availability (No Auth Header needed)
       const checkResponse = await fetch(
-        `${API}/venue-booking-requests/${selectedVenueId}`,
+        `${API}/venue-booking-requests/venues/${selectedVenueId}`,
       );
 
       if (!checkResponse.ok) {
@@ -740,9 +754,100 @@ export default function VenueRequest({ user }) {
               <p>View the status of your submitted venue requests.</p>
             </div>
           </div>
-          <p className="empty-state">
-            No venue requests have been submitted yet.
-          </p>
+
+          {submittedRequests.length > 0 ? (
+            <div
+              className="request-table-wrapper"
+              style={{ width: "100%", overflowX: "auto" }}
+            >
+              <table className="request-table" style={{ width: "100%" }}>
+                <thead>
+                  <tr>
+                    <th style={{ textAlign: "left" }}>ID</th>
+                    <th style={{ textAlign: "left" }}>Event Name</th>
+                    <th style={{ textAlign: "left" }}>Venue</th>
+                    <th style={{ textAlign: "left" }}>Start</th>
+                    <th style={{ textAlign: "left" }}>End</th>
+                    <th style={{ textAlign: "left" }}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {submittedRequests.map((req) => {
+                    // Map IDs to names just in case the backend only sends IDs
+                    const eventName =
+                      events.find((e) => String(e.id) === String(req.event_id))
+                        ?.event_name || req.event_id;
+                    const venueName =
+                      venues.find(
+                        (v) => String(v.venue_id) === String(req.venue_id),
+                      )?.name || req.venue_id;
+
+                    return (
+                      <tr key={req.request_id || req.id}>
+                        <td>{req.request_id || req.id}</td>
+                        <td>
+                          <strong>{eventName}</strong>
+                        </td>
+                        <td>{venueName}</td>
+                        <td>
+                          {req.start_datetime
+                            ? req.start_datetime.slice(0, 10)
+                            : ""}{" "}
+                          <br />
+                          <small style={{ color: "var(--text-muted, #666)" }}>
+                            {req.start_datetime
+                              ? format12HourTime(
+                                  req.start_datetime.slice(11, 16),
+                                )
+                              : ""}
+                          </small>
+                        </td>
+                        <td>
+                          {req.end_datetime
+                            ? req.end_datetime.slice(0, 10)
+                            : ""}{" "}
+                          <br />
+                          <small style={{ color: "var(--text-muted, #666)" }}>
+                            {req.end_datetime
+                              ? format12HourTime(req.end_datetime.slice(11, 16))
+                              : ""}
+                          </small>
+                        </td>
+                        <td>
+                          <span
+                            style={{
+                              padding: "4px 8px",
+                              borderRadius: "12px",
+                              fontSize: "0.85em",
+                              fontWeight: "bold",
+                              backgroundColor:
+                                req.status === "Approved"
+                                  ? "#d4edda"
+                                  : req.status === "Rejected"
+                                    ? "#f8d7da"
+                                    : "#fff3cd",
+                              color:
+                                req.status === "Approved"
+                                  ? "#155724"
+                                  : req.status === "Rejected"
+                                    ? "#721c24"
+                                    : "#856404",
+                            }}
+                          >
+                            {req.status || "Pending"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-state">
+              No venue requests have been submitted yet.
+            </p>
+          )}
         </div>
       )}
 
