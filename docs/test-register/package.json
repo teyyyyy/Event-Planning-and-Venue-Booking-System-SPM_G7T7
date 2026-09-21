@@ -1,0 +1,8 @@
+{
+  "name": "test-register-generator",
+  "private": true,
+  "type": "module",
+  "description": "Builds the unit test case register (.docx) from the Vitest and pytest result files.",
+  "scripts": { "build": "./build.sh" },
+  "dependencies": { "docx": "^9.0.0" }
+}

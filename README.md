@@ -70,6 +70,27 @@ uvicorn main:app --reload --port 8000
 The backend exposes the event-organiser and coordinator-assignment routers; it
 reads `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` from the repo-root `.env`.
 
+## Tests
+
+Unit tests: Vitest + React Testing Library (frontend) and pytest (backend). No database or
+`.env` is needed — Supabase is replaced by test doubles.
+
+```bash
+# frontend
+cd frontend && npm install && npm test
+
+# backend (from the repo root)
+cd backend && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements-dev.txt
+cd .. && backend/.venv/bin/python -m pytest
+```
+
+Every test carries its case ID, steps and expected result, and the Word register
+`docs/Unit-Test-Cases.docx` is generated from them:
+
+```bash
+cd docs/test-register && npm install && ./build.sh
+```
+
 ## Authentication
 
 Accounts live in **Supabase Auth** (`auth.users`). The React app talks to Supabase
