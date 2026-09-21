@@ -202,17 +202,50 @@ export default function VenueRequest({ user }) {
 
     setSubmitting(true);
     try {
+      // 1. Fetch approved bookings for this venue to check availability (No Auth Header needed)
+      const checkResponse = await fetch(
+        `${API}/venue-booking-requests/${selectedVenueId}`,
+      );
+
+      if (!checkResponse.ok) {
+        throw new Error("Unable to verify venue availability.");
+      }
+
+      const existingBookings = await checkResponse.json();
+      const reqStart = new Date(startDatetime);
+      const reqEnd = new Date(endDatetime);
+
+      // 2. Check for time overlaps
+      const hasOverlap = existingBookings.some((booking) => {
+        const exStart = new Date(booking.start_datetime);
+        const exEnd = new Date(booking.end_datetime);
+        return reqStart < exEnd && reqEnd > exStart;
+      });
+
+      if (hasOverlap) {
+        setNotice({
+          type: "error",
+          text: "This venue is already booked for the selected time period. Please choose a different time or venue.",
+        });
+        setSubmitting(false);
+        return; // Abort submission
+      }
+
+      // 3. If no overlaps, proceed with submitting the booking
       const payload = {
         event_id: Number(eventId),
         venue_id: selectedVenueId,
-        coordinator_id: user.id,
+        coordinator_id: user.id, // Make sure user.id is available here
         start_datetime: startDatetime,
         end_datetime: endDatetime,
       };
 
+      // Removed the Authorization header here as well
       const response = await fetch(`${API}/venue-bookings`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
@@ -232,9 +265,23 @@ export default function VenueRequest({ user }) {
       setStartDatetime("");
       setEndDatetime("");
     } catch (error) {
+      let errorMessage = error.message;
+
+      // Intercept the PostgreSQL unique constraint violation error
+      if (
+        errorMessage &&
+        (errorMessage.includes("23505") ||
+          errorMessage.includes("event_id_key"))
+      ) {
+        errorMessage =
+          "A venue booking request has already been submitted for this event.";
+      } else {
+        errorMessage = errorMessage || "Venue request could not be submitted.";
+      }
+
       setNotice({
         type: "error",
-        text: error.message || "Venue request could not be submitted.",
+        text: errorMessage,
       });
     } finally {
       setSubmitting(false);
@@ -291,15 +338,6 @@ export default function VenueRequest({ user }) {
               <p>
                 Select an event to browse the catalogue and request a venue.
               </p>
-            </div>
-            <div className="form-actions">
-              <button
-                className="primary"
-                type="submit"
-                disabled={submitting || !formIsValid()}
-              >
-                {submitting ? "Submitting…" : "Submit request"}
-              </button>
             </div>
           </div>
 
@@ -646,7 +684,7 @@ export default function VenueRequest({ user }) {
                           <td>
                             <button
                               type="button"
-                              className="secondary"
+                              className="primary"
                               onClick={() => setSelectedVenueId(item.venue_id)}
                             >
                               Select Venue
@@ -670,6 +708,27 @@ export default function VenueRequest({ user }) {
               </div>
             </div>
           )}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              marginTop: "24px",
+              marginBottom: "24px",
+            }}
+          >
+            <button
+              className="primary"
+              type="submit"
+              disabled={submitting || !formIsValid()}
+              style={{
+                opacity: submitting || !formIsValid() ? 0.5 : 1,
+                cursor:
+                  submitting || !formIsValid() ? "not-allowed" : "pointer",
+              }}
+            >
+              {submitting ? "Submitting…" : "Submit Request"}
+            </button>
+          </div>
         </form>
       )}
 
