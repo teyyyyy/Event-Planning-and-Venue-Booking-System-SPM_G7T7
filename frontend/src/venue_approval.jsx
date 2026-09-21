@@ -62,10 +62,11 @@ export default function VenueApproval() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  async function load() {
+  // keepMessage: leave the caller's message on screen after the reload.
+  async function load(keepMessage = false) {
     try {
       setBookings(await request('/venue-booking-requests'));
-      setMessage('');
+      if (!keepMessage) setMessage('');
     } catch (error) {
       setMessage(`Unable to load venue booking requests. (${error.message})`);
     } finally {
@@ -83,7 +84,7 @@ export default function VenueApproval() {
       setMessage(`Request for ${updated.event_name || `event #${updated.event_id}`} ${updated.status.toLowerCase()}.`);
     } catch (error) {
       setMessage(error.message);
-      await load(); // status may have changed underneath us
+      await load(true); // status may have changed underneath us
     } finally {
       setBusy(false);
     }

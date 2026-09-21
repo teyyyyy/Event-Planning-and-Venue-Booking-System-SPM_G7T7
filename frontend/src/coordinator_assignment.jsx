@@ -19,12 +19,13 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
   const [activeTab, setActiveTab] = useState(isCoordinator ? 'management' : 'status');
   const [message, setMessage] = useState('');
 
-  async function loadOrganiser() {
+  // keepMessage: leave the caller's success/error message on screen after the reload.
+  async function loadOrganiser(keepMessage = false) {
     try {
       const statusResponse = await fetch(`${API}/event-organisers/${user.id}/requests`);
       if (!statusResponse.ok) throw new Error(`Backend returned ${statusResponse.status}`);
       setEvents(await statusResponse.json());
-      setMessage('');
+      if (!keepMessage) setMessage('');
     } catch (error) {
       setMessage(`Unable to load event status. Start the backend at http://localhost:8000. (${error.message})`);
     }
@@ -35,13 +36,13 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     else loadOrganiser();
   }, [isCoordinator, user.id]);
 
-  async function loadReassignment() {
+  async function loadReassignment(keepMessage = false) {
     try {
       const [eventResponse, coordinatorResponse] = await Promise.all([fetch(`${API}/events`), fetch(`${API}/coordinators`)]);
       if (!eventResponse.ok || !coordinatorResponse.ok) throw new Error('Unable to load event tasks');
       const allEvents = await eventResponse.json();
       setEvents(allEvents.filter((event) => event.assigned_coordinator_id === user.id));
-      setCoordinators(await coordinatorResponse.json()); setMessage('');
+      setCoordinators(await coordinatorResponse.json()); if (!keepMessage) setMessage('');
     } catch (error) { setMessage(`Unable to load event tasks. (${error.message})`); }
   }
 
@@ -51,7 +52,7 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     const result = await response.json();
     if (!response.ok) return setMessage(result.detail || 'Assignment failed.');
     setMessage(`${result.event_title} assigned to ${result.coordinator_name}.`);
-    await loadOrganiser();
+    await loadOrganiser(true);
   }
 
   async function reassign(eventId, coordinatorId) {
@@ -59,7 +60,7 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     const response = await fetch(`${API}/events/${eventId}/coordinator`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ coordinator_id: coordinatorId }) });
     const result = await response.json();
     if (!response.ok) return setMessage(result.detail || 'Reassignment failed.');
-    setMessage(`${result.event_title} reassigned to ${result.coordinator_name}.`); await loadReassignment();
+    setMessage(`${result.event_title} reassigned to ${result.coordinator_name}.`); await loadReassignment(true);
   }
 
   async function updateStatus(eventId, eventStatus) {
@@ -75,7 +76,7 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     const result = await response.json();
     if (!response.ok) return setMessage(result.detail || 'Could not submit request.');
     setMessage('Request submitted for review.');
-    await loadOrganiser();
+    await loadOrganiser(true);
   }
 
   function editEvent(eventId) {
@@ -97,7 +98,7 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
       </nav>
       {message && <p className="message">{message}</p>}
       <h2>Event status</h2>
-      <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{!isCoordinator && <th>Action</th>}</tr></thead><tbody><EventRows events={events} onAssign={reassign} onStatusChange={updateStatus} onSubmit={submitEvent} onEdit={editEvent} coordinators={coordinators} canManage={activeTab === 'management'} /></tbody></table></div>
+      <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{!isCoordinator && <th>Action</th>}</tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onEdit={editEvent} coordinators={coordinators} canManage={activeTab === 'management'} /></tbody></table></div>
     </section>
   </main>;
 }
