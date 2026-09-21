@@ -7,7 +7,8 @@ import EquipmentRequest from "./EquipmentRequest";
 import EquipmentUpdate from "./EquipmentUpdate";
 import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
-import VenueRequest from "./venueRequest";
+import VenueRequest from "./VenueRequest";
+import VenueCatalogue from "./VenueCatalogue";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -40,15 +41,22 @@ function AuthedApp() {
 
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
+  const [activeSection, setActiveSection] = useState("catalogue");
   return (
-    <>
-      <div className="role-tabs">
-        <button className="logout-tab" onClick={logout} title={email}>
-          Log out
-        </button>
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div><div className="logo">G</div><div className="side-label">VENUE STAFF</div>
+          <nav className="coordinator-side-nav" aria-label="Venue Staff navigation">
+            <button type="button" className={`coordinator-nav-button ${activeSection === 'catalogue' ? 'active' : ''}`} onClick={() => setActiveSection('catalogue')}>Venue Catalogue</button>
+            <button type="button" className={`coordinator-nav-button ${activeSection === 'approvals' ? 'active' : ''}`} onClick={() => setActiveSection('approvals')}>Booking Approvals</button>
+          </nav>
+        </div>
+        <button className="coordinator-logout" onClick={logout} title={email}>Log out</button>
+      </aside>
+      <div className="coordinator-main">
+        {activeSection === 'catalogue' ? <VenueCatalogue canEdit /> : <div className="embedded-existing-page"><VenueApproval /></div>}
       </div>
-      <VenueApproval />
-    </>
+    </div>
   );
 }
 
@@ -64,6 +72,7 @@ function TechnicalSupportWorkspace({ user, logout }) {
           <div className="side-label">TECHNICAL SUPPORT</div>
 
           <nav className="coordinator-side-nav">
+            <button type="button" className={`coordinator-nav-button ${activeSection === 'catalogue' ? 'active' : ''}`} onClick={() => setActiveSection('catalogue')}>Venue Catalogue</button>
             <button
               type="button"
               className={
@@ -101,6 +110,7 @@ function TechnicalSupportWorkspace({ user, logout }) {
       </aside>
 
       <div className="coordinator-main">
+        {activeSection === "catalogue" && <VenueCatalogue />}
         {activeSection === "equipment-update" && (
           <EquipmentUpdate user={user} />
         )}

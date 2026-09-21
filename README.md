@@ -1,5 +1,43 @@
 # Gather
 
+## Venue catalogue — stories 16.1 and 16.2
+
+- Venue Staff: **Venue Catalogue → View details → Edit venue → Save changes**.
+  Booking Approvals remains available in the sidebar.
+- Technical Support Staff: **Venue Catalogue → View details** (read-only).
+  Equipment Update and Equipment Availability Check remain available.
+
+Run `backend/sql/venue_catalogue.sql` in the Supabase SQL Editor before saving
+venue edits, then restart the backend. The migration adds `operating_hours` and
+`accessibility_details` to the existing `public."Venues"` table; it does not create
+another venue table or change existing records. The account's `public.users.role`
+must be `Venue Staff` or `Technical Support Staff` respectively.
+
+The editor reuses `facilities`, `accessible` (0/1), and `layouts`, so saved changes
+also appear when coordinators reload the venue request flow. Supported
+characteristics currently means supported layouts (e.g. Theatre or Banquet).
+Facilities/layouts allow up to 30 items of 100 characters each; duplicates are
+removed. Accessibility notes allow 1,000 characters. Name, location, and capacity
+are displayed but not edited by this story.
+
+Operating hours use one interval per day in local venue time, or Closed. All seven
+days must be specified when saving; closing must be later on the same day.
+Overnight hours are not supported. Existing records without hours display
+"Not specified" until updated. Hours are planning information, not an automatic
+booking restriction. Cancel discards the draft; failed saves retain it for retry.
+
+The new `/api/venue-catalogue` routes use the shared authentication module and
+enforce staff roles server-side. The existing coordinator `/api/venues` route is
+unchanged. No live database changes are made by the tests:
+
+```bash
+backend/.venv/bin/python -m unittest discover -s test -p 'venue_catalogue_test.py' -v
+```
+
+After database setup, verify with two venues: edit one, refresh, confirm the other
+is unchanged; cancel another edit; sign in as Technical Support Staff and confirm
+there is no Edit button. Also check invalid hours, empty catalogue and failed save.
+
 Minimal starting point for the event management Scrum project.
 
 ## Environment

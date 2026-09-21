@@ -10,12 +10,12 @@ export async function request(path, options = {}) {
   const token = data.session?.access_token;
 
   const res = await fetch(BASE + path, {
+    ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers || {}),
     },
-    ...options,
   });
 
   let body = null;
@@ -26,7 +26,10 @@ export async function request(path, options = {}) {
   }
 
   if (!res.ok) {
-    const message =
+    const validation = Array.isArray(body?.detail)
+      ? body.detail.map((error) => `${error.loc.slice(1).join(' / ')}: ${error.msg.replace(/^Value error, /, '')}`).join(' ')
+      : '';
+    const message = validation ||
       (body && typeof body.detail === 'string' && body.detail) ||
       `Request failed (${res.status})`;
     throw new Error(message);
