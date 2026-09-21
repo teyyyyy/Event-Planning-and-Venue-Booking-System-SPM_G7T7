@@ -230,9 +230,22 @@ export default function VenueRequest({ user }) {
       const reqEnd = new Date(endDatetime);
 
       // 2. Check for time overlaps
+      // 2. Check for time overlaps
       const hasOverlap = existingBookings.some((booking) => {
-        const exStart = new Date(booking.start_datetime);
-        const exEnd = new Date(booking.end_datetime);
+        // 1. Take "2026-10-10 13:05:00+00"
+        // 2. Grab just the first 16 characters: "2026-10-10 13:05"
+        // 3. Replace the space with a "T": "2026-10-10T13:05"
+        const cleanExStartStr = booking.start_datetime
+          .substring(0, 16)
+          .replace(" ", "T");
+        const cleanExEndStr = booking.end_datetime
+          .substring(0, 16)
+          .replace(" ", "T");
+
+        // Now both the requested and existing dates are in the exact same local format
+        const exStart = new Date(cleanExStartStr).getTime();
+        const exEnd = new Date(cleanExEndStr).getTime();
+
         return reqStart < exEnd && reqEnd > exStart;
       });
 
@@ -254,7 +267,6 @@ export default function VenueRequest({ user }) {
         end_datetime: endDatetime,
       };
 
-      // Removed the Authorization header here as well
       const response = await fetch(`${API}/venue-bookings`, {
         method: "POST",
         headers: {
