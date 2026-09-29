@@ -14,7 +14,7 @@ function statusClass(status) {
   return String(status || '').toLowerCase().replaceAll(' ', '-');
 }
 
-export default function EquipmentAvailability({ user }) {
+export default function EquipmentAvailability({ user, onReserve, onUpdate }) {
   const [screen, setScreen] = useState('events');
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -35,7 +35,9 @@ export default function EquipmentAvailability({ user }) {
       const response = await fetch(`${API}/equipment-availability/${user.id}/events`);
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.detail || 'Unable to load equipment requests.');
+      if (!response.ok)
+        throw new Error(result.detail || 'Unable to load equipment requests.');
+
       setEvents(Array.isArray(result) ? result : []);
     } catch (loadError) {
       setEvents([]);
@@ -56,19 +58,24 @@ export default function EquipmentAvailability({ user }) {
     setCatalogue([]);
 
     try {
-      const response = await fetch(`${API}/equipment-availability/${user.id}/events/${eventId}`);
+      const response = await fetch(
+        `${API}/equipment-availability/${user.id}/events/${eventId}`
+      );
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.detail || 'Unable to check equipment availability.');
+      if (!response.ok)
+        throw new Error(result.detail || 'Unable to check equipment availability.');
 
       setSelectedEvent(result.event);
       setAvailability(result.availability || []);
+
       setSummary({
         request_id: result.request_id,
         request_status: result.request_status,
         all_equipment_available: result.all_equipment_available,
         unavailable_equipment_count: result.unavailable_equipment_count,
       });
+
       setScreen('details');
     } catch (checkError) {
       setError(checkError.message || 'Unable to check equipment availability.');
@@ -95,11 +102,12 @@ export default function EquipmentAvailability({ user }) {
 
     try {
       const response = await fetch(
-        `${API}/equipment-availability/${user.id}/events/${selectedEvent.id}/catalogue`,
+        `${API}/equipment-availability/${user.id}/events/${selectedEvent.id}/catalogue`
       );
       const result = await response.json();
 
-      if (!response.ok) throw new Error(result.detail || 'Unable to load equipment catalogue.');
+      if (!response.ok)
+        throw new Error(result.detail || 'Unable to load equipment catalogue.');
 
       setCatalogue(Array.isArray(result) ? result : []);
       setShowCatalogue(true);
@@ -118,6 +126,16 @@ export default function EquipmentAvailability({ user }) {
     setSummary(null);
     setShowCatalogue(false);
     await loadEvents();
+  }
+
+  function continueWorkflow() {
+    if (!selectedEvent) return;
+
+    if (summary?.all_equipment_available) {
+      onReserve?.(selectedEvent.id);
+    } else {
+      onUpdate?.(selectedEvent.id);
+    }
   }
 
   if (loading && screen === 'events') {
@@ -150,7 +168,9 @@ export default function EquipmentAvailability({ user }) {
           </div>
 
           {events.length === 0 ? (
-            <p className="empty-state">There are currently no equipment requests to check.</p>
+            <p className="empty-state">
+              There are currently no equipment requests to check.
+            </p>
           ) : (
             <div className="request-table-wrapper">
               <table className="availability-event-table">
@@ -171,17 +191,27 @@ export default function EquipmentAvailability({ user }) {
                       <td><strong>{event.event_name}</strong></td>
                       <td>{event.event_date}</td>
                       <td>{formatTime(event.start_time)} – {formatTime(event.end_time)}</td>
+
                       <td>
                         <div className="availability-equipment-summary">
-                          <strong>{event.requested_equipment_count} equipment type{event.requested_equipment_count === 1 ? '' : 's'}</strong>
+                          <strong>
+                            {event.requested_equipment_count} equipment type
+                            {event.requested_equipment_count === 1 ? '' : 's'}
+                          </strong>
                           <span>{event.equipment_description}</span>
                         </div>
                       </td>
+
                       <td>
-                        <span className={`request-status request-status-${statusClass(event.request_status)}`}>
+                        <span
+                          className={`request-status request-status-${statusClass(
+                            event.request_status
+                          )}`}
+                        >
                           {event.request_status}
                         </span>
                       </td>
+
                       <td>
                         <button
                           type="button"
@@ -219,26 +249,57 @@ export default function EquipmentAvailability({ user }) {
         </button>
 
         <div className="technical-event-date">
-          {selectedEvent?.event_date} · {formatTime(selectedEvent?.start_time)} – {formatTime(selectedEvent?.end_time)}
+          {selectedEvent?.event_date} · {formatTime(selectedEvent?.start_time)} –{' '}
+          {formatTime(selectedEvent?.end_time)}
         </div>
       </div>
 
       {error && <div className="page-error">{error}</div>}
 
-      <div className={`availability-overview ${summary?.all_equipment_available ? 'available' : 'insufficient'}`}>
+      <div
+        className={`availability-overview ${
+          summary?.all_equipment_available ? 'available' : 'insufficient'
+        }`}
+      >
         <div>
-          <span className="availability-overview-label">Request #{summary?.request_id}</span>
-          <h2>{summary?.all_equipment_available ? 'All requested equipment is available' : 'Some requested equipment cannot be fully fulfilled'}</h2>
+          <span className="availability-overview-label">
+            Request #{summary?.request_id}
+          </span>
+
+          <h2>
+            {summary?.all_equipment_available
+              ? 'All requested equipment is available'
+              : 'Some requested equipment cannot be fully fulfilled'}
+          </h2>
+
           <p>
             {summary?.all_equipment_available
               ? 'Current catalogue quantities, maintenance and overlapping allocations allow this request to be fulfilled.'
-              : `${summary?.unavailable_equipment_count || 0} requested equipment type${summary?.unavailable_equipment_count === 1 ? '' : 's'} currently have insufficient availability.`}
+              : `${summary?.unavailable_equipment_count || 0} requested equipment type${
+                  summary?.unavailable_equipment_count === 1 ? '' : 's'
+                } currently have insufficient availability.`}
           </p>
         </div>
 
-        <span className={`availability-result-pill ${summary?.all_equipment_available ? 'available' : 'insufficient'}`}>
-          {summary?.all_equipment_available ? 'Available' : 'Attention Required'}
-        </span>
+        <div className="availability-overview-actions">
+          <span
+            className={`availability-result-pill ${
+              summary?.all_equipment_available ? 'available' : 'insufficient'
+            }`}
+          >
+            {summary?.all_equipment_available ? 'Available' : 'Attention Required'}
+          </span>
+
+          <button
+            type="button"
+            className="primary availability-action-button"
+            onClick={continueWorkflow}
+          >
+            {summary?.all_equipment_available
+              ? 'Reserve Equipment'
+              : 'Update Equipment Request'}
+          </button>
+        </div>
       </div>
 
       <div className="request-form availability-details-card">
@@ -250,7 +311,8 @@ export default function EquipmentAvailability({ user }) {
         </div>
 
         <div className="availability-formula">
-          Available quantity = Total quantity − Under maintenance − Reserved for overlapping events
+          Available quantity = Total quantity − Under maintenance − Reserved for
+          overlapping events
         </div>
 
         <div className="request-table-wrapper">
@@ -272,20 +334,35 @@ export default function EquipmentAvailability({ user }) {
                 <tr key={item.equipment_id}>
                   <td>
                     <strong>{item.equipment_name}</strong>
-                    <span className="availability-equipment-id">{item.equipment_id}</span>
+                    <span className="availability-equipment-id">
+                      {item.equipment_id}
+                    </span>
                   </td>
+
                   <td>{item.requested_quantity}</td>
                   <td>{item.total_quantity}</td>
                   <td>{item.under_maintenance_count}</td>
                   <td>{item.reserved_quantity}</td>
-                  <td><strong className="available-number">{item.available_quantity}</strong></td>
+
                   <td>
-                    <span className={`availability-result-pill ${statusClass(item.availability_status)}`}>
+                    <strong className="available-number">
+                      {item.available_quantity}
+                    </strong>
+                  </td>
+
+                  <td>
+                    <span
+                      className={`availability-result-pill ${statusClass(
+                        item.availability_status
+                      )}`}
+                    >
                       {item.availability_status}
                     </span>
 
                     {item.shortage_quantity > 0 && (
-                      <span className="availability-shortage">Short by {item.shortage_quantity}</span>
+                      <span className="availability-shortage">
+                        Short by {item.shortage_quantity}
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -295,7 +372,9 @@ export default function EquipmentAvailability({ user }) {
         </div>
 
         {availability.length === 0 && (
-          <p className="empty-state">This request does not contain any active equipment items.</p>
+          <p className="empty-state">
+            This request does not contain any active equipment items.
+          </p>
         )}
       </div>
 
@@ -303,11 +382,23 @@ export default function EquipmentAvailability({ user }) {
         <div className="form-heading">
           <div>
             <h2>Full equipment catalogue</h2>
-            <p>View current quantities across the full catalogue for this event's date and time.</p>
+            <p>
+              View current quantities across the full catalogue for this event's
+              date and time.
+            </p>
           </div>
 
-          <button type="button" className="secondary" onClick={loadCatalogue} disabled={catalogueLoading}>
-            {catalogueLoading ? 'Loading…' : showCatalogue ? 'Hide Catalogue' : 'View Full Catalogue'}
+          <button
+            type="button"
+            className="secondary"
+            onClick={loadCatalogue}
+            disabled={catalogueLoading}
+          >
+            {catalogueLoading
+              ? 'Loading…'
+              : showCatalogue
+                ? 'Hide Catalogue'
+                : 'View Full Catalogue'}
           </button>
         </div>
 
@@ -329,7 +420,9 @@ export default function EquipmentAvailability({ user }) {
                   <tr key={item.equipment_id}>
                     <td>
                       <strong>{item.equipment_name}</strong>
-                      <span className="availability-equipment-id">{item.equipment_id}</span>
+                      <span className="availability-equipment-id">
+                        {item.equipment_id}
+                      </span>
                     </td>
                     <td>{item.total_quantity}</td>
                     <td>{item.under_maintenance_count}</td>

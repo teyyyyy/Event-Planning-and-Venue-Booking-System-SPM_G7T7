@@ -9,6 +9,7 @@ import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
 import VenueCatalogue from "./VenueCatalogue";
+import EquipmentReservation from "./EquipmentReservation";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -22,7 +23,8 @@ function AuthedApp() {
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator)
     return <CoordinatorWorkspace user={user} logout={logout} />;
-  if (isOrganiser) return <OrganiserWorkspace user={user} logout={logout} />;
+  if (isOrganiser)
+    return <OrganiserWorkspace user={user} logout={logout} />;
   if (isVenueStaff)
     return <VenueStaffWorkspace logout={logout} email={user.email} />;
 
@@ -42,19 +44,43 @@ function AuthedApp() {
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
   const [activeSection, setActiveSection] = useState("catalogue");
+
   return (
     <div className="coordinator-workspace">
       <aside className="coordinator-sidebar">
-        <div><div className="logo">G</div><div className="side-label">VENUE STAFF</div>
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">VENUE STAFF</div>
           <nav className="coordinator-side-nav" aria-label="Venue Staff navigation">
-            <button type="button" className={`coordinator-nav-button ${activeSection === 'catalogue' ? 'active' : ''}`} onClick={() => setActiveSection('catalogue')}>Venue Catalogue</button>
-            <button type="button" className={`coordinator-nav-button ${activeSection === 'approvals' ? 'active' : ''}`} onClick={() => setActiveSection('approvals')}>Booking Approvals</button>
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "catalogue" ? "active" : ""}`}
+              onClick={() => setActiveSection("catalogue")}
+            >
+              Venue Catalogue
+            </button>
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "approvals" ? "active" : ""}`}
+              onClick={() => setActiveSection("approvals")}
+            >
+              Booking Approvals
+            </button>
           </nav>
         </div>
-        <button className="coordinator-logout" onClick={logout} title={email}>Log out</button>
+        <button className="coordinator-logout" onClick={logout} title={email}>
+          Log out
+        </button>
       </aside>
+
       <div className="coordinator-main">
-        {activeSection === 'catalogue' ? <VenueCatalogue canEdit /> : <div className="embedded-existing-page"><VenueApproval /></div>}
+        {activeSection === "catalogue" ? (
+          <VenueCatalogue canEdit />
+        ) : (
+          <div className="embedded-existing-page">
+            <VenueApproval />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -63,6 +89,32 @@ function VenueStaffWorkspace({ logout, email }) {
 // Technical Support Staff workspace
 function TechnicalSupportWorkspace({ user, logout }) {
   const [activeSection, setActiveSection] = useState("equipment-update");
+  const [selectedEquipmentEventId, setSelectedEquipmentEventId] = useState(null);
+
+  function openSection(section) {
+    setSelectedEquipmentEventId(null);
+    setActiveSection(section);
+  }
+
+  function openReservation(eventId) {
+    setSelectedEquipmentEventId(eventId);
+    setActiveSection("equipment-reservation");
+  }
+
+  function openUpdate(eventId) {
+    setSelectedEquipmentEventId(eventId);
+    setActiveSection("equipment-update");
+  }
+
+  function backToAvailability() {
+    setSelectedEquipmentEventId(null);
+    setActiveSection("equipment-availability");
+  }
+
+  function backToReservationList() {
+    setSelectedEquipmentEventId(null);
+    setActiveSection("equipment-reservation");
+  }
 
   return (
     <div className="coordinator-workspace">
@@ -72,29 +124,36 @@ function TechnicalSupportWorkspace({ user, logout }) {
           <div className="side-label">TECHNICAL SUPPORT</div>
 
           <nav className="coordinator-side-nav">
-            <button type="button" className={`coordinator-nav-button ${activeSection === 'catalogue' ? 'active' : ''}`} onClick={() => setActiveSection('catalogue')}>Venue Catalogue</button>
             <button
               type="button"
-              className={
-                activeSection === "equipment-update"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
-              onClick={() => setActiveSection("equipment-update")}
+              className={`coordinator-nav-button ${activeSection === "catalogue" ? "active" : ""}`}
+              onClick={() => openSection("catalogue")}
+            >
+              Venue Catalogue
+            </button>
+
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "equipment-update" ? "active" : ""}`}
+              onClick={() => openSection("equipment-update")}
             >
               Equipment Update
             </button>
 
             <button
               type="button"
-              className={
-                activeSection === "equipment-availability"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
-              onClick={() => setActiveSection("equipment-availability")}
+              className={`coordinator-nav-button ${activeSection === "equipment-availability" ? "active" : ""}`}
+              onClick={() => openSection("equipment-availability")}
             >
               Equipment Availability Check
+            </button>
+
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "equipment-reservation" ? "active" : ""}`}
+              onClick={() => openSection("equipment-reservation")}
+            >
+              Equipment Reservation
             </button>
           </nav>
         </div>
@@ -111,11 +170,33 @@ function TechnicalSupportWorkspace({ user, logout }) {
 
       <div className="coordinator-main">
         {activeSection === "catalogue" && <VenueCatalogue />}
+
         {activeSection === "equipment-update" && (
-          <EquipmentUpdate user={user} />
+          <EquipmentUpdate
+            user={user}
+            eventId={selectedEquipmentEventId}
+          />
         )}
+
         {activeSection === "equipment-availability" && (
-          <EquipmentAvailability user={user} />
+          <EquipmentAvailability
+            user={user}
+            onReserve={openReservation}
+            onUpdate={openUpdate}
+          />
+        )}
+
+        {activeSection === "equipment-reservation" && (
+          <EquipmentReservation
+            user={user}
+            eventId={selectedEquipmentEventId}
+            onOpenEvent={openReservation}
+            onBack={
+              selectedEquipmentEventId
+                ? backToReservationList
+                : backToAvailability
+            }
+          />
         )}
       </div>
     </div>

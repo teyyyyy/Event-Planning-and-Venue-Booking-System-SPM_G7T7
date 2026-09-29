@@ -174,3 +174,41 @@
 .availability-catalogue-table th:not(:first-child),.availability-catalogue-table td:not(:first-child){text-align:center;}
 .availability-event-table th:last-child,.availability-event-table td:last-child{text-align:right;white-space:nowrap;}
 @media(max-width:900px){.availability-overview{align-items:flex-start;flex-direction:column;}.availability-event-table,.availability-detail-table,.availability-catalogue-table{min-width:850px;}}
+
+/* Equipment Reservation */
+.reservation-event-card{display:flex;align-items:center;justify-content:space-between;gap:30px;margin:22px 0;padding:24px 28px;background:#fff;border:1px solid #dce4ef;border-radius:12px;}
+.reservation-event-card h2{margin:5px 0 0;font-size:22px;}
+.reservation-event-details{display:flex;gap:45px;}
+.reservation-event-details div{display:flex;flex-direction:column;gap:5px;}
+.reservation-event-details span{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#8a97aa;}
+.reservation-event-details strong{font-size:14px;color:#17263f;}
+.reservation-card{margin-top:22px;}
+.reservation-notice{margin-bottom:20px;padding:12px 16px;border-radius:8px;background:#f5f7fb;color:#687890;font-size:13px;line-height:1.5;}
+.reservation-table{width:100%;border-collapse:collapse;}
+.reservation-table th,.reservation-table td{padding:18px 20px;text-align:left;border-bottom:1px solid #e4e9f1;vertical-align:middle;}
+.reservation-table th{font-size:12px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#7b8aa3;background:#f7f9fc;}
+.reservation-table tbody tr:hover{background:#fafcff;}
+.reservation-quantity-input{width:100px;padding:10px 12px;border:1px solid #ccd6e4;border-radius:7px;font:inherit;}
+.reservation-quantity-input:focus{outline:none;border-color:#8195b3;}
+.reservation-quantity-help{display:block;margin-top:6px;color:#8b97a9;font-size:11px;}
+.reservation-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-top:24px;}
+.reservation-cancel{padding:11px 18px;border:1px solid #e3b7b7;border-radius:7px;background:#fff;color:#a34e4e;cursor:pointer;}
+.reservation-cancel:hover{background:#fff5f5;}
+.reservation-cancel:disabled{opacity:.55;cursor:not-allowed;}
+.reservation-success{margin:18px 0;padding:14px 18px;border:1px solid #cce5d4;border-radius:8px;background:#edf7f0;color:#47755a;}
+.reservation-status{font-size:13px;color:#718097;}
+@media(max-width:900px){.reservation-event-card{align-items:flex-start;flex-direction:column;}.reservation-event-details{flex-direction:column;gap:15px;}.reservation-table{min-width:800px;}}
+
+.availability-overview-actions{display:flex;flex-direction:column;align-items:flex-end;gap:12px;flex-shrink:0;}
+.availability-action-button{white-space:nowrap;min-width:180px;}
+@media(max-width:800px){.availability-overview-actions{align-items:flex-start;width:100%;}.availability-action-button{width:100%;}}
+
+.reservation-recheck-warning{display:flex;align-items:center;justify-content:space-between;gap:24px;margin:0 0 20px;padding:18px 20px;border:1px solid #e5a93d;border-radius:12px;background:#fff8e8;}
+.reservation-recheck-warning strong{display:block;margin-bottom:4px;font-size:15px;}
+.reservation-recheck-warning p{margin:0;color:#6b6251;font-size:13px;line-height:1.5;}
+.reservation-status.needs-recheck{border-color:#e5a93d;background:#fff8e8;color:#8a5a00;}
+.reservation-fixed-quantity{display:block;font-size:16px;}
+.reservation-request-changed{display:block;margin-top:4px;color:#a35f00;font-weight:600;}
+.reservation-changed-row{background:#fffaf0;}
+.reservation-use-requested{white-space:nowrap;}
+.reservation-match{font-size:13px;font-weight:600;color:#39724e;}
