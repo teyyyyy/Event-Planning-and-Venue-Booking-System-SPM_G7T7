@@ -6,6 +6,7 @@ import { json, mockFetch } from '../test/helpers';
 
 const auth = vi.hoisted(() => ({
   getSession: vi.fn(), onAuthStateChange: vi.fn(), signInWithPassword: vi.fn(), signOut: vi.fn(), unsubscribe: vi.fn(),
+  mfa: { getAuthenticatorAssuranceLevel: vi.fn(), listFactors: vi.fn(), enroll: vi.fn(), unenroll: vi.fn(), challengeAndVerify: vi.fn() },
 }));
 vi.mock('../utils/supabase', () => ({ supabase: { auth } }));
 
@@ -20,6 +21,8 @@ describe('AuthContext', () => {
     auth.getSession.mockResolvedValue({ data: { session: null } });
     auth.onAuthStateChange.mockImplementation((cb) => { authListener = cb; return { data: { subscription: { unsubscribe: auth.unsubscribe } } }; });
     auth.signOut.mockResolvedValue({});
+    auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal2', nextLevel: 'aal2' } });
+    auth.mfa.listFactors.mockResolvedValue({ data: { totp: [], all: [] } });
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
@@ -133,5 +136,119 @@ describe('AuthContext', () => {
       const { unmount } = await mount();
       unmount();
       expect(auth.unsubscribe).toHaveBeenCalled();
+    });
+
+  tc('FE-AUTH-013', 'AuthProvider (MFA)', 'A password-only session exists and the user has a verified authenticator.', 'No user is exposed and mfa asks for a code for that factor; the backend is not called.',
+    { kind: 'Security', pre: 'Session is aal1; one verified TOTP factor f1.', steps: '1. Mount the provider with an aal1 session.' },
+    async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() } });
+      auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal1', nextLevel: 'aal2' } });
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'f1' }], all: [{ id: 'f1', status: 'verified' }] } });
+      const fetchMock = mockFetch(() => json({}));
+      const { result } = await mount();
+      expect(result.current.user).toBeNull();
+      expect(result.current.mfa).toEqual({ step: 'verify', factorId: 'f1' });
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+  tc('FE-AUTH-014', 'AuthProvider (MFA)', 'A password-only session exists and the user has no authenticator yet.', 'No user is exposed and mfa asks the user to enrol.',
+    { kind: 'Security', pre: 'Session is aal1; no TOTP factors.', steps: '1. Mount the provider with an aal1 session.' },
+    async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() } });
+      auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal1', nextLevel: 'aal1' } });
+      const { result } = await mount();
+      expect(result.current.user).toBeNull();
+      expect(result.current.mfa).toEqual({ step: 'enroll' });
+    });
+
+  tc('FE-AUTH-015', 'verifyMfa', 'User enters a correct code for their authenticator.', 'The code is checked against the factor, the session is re-read at aal2 and the user is signed in.',
+    { pre: 'Session is aal1 with factor f1.', data: 'code = " 123456 "', steps: '1. Mount with an aal1 session. 2. Upgrade the session to aal2. 3. Call verifyMfa("f1", " 123456 ").' },
+    async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() } });
+      auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal1' } });
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'f1' }], all: [] } });
+      mockFetch(() => json({ name: 'Ann', role: 'Venue Staff' }));
+      auth.mfa.challengeAndVerify.mockResolvedValue({ error: null });
+      const { result } = await mount();
+      auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal2' } });
+      await act(async () => { await result.current.verifyMfa('f1', ' 123456 '); });
+      expect(auth.mfa.challengeAndVerify).toHaveBeenCalledWith({ factorId: 'f1', code: '123456' });
+      expect(result.current.user?.role).toBe('Venue Staff');
+      expect(result.current.mfa).toBeNull();
+    });
+
+  tc('FE-AUTH-016', 'verifyMfa', 'User enters a wrong code.', 'verifyMfa rejects with Supabase\'s message and the user stays signed out.',
+    { kind: 'Negative', pre: 'Session is aal1 with factor f1.', steps: '1. Make challengeAndVerify return an error. 2. Call verifyMfa.' },
+    async () => {
+      auth.getSession.mockResolvedValue({ data: { session: session() } });
+      auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal1' } });
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'f1' }], all: [] } });
+      auth.mfa.challengeAndVerify.mockResolvedValue({ error: { message: 'Invalid TOTP code entered' } });
+      const { result } = await mount();
+      await act(async () => { await expect(result.current.verifyMfa('f1', '000000')).rejects.toThrow('Invalid TOTP code entered'); });
+      expect(result.current.user).toBeNull();
+    });
+
+  tc('FE-AUTH-017', 'startEnrollment', 'A user starts authenticator setup and has a half-finished earlier attempt.', 'The stale unverified factor is removed and the new factor\'s id, QR code and secret are returned.',
+    { pre: 'listFactors reports an unverified factor "old".', steps: '1. Call startEnrollment().' },
+    async () => {
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [], all: [{ id: 'old', status: 'unverified' }, { id: 'keep', status: 'verified' }] } });
+      auth.mfa.unenroll.mockResolvedValue({});
+      auth.mfa.enroll.mockResolvedValue({ data: { id: 'new', totp: { qr_code: 'data:image/svg+xml;qr', secret: 'ABCD' } }, error: null });
+      const { result } = await mount();
+      let enrollment;
+      await act(async () => { enrollment = await result.current.startEnrollment(); });
+      expect(auth.mfa.unenroll).toHaveBeenCalledTimes(1);
+      expect(auth.mfa.unenroll).toHaveBeenCalledWith({ factorId: 'old' });
+      expect(enrollment).toEqual({ factorId: 'new', qrCode: 'data:image/svg+xml;qr', secret: 'ABCD' });
+    });
+
+  tc('FE-AUTH-018', 'startEnrollment', 'Supabase refuses to start enrolment.', 'startEnrollment rejects with Supabase\'s message.',
+    { kind: 'Negative', steps: '1. Make enroll return an error. 2. Call startEnrollment().' },
+    async () => {
+      auth.mfa.enroll.mockResolvedValue({ data: null, error: { message: 'MFA enroll is disabled' } });
+      const { result } = await mount();
+      await act(async () => { await expect(result.current.startEnrollment()).rejects.toThrow('MFA enroll is disabled'); });
+    });
+
+  tc('FE-AUTH-019', 'listDevices', 'A signed-in user opens their security settings.', 'Their verified authenticators are returned with a display name and creation date.',
+    { steps: '1. Mock two verified factors. 2. Call listDevices().' },
+    async () => {
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'a', friendly_name: 'Phone', created_at: 't1' }, { id: 'b', created_at: 't2' }], all: [] } });
+      const { result } = await mount();
+      let devices;
+      await act(async () => { devices = await result.current.listDevices(); });
+      expect(devices).toEqual([{ id: 'a', name: 'Phone', createdAt: 't1' }, { id: 'b', name: 'Authenticator', createdAt: 't2' }]);
+    });
+
+  tc('FE-AUTH-020', 'removeDevice', 'User removes one of two authenticators.', 'The chosen factor is unenrolled.',
+    { pre: 'Two verified factors.', steps: '1. Call removeDevice("b").' },
+    async () => {
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'a' }, { id: 'b' }], all: [] } });
+      auth.mfa.unenroll.mockResolvedValue({ error: null });
+      const { result } = await mount();
+      await act(async () => { await result.current.removeDevice('b'); });
+      expect(auth.mfa.unenroll).toHaveBeenCalledWith({ factorId: 'b' });
+    });
+
+  tc('FE-AUTH-021', 'removeDevice', 'User tries to remove their only authenticator.', 'It is refused with a message and nothing is unenrolled.',
+    { kind: 'Security', pre: 'One verified factor.', steps: '1. Call removeDevice("a").' },
+    async () => {
+      auth.mfa.unenroll.mockClear();
+      auth.mfa.listFactors.mockResolvedValue({ data: { totp: [{ id: 'a' }], all: [] } });
+      const { result } = await mount();
+      await act(async () => { await expect(result.current.removeDevice('a')).rejects.toThrow('at least one authenticator'); });
+      expect(auth.mfa.unenroll).not.toHaveBeenCalled();
+    });
+
+  tc('FE-AUTH-022', 'confirmDevice', 'User confirms a new backup device with its code.', 'The code is verified for that factor; a wrong code rejects with Supabase\'s message.',
+    { steps: '1. Call confirmDevice("n", " 123456 "). 2. Repeat with an error response.' },
+    async () => {
+      auth.mfa.challengeAndVerify.mockResolvedValueOnce({ error: null });
+      const { result } = await mount();
+      await act(async () => { await result.current.confirmDevice('n', ' 123456 '); });
+      expect(auth.mfa.challengeAndVerify).toHaveBeenCalledWith({ factorId: 'n', code: '123456' });
+      auth.mfa.challengeAndVerify.mockResolvedValueOnce({ error: { message: 'Invalid TOTP code entered' } });
+      await act(async () => { await expect(result.current.confirmDevice('n', '000000')).rejects.toThrow('Invalid TOTP code entered'); });
     });
 });

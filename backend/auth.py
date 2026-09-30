@@ -1,3 +1,6 @@
+import base64
+import json
+import os
 from typing import Any
 
 from fastapi import Depends, Header, HTTPException
@@ -15,6 +18,22 @@ VENUE_STAFF_ROLE = "venue staff"
 TECHNICAL_SUPPORT_ROLE = "technical support staff"
 ATTENDEE_ROLE = "attendee"
 
+# Set REQUIRE_MFA=false to accept password-only (aal1) sessions, e.g. for local development.
+MFA_REQUIRED = os.getenv("REQUIRE_MFA", "true").strip().lower() != "false"
+
+
+def token_aal(token: str) -> str | None:
+    """Authenticator assurance level ("aal1"/"aal2") claim of a Supabase JWT.
+
+    Only call this on a token that auth.get_user has already verified; the payload is read, not re-verified.
+    """
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        return claims.get("aal")
+    except (IndexError, ValueError, AttributeError):
+        return None
+
 
 def current_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
     """Verify the Supabase access token and return the caller's profile row."""
@@ -28,6 +47,8 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
         raise HTTPException(401, "Invalid or expired token.") from error
     if not auth_user:
         raise HTTPException(401, "Invalid or expired token.")
+    if MFA_REQUIRED and token_aal(token) != "aal2":
+        raise HTTPException(403, "Multi-factor authentication required.")
     profile = (
         client.table("users")
         .select("id,name,role,email")

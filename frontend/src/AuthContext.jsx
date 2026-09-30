@@ -25,6 +25,8 @@ function toUser(session, profile = {}) {
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  // null, or { step: 'verify', factorId } / { step: 'enroll' } while a password-only session awaits its second factor.
+  const [mfa, setMfa] = useState(null);
 
   const hydrateUser = useCallback(async (session) => {
     const baseUser = toUser(session);
@@ -42,29 +44,38 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // A session only becomes a signed-in user once it has completed the second factor (aal2).
+  const resolveSession = useCallback(async (session) => {
+    if (!session) return { user: null, mfa: null };
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal?.currentLevel === 'aal2') return { user: await hydrateUser(session), mfa: null };
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    const factor = factors?.totp?.[0];
+    return { user: null, mfa: factor ? { step: 'verify', factorId: factor.id } : { step: 'enroll' } };
+  }, [hydrateUser]);
+
   useEffect(() => {
     let active = true;
-
-    supabase.auth.getSession().then(async ({ data }) => {
+    const apply = async (session) => {
+      const next = await resolveSession(session);
       if (!active) return;
-      setUser(await hydrateUser(data.session));
+      setUser(next.user);
+      setMfa(next.mfa);
       setLoading(false);
-    });
+    };
+
+    supabase.auth.getSession().then(({ data }) => apply(data.session));
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!active) return;
-      hydrateUser(session).then((nextUser) => {
-        if (!active) return;
-        setUser(nextUser);
-        setLoading(false);
-      });
+      apply(session);
     });
 
     return () => {
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, [hydrateUser]);
+  }, [resolveSession]);
 
   const login = useCallback(async (email, password) => {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -80,12 +91,56 @@ export function AuthProvider({ children }) {
       await supabase.auth.signOut();
     } finally {
       setUser(null);
+      setMfa(null);
     }
   }, []);
 
+  // Starts TOTP enrolment; resolves to { factorId, qrCode, secret } to show the user.
+  const startEnrollment = useCallback(async (friendlyName = `Authenticator ${Date.now()}`) => {
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    // Drop factors left half-enrolled by an abandoned attempt so a fresh one can be created.
+    for (const stale of (factors?.all || []).filter((f) => f.status === 'unverified')) {
+      await supabase.auth.mfa.unenroll({ factorId: stale.id });
+    }
+    const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp', friendlyName });
+    if (error) throw new Error(error.message);
+    return { factorId: data.id, qrCode: data.totp.qr_code, secret: data.totp.secret };
+  }, []);
+
+  // Checks a 6-digit code for a factor (new or existing); on success the session is upgraded to aal2.
+  const verifyMfa = useCallback(async (factorId, code) => {
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: code.trim() });
+    if (error) throw new Error(error.message);
+    const { data } = await supabase.auth.getSession();
+    const next = await resolveSession(data.session);
+    setUser(next.user);
+    setMfa(next.mfa);
+  }, [resolveSession]);
+
+  // Devices (verified authenticators) on the signed-in account.
+  const listDevices = useCallback(async () => {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (error) throw new Error(error.message);
+    return (data?.totp || []).map((f) => ({ id: f.id, name: f.friendly_name || 'Authenticator', createdAt: f.created_at }));
+  }, []);
+
+  // Confirms a newly enrolled backup device without touching the current session state.
+  const confirmDevice = useCallback(async (factorId, code) => {
+    const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code: code.trim() });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  // Removes a device; the last one is kept so the account can't end up with no second factor.
+  const removeDevice = useCallback(async (factorId) => {
+    const devices = await listDevices();
+    if (devices.length <= 1) throw new Error('You must keep at least one authenticator device.');
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) throw new Error(error.message);
+  }, [listDevices]);
+
   const value = useMemo(
-    () => ({ user, loading, login, logout }),
-    [user, loading, login, logout]
+    () => ({ user, loading, mfa, login, logout, startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice }),
+    [user, loading, mfa, login, logout, startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

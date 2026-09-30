@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
+import MfaChallenge from "./MfaChallenge";
+import SecurityButton from "./SecuritySettings";
 import CoordinatorAssignment from "./coordinator_assignment";
 import EventOrganiser from "./event_organiser";
 import EquipmentRequest from "./EquipmentRequest";
@@ -52,7 +54,7 @@ function VenueStaffWorkspace({ logout, email }) {
             <button type="button" className={`coordinator-nav-button ${activeSection === 'approvals' ? 'active' : ''}`} onClick={() => setActiveSection('approvals')}>Booking Approvals</button>
           </nav>
         </div>
-        <button className="coordinator-logout" onClick={logout} title={email}>Log out</button>
+        <div className="coordinator-side-footer"><SecurityButton /><button className="coordinator-logout" onClick={logout} title={email}>Log out</button></div>
       </aside>
       <div className="coordinator-main">
         {activeSection === 'catalogue' ? <VenueCatalogue canEdit /> : <div className="embedded-existing-page"><VenueApproval /></div>}
@@ -100,14 +102,14 @@ function TechnicalSupportWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -196,14 +198,14 @@ function CoordinatorWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -273,14 +275,14 @@ function OrganiserWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -307,7 +309,7 @@ function OrganiserWorkspace({ user, logout }) {
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, mfa } = useAuth();
 
   if (loading) {
     return (
@@ -317,5 +319,6 @@ export default function App() {
     );
   }
 
-  return user ? <AuthedApp /> : <Login />;
+  if (user) return <AuthedApp />;
+  return mfa ? <MfaChallenge /> : <Login />;
 }

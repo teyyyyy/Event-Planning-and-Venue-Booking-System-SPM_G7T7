@@ -6,6 +6,7 @@ import { tc } from '../test/tc';
 const auth = vi.hoisted(() => ({ value: {} }));
 vi.mock('../AuthContext', () => ({ useAuth: () => auth.value }));
 vi.mock('../Login', () => ({ default: () => <div>LOGIN SCREEN</div> }));
+vi.mock('../MfaChallenge', () => ({ default: () => <div>MFA SCREEN</div> }));
 vi.mock('../coordinator_assignment', () => ({
   default: ({ onEditEvent }) => <div>COORDINATOR PAGE<button onClick={() => onEditEvent({ id: 5 })}>trigger edit</button></div>,
 }));
@@ -197,5 +198,14 @@ describe('App', () => {
       expect(screen.getByText('Attendee features are not available yet.')).toBeInTheDocument();
       expect(screen.queryByText('EVENT COORDINATOR')).toBeNull();
       expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+    });
+
+  tc('FE-APP-020', 'App (MFA)', 'A password-only session is waiting for its second factor.', 'The two-factor screen shows instead of login or any workspace.',
+    { kind: 'Security', pre: 'user is null and mfa step is "verify".', steps: '1. Render App with mfa set.' },
+    () => {
+      auth.value = { user: null, loading: false, mfa: { step: 'verify', factorId: 'f1' }, logout };
+      render(<App />);
+      expect(screen.getByText('MFA SCREEN')).toBeInTheDocument();
+      expect(screen.queryByText('LOGIN SCREEN')).toBeNull();
     });
 });

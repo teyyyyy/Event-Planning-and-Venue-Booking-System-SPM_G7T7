@@ -168,3 +168,46 @@ def test_require_self_mismatch():
     steps="1. Read auth.COORDINATOR_ROLE and auth.VENUE_STAFF_ROLE.", kind="Config")
 def test_role_constants():
     assert (auth.COORDINATOR_ROLE, auth.VENUE_STAFF_ROLE) == ("event coordinator", "venue staff")
+
+
+def jwt(aal):
+    import base64, json
+    part = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    return f"{part({'alg': 'HS256'})}.{part({'aal': aal} if aal else {})}.sig"
+
+
+@tc("BE-AUTH-019", "current_user (MFA)", "MFA is required and the token is password-only (aal1).",
+    "HTTP 403 \"Multi-factor authentication required.\"; the profile is never loaded.",
+    pre="auth.MFA_REQUIRED is True; token carries aal = aal1.", steps="1. Call current_user with an aal1 token.", kind="Security")
+def test_mfa_rejects_aal1(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert status_of(auth.current_user, f"Bearer {jwt('aal1')}") == (403, "Multi-factor authentication required.")
+
+
+@tc("BE-AUTH-020", "current_user (MFA)", "MFA is required and the token has completed a second factor (aal2).",
+    "The caller's profile is returned.", pre="auth.MFA_REQUIRED is True; token carries aal = aal2.",
+    steps="1. Call current_user with an aal2 token.", kind="Security")
+def test_mfa_accepts_aal2(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert auth.current_user(f"Bearer {jwt('aal2')}") == PROFILE
+
+
+@tc("BE-AUTH-021", "current_user (MFA)", "MFA is required and the token payload is malformed or has no aal claim.",
+    "HTTP 403 \"Multi-factor authentication required.\"", pre="auth.MFA_REQUIRED is True.",
+    data="tokens: \"opaque\", payload without aal", steps="1. Call current_user with each token.", kind="Negative")
+def test_mfa_rejects_unreadable_token(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert status_of(auth.current_user, "Bearer opaque")[0] == 403
+    assert status_of(auth.current_user, f"Bearer {jwt(None)}")[0] == 403
+
+
+@tc("BE-AUTH-022", "current_user (MFA)", "MFA is switched off (REQUIRE_MFA=false) and the token is aal1.",
+    "The caller's profile is returned.", pre="auth.MFA_REQUIRED is False.",
+    steps="1. Call current_user with an aal1 token.", kind="Edge")
+def test_mfa_can_be_disabled(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", False)
+    use_db(client(), auth)
+    assert auth.current_user(f"Bearer {jwt('aal1')}") == PROFILE

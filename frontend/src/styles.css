@@ -18,6 +18,8 @@
 .auth-submit{margin-top:4px;padding:12px 16px;border:0;border-radius:999px;background:#193452;color:#f5f7fb;font:inherit;font-weight:600;cursor:pointer}
 .auth-submit:hover:not(:disabled){background:#22405f}
 .auth-submit:disabled{opacity:.6;cursor:default}
+.auth-qr{align-self:center;width:180px;height:180px}
+.auth-link{padding:4px;border:0;background:none;color:#67728a;font:inherit;font-size:13px;cursor:pointer;text-decoration:underline}
 .auth-hint{margin:8px 0 0;color:#8a95a8;font-size:12px;text-align:center}
 .auth-hint code{background:#eef3fa;padding:1px 5px;border-radius:5px;font-size:11px}
 
@@ -45,6 +47,7 @@
 .coordinator-nav-button{width:100%;border:0;background:transparent;color:#768298;padding:11px 12px;border-radius:5px;text-align:left;font:12px 'DM Sans',sans-serif;cursor:pointer;}
 .coordinator-nav-button:hover{background:rgba(255,255,255,.4);}
 .coordinator-nav-button.active{background:#192541;color:#fff;}
+.coordinator-side-footer{display:flex;flex-direction:column;}
 .coordinator-logout{border:0;background:transparent;color:#768298;padding:11px 12px;text-align:left;font:12px 'DM Sans',sans-serif;cursor:pointer;}
 
 /* --- Equipment Request Page --- */
@@ -174,3 +177,9 @@
 .availability-catalogue-table th:not(:first-child),.availability-catalogue-table td:not(:first-child){text-align:center;}
 .availability-event-table th:last-child,.availability-event-table td:last-child{text-align:right;white-space:nowrap;}
 @media(max-width:900px){.availability-overview{align-items:flex-start;flex-direction:column;}.availability-event-table,.availability-detail-table,.availability-catalogue-table{min-width:850px;}}
+
+.security-overlay{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(25,52,82,.45)}
+.security-card{max-height:90vh;overflow-y:auto}
+.security-devices{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.security-devices li{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border:1px solid #e2e9f4;border-radius:10px;font-size:14px;color:#192541}
+.security-add{display:flex;flex-direction:column;gap:12px}
