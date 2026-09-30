@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+os.environ.setdefault("REQUIRE_MFA", "false")  # auth tests switch it on explicitly
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
