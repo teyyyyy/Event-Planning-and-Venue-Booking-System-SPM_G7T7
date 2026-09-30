@@ -124,6 +124,30 @@ def test_venue_staff_rejects_other_role():
     assert status_of(auth.require_venue_staff, {"id": "1", "role": "event coordinator"}) == (403, "Venue staff access required.")
 
 
+@tc("BE-AUTH-017", "require_organiser", "Caller is an Event Organiser.", "The user is returned; other roles are rejected.",
+    steps="1. Check organiser and attendee profiles.", kind="Security")
+def test_organiser_role_guard():
+    user = {"id": "o1", "role": " Event Organiser "}
+    assert auth.require_organiser(user) is user
+    assert status_of(auth.require_organiser, {"id": "a1", "role": "Attendee"})[0] == 403
+
+
+@tc("BE-AUTH-018", "require_technical_support", "Caller is Technical Support Staff.", "The user is returned; other roles are rejected.",
+    steps="1. Check technical-support and coordinator profiles.", kind="Security")
+def test_technical_support_role_guard():
+    user = {"id": "t1", "role": "Technical Support Staff"}
+    assert auth.require_technical_support(user) is user
+    assert status_of(auth.require_technical_support, {"id": "c1", "role": "Event Coordinator"})[0] == 403
+
+
+@tc("BE-AUTH-019", "require_attendee", "Caller is an Attendee.", "The user is returned; staff roles are rejected.",
+    steps="1. Check attendee and venue-staff profiles.", kind="Security")
+def test_attendee_role_guard():
+    user = {"id": "a1", "role": " Attendee "}
+    assert auth.require_attendee(user) is user
+    assert status_of(auth.require_attendee, {"id": "v1", "role": "Venue Staff"})[0] == 403
+
+
 @tc("BE-AUTH-014", "require_self", "Path organiser_id equals the caller's id (caller id is a non-string, e.g. UUID).",
     "The user is returned; ids are compared as strings.", data="user.id = 42 (int); organiser_id = \"42\"",
     steps="1. Call require_self(\"42\", {\"id\": 42}).", kind="Edge")

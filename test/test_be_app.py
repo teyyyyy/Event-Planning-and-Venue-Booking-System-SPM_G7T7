@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 import coordinator_assignment as ca
 import event_organiser as eo
 import main
+from auth import current_user
 from fake_supabase import FakeClient
 from tc import tc
 
@@ -48,20 +49,22 @@ def test_http_venue_requires_auth():
     assert client.get("/api/venue-booking-requests").status_code == 401
 
 
-@tc("BE-APP-007", "POST /api/event-organisers/{id}/requests", "Body is missing required fields.", "HTTP 422 validation error.", data="{}", steps="1. POST an empty JSON body.", kind="Negative")
-def test_http_validation_422():
+@tc("BE-APP-007", "POST /api/event-organisers/{id}/requests", "Authenticated organiser sends a body missing required fields.", "HTTP 422 validation error.", data="{}", steps="1. Authenticate as o1. 2. POST an empty JSON body.", kind="Negative")
+def test_http_validation_422(monkeypatch):
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "o1", "role": "Event Organiser"})
     assert client.post("/api/event-organisers/o1/requests", json={}).status_code == 422
 
 
-@tc("BE-APP-008", "PATCH /api/events/{id}/status", "An invalid status is sent over HTTP.", "HTTP 400 \"Invalid event status.\" (rejected before the database is used).", data="event_status = \"Nope\"", steps="1. PATCH /api/events/1/status with an invalid status.", kind="Negative")
-def test_http_invalid_status():
+@tc("BE-APP-008", "PATCH /api/events/{id}/status", "A request has no Authorization header.", "HTTP 401 before status validation or database access.", data="event_status = \"Nope\"", steps="1. PATCH /api/events/1/status without a bearer token.", kind="Security")
+def test_http_status_requires_auth():
     response = client.patch("/api/events/1/status", json={"event_status": "Nope"})
-    assert (response.status_code, response.json()["detail"]) == (400, "Invalid event status.")
+    assert response.status_code == 401
 
 
 @tc("BE-APP-009", "GET /api/users/{id}/role", "Backend credentials are not configured.", "HTTP 500 with the configuration message.", pre="Service-role key unset.", steps="1. Blank the key. 2. GET /api/users/u1/role.", kind="Config")
 def test_http_missing_credentials(monkeypatch):
     monkeypatch.setattr(ca, "SUPABASE_SERVICE_ROLE_KEY", None)
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "u1", "role": "Attendee"})
     assert client.get("/api/users/u1/role").status_code == 500
 
 
@@ -71,7 +74,46 @@ def test_http_create_draft(monkeypatch):
     from datetime import date, timedelta
     fake = FakeClient({"Event Details": []})
     monkeypatch.setattr(eo, "db", lambda: fake)
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "o1", "role": "Event Organiser"})
     body = {"event_name": "Gala", "event_type": "Workshop", "event_date": (date.today() + timedelta(days=3)).isoformat(),
             "event_capacity": 10, "description": "d", "start_time": "09:00", "end_time": "17:00"}
     response = client.post("/api/event-organisers/o1/requests", json=body)
     assert response.status_code == 200 and response.json()["status"] == "Draft"
+
+
+@tc("BE-APP-011", "GET /api/events", "An Attendee requests coordinator event management data.", "HTTP 403; no event data is returned.", steps="1. Authenticate as Attendee. 2. GET /api/events.", kind="Security")
+def test_http_attendee_cannot_read_coordinator_events(monkeypatch):
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "a1", "role": "Attendee"})
+    assert client.get("/api/events").status_code == 403
+
+
+@tc("BE-APP-012", "GET /api/event-organisers/{id}/requests", "An organiser requests another user's event status.", "HTTP 403; the event list is not queried.", steps="1. Authenticate as organiser o1. 2. GET requests for o2.", kind="Security")
+def test_http_organiser_cannot_read_other_user_events(monkeypatch):
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "o1", "role": "Event Organiser"})
+    assert client.get("/api/event-organisers/o2/requests").status_code == 403
+
+
+@tc("BE-APP-013", "GET /api/event-coordinators/{id}/events", "A coordinator supplies another coordinator's id.", "HTTP 403; another coordinator's events are not returned.", steps="1. Authenticate as c1. 2. GET events for c2.", kind="Security")
+def test_http_coordinator_cannot_impersonate_path_user(monkeypatch):
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "c1", "role": "Event Coordinator"})
+    assert client.get("/api/event-coordinators/c2/events").status_code == 403
+
+
+@tc("BE-APP-014", "Protected API routes", "Requests omit the bearer token.", "All event, venue, and equipment data routes return HTTP 401.", steps="1. Request representative data routes without Authorization.", kind="Security")
+def test_http_data_routes_require_authentication():
+    paths = [
+        "/api/events", "/api/venues", "/api/venue-booking-requests/venues/1",
+        "/api/event-coordinators/c1/events", "/api/equipment",
+        "/api/equipment-update/t1/requests/summary", "/api/equipment-availability/t1/events",
+        "/api/venue-catalogue",
+    ]
+    assert all(client.get(path).status_code == 401 for path in paths)
+
+
+@tc("BE-APP-015", "Protected API routes", "An authenticated user with an unrelated role requests restricted data.", "HTTP 403 for coordinator, venue, and equipment operations.", steps="1. Authenticate as Event Organiser. 2. Request coordinator, venue approval, and equipment update routes.", kind="Security")
+def test_http_role_boundaries(monkeypatch):
+    user = {"id": "o1", "role": "Event Organiser"}
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: user)
+    assert client.get("/api/events").status_code == 403
+    assert client.get("/api/venue-booking-requests").status_code == 403
+    assert client.get("/api/equipment-update/o1/requests/summary").status_code == 403

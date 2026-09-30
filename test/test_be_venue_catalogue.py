@@ -45,16 +45,16 @@ def api_error():
     return APIError({"code": "XX000", "message": "outage", "details": None, "hint": None})
 
 
-@tc("BE-VCAT-001", "require_reader", "Caller is Venue Staff or Technical Support Staff (odd casing/spacing).", "The user is returned.", data="\"venue staff\", \"  Technical SUPPORT staff \"",
+@tc("BE-VCAT-001", "require_reader", "Caller is Event Coordinator, Venue Staff or Technical Support Staff (odd casing/spacing).", "The user is returned.", data="\"event coordinator\", \"venue staff\", \"  Technical SUPPORT staff \"",
     steps="1. Call require_reader for each role.")
 def test_reader_allowed():
-    assert vc.require_reader({"role": "venue staff"}) and vc.require_reader({"role": "  Technical SUPPORT staff "})
+    assert vc.require_reader({"role": "event coordinator"}) and vc.require_reader({"role": "venue staff"}) and vc.require_reader({"role": "  Technical SUPPORT staff "})
 
 
-@tc("BE-VCAT-002", "require_reader", "Caller is an event coordinator or has no role.", "HTTP 403 \"Venue Staff or Technical Support Staff access required.\"", data="role = \"event coordinator\"; {}",
-    steps="1. Call require_reader with a coordinator. 2. Call it with no role.", kind="Security")
+@tc("BE-VCAT-002", "require_reader", "Caller is an organiser or has no role.", "HTTP 403.", data="role = \"event organiser\"; {}",
+    steps="1. Call require_reader with an organiser. 2. Call it with no role.", kind="Security")
 def test_reader_denied():
-    assert err(vc.require_reader, {"role": "event coordinator"})[0] == 403 and err(vc.require_reader, {})[0] == 403
+    assert err(vc.require_reader, {"role": "event organiser"})[0] == 403 and err(vc.require_reader, {})[0] == 403
 
 
 @tc("BE-VCAT-003", "Hours", "A closed day with no times.", "Accepted.", data="closed = True", steps="1. Instantiate Hours(closed=True).")
@@ -249,10 +249,10 @@ def test_http_put_forbidden_for_technical_support(monkeypatch):
     assert not client.writes("Venues", "update")
 
 
-@tc("BE-VCAT-031", "GET /api/venue-catalogue", "Technical support and coordinators request the catalogue over HTTP.", "Technical support gets 200; a coordinator gets 403.", steps="1. GET as technical support. 2. GET as event coordinator.", kind="Security")
+@tc("BE-VCAT-031", "GET /api/venue-catalogue", "Technical support and coordinators request the catalogue over HTTP.", "Both roles get 200.", steps="1. GET as technical support. 2. GET as event coordinator.", kind="Security")
 def test_http_get_roles(monkeypatch):
     assert http("technical support staff", monkeypatch).get("/api/venue-catalogue").status_code == 200
-    assert http("event coordinator", monkeypatch).get("/api/venue-catalogue").status_code == 403
+    assert http("event coordinator", monkeypatch).get("/api/venue-catalogue").status_code == 200
 
 
 @tc("BE-VCAT-032", "PUT /api/venue-catalogue/{id}", "Venue staff sends an invalid body over HTTP (a day missing).", "HTTP 422 and nothing is saved.", data="monday..saturday only", steps="1. PUT a body with six days as venue staff.", kind="Negative")

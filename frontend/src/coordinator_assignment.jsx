@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { authenticatedFetch as fetch } from './api';
 
 const API = 'http://127.0.0.1:8000/api';
 const EVENT_STATUSES = ['Under review', 'Approved', 'Planning', 'Confirmed', 'Completed', 'Cancelled', 'Rejected'];

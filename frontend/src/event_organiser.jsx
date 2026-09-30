@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
+import { authenticatedFetch as fetch } from './api';
 
 const API = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api').replace(/\/$/, '');
-const ORGANISER_ID = '00000000-0000-0000-0000-000000000001';
 const emptyRequest = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
 const eventTypes = ['Conference', 'Workshop', 'Seminar', 'Training', 'Meeting', 'Networking', 'Exhibition', 'Social event', 'Other'];
 const capacityOptions = [{ label: '1-25 attendees', value: 25 }, { label: '26-50 attendees', value: 50 }, { label: '51-100 attendees', value: 100 }, { label: '101-250 attendees', value: 250 }, { label: '251-500 attendees', value: 500 }, { label: '501-1000 attendees', value: 1000 }, { label: 'More than 1000 attendees', value: 1001 }];
@@ -19,7 +19,7 @@ function scheduleError(form) {
   return null;
 }
 
-export default function EventOrganiser({ editingEvent, onEditComplete }) {
+export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   const [requests, setRequests] = useState([]);
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
@@ -28,11 +28,12 @@ export default function EventOrganiser({ editingEvent, onEditComplete }) {
   const [loadingAction, setLoadingAction] = useState(null);
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
   const isSubmitting = loadingAction !== null;
+  const organiserId = user?.id || '';
 
   async function loadRequests() {
     setIsLoadingRequests(true);
     try {
-      const response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/submitted-requests`);
+      const response = await fetch(`${API}/event-organisers/${organiserId}/submitted-requests`);
       if (!response.ok) throw new Error('Unable to load event requests.');
       setRequests(await response.json());
     } finally {
@@ -72,7 +73,7 @@ export default function EventOrganiser({ editingEvent, onEditComplete }) {
     setLoadingAction('edit');
     let response;
     try {
-      response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/requests/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      response = await fetch(`${API}/event-organisers/${organiserId}/requests/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
     } catch (error) {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
@@ -102,7 +103,7 @@ export default function EventOrganiser({ editingEvent, onEditComplete }) {
     setLoadingAction('submit');
     let response;
     try {
-      response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/requests/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      response = await fetch(`${API}/event-organisers/${organiserId}/requests/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
     } catch (error) {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
@@ -129,7 +130,7 @@ export default function EventOrganiser({ editingEvent, onEditComplete }) {
     setLoadingAction('draft');
     let response;
     try {
-      response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      response = await fetch(`${API}/event-organisers/${organiserId}/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
     } catch (error) {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
@@ -155,7 +156,7 @@ export default function EventOrganiser({ editingEvent, onEditComplete }) {
     if (isSubmitting) return;
     setLoadingAction('row-submit');
     try {
-      const response = await fetch(`${API}/event-organisers/${ORGANISER_ID}/requests/${id}/submit`, { method: 'POST' });
+      const response = await fetch(`${API}/event-organisers/${organiserId}/requests/${id}/submit`, { method: 'POST' });
       const result = await response.json();
       if (!response.ok) { setNotice({ type: 'error', text: result.detail || 'Could not submit request.' }); return; }
       await loadRequests();

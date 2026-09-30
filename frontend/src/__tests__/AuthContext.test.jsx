@@ -11,7 +11,7 @@ vi.mock('../utils/supabase', () => ({ supabase: { auth } }));
 
 import { AuthProvider, useAuth } from '../AuthContext';
 
-const session = (extra = {}) => ({ user: { id: 'u1', email: 'a@x.com', user_metadata: {}, ...extra } });
+const session = (extra = {}) => ({ access_token: 'token-1', user: { id: 'u1', email: 'a@x.com', user_metadata: {}, ...extra } });
 const wrapper = ({ children }) => <AuthProvider>{children}</AuthProvider>;
 let authListener;
 
@@ -44,6 +44,7 @@ describe('AuthContext', () => {
       const fetchMock = mockFetch(() => json({ name: 'Ann', role: 'Event Coordinator' }));
       const { result } = await mount();
       expect(fetchMock.mock.calls[0][0]).toMatch(/\/users\/u1\/role$/);
+      expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe('Bearer token-1');
       expect(result.current.user).toEqual({ id: 'u1', email: 'a@x.com', name: 'Ann', role: 'Event Coordinator' });
     });
 
@@ -57,13 +58,13 @@ describe('AuthContext', () => {
       expect(console.error).toHaveBeenCalled();
     });
 
-  tc('FE-AUTH-005', 'AuthProvider', 'Role lookup fails with a network error.', 'The user falls back to the metadata-derived profile and the app still loads.',
+  tc('FE-AUTH-005', 'AuthProvider', 'Role lookup fails with a network error.', 'The user remains signed in, but the role is blank and no role workspace is granted.',
     { kind: 'Negative', pre: 'fetch rejects.', steps: '1. Mount the provider with a session and a rejecting fetch.' },
     async () => {
       auth.getSession.mockResolvedValue({ data: { session: session({ user_metadata: { full_name: 'Full Name', role: 'venue staff' }, }) } });
       mockFetch(() => { throw new Error('offline'); });
       const { result } = await mount();
-      expect(result.current.user).toMatchObject({ name: 'Full Name', role: 'venue staff' });
+      expect(result.current.user).toMatchObject({ name: 'Full Name', role: '' });
     });
 
   tc('FE-AUTH-006', 'login', 'User logs in with valid credentials.', 'signInWithPassword is called with the email and password and the signed-in user is returned.',

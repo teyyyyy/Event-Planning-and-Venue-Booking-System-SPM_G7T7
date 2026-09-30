@@ -57,8 +57,8 @@ def test_all_venues(monkeypatch):
 
 @tc("BE-VREQ-005", "create_venue_booking", "A coordinator submits a booking.", "A Pending row with ISO datetimes is inserted and its request_id returned.", data="event 10, venue 5, coordinator c1", steps="1. Call create_venue_booking(create()).")
 def test_create_ok(monkeypatch):
-    client = use(monkeypatch)
-    out = vr.create_venue_booking(create())
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    out = vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     saved = client.tables[BOOKING][0]
     assert out == {"request_id": saved["request_id"]}
     assert (saved["status"], saved["start_datetime"], saved["coordinator_id"]) == ("Pending", "2026-10-03T09:00:00", "c1")
@@ -66,21 +66,37 @@ def test_create_ok(monkeypatch):
 
 @tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
 def test_create_db_error(monkeypatch):
-    client = use(monkeypatch)
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     client.fail_tables.add((BOOKING, "insert"))
     client.fail_error = RuntimeError("23505 duplicate key")
     with pytest.raises(HTTPException) as info:
-        vr.create_venue_booking(create())
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     assert info.value.status_code == 500 and "23505" in info.value.detail
 
 
 @tc("BE-VREQ-007", "create_venue_booking", "The insert succeeds but returns no row.", "HTTP 400 \"Failed to create venue booking request.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call create_venue_booking.", kind="Negative",
     defect="the 400 raised inside the try block is caught by the broad `except Exception` and re-raised as HTTP 500 with detail \"400: Failed to create venue booking request.\" (venue_request.py).")
 def test_create_empty_insert(monkeypatch):
-    use(monkeypatch).empty_inserts = True
+    use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]}).empty_inserts = True
     with pytest.raises(HTTPException) as info:
-        vr.create_venue_booking(create())
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     assert (info.value.status_code, info.value.detail) == (400, "Failed to create venue booking request.")
+
+
+@tc("BE-VREQ-012", "create_venue_booking", "A coordinator submits another coordinator's id.", "HTTP 403 and no booking is inserted.", steps="1. Submit with a spoofed coordinator id.", kind="Security")
+def test_create_spoofed_coordinator(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(coordinator_id="c2"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 403 and client.tables[BOOKING] == []
+
+
+@tc("BE-VREQ-013", "create_venue_booking", "The coordinator requests a venue for an event assigned to someone else.", "HTTP 403 and no booking is inserted.", steps="1. Submit for an event assigned to another coordinator.", kind="Security")
+def test_create_unassigned_event(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c2"}]})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 403 and client.tables[BOOKING] == []
 
 
 @tc("BE-VREQ-008", "list_requests_by_venue", "Availability of a venue is checked.", "Only Approved bookings for that venue are returned.", pre="Venue 5 has Approved, Pending and Rejected bookings; venue 6 has an Approved one.", steps="1. Call list_requests_by_venue(5).")

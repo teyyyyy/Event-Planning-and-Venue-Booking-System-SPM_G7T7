@@ -18,7 +18,7 @@ function toUser(session, profile = {}) {
     id: u.id,
     email: u.email,
     name: profile.name || u.user_metadata?.name || u.user_metadata?.full_name || u.email,
-    role: profile.role || u.user_metadata?.role || '',
+    role: profile.role || '',
   };
 }
 
@@ -30,7 +30,9 @@ export function AuthProvider({ children }) {
     const baseUser = toUser(session);
     if (!baseUser) return null;
     try {
-      const response = await fetch(`${API}/users/${baseUser.id}/role`);
+      const response = await fetch(`${API}/users/${baseUser.id}/role`, {
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
       const profile = response.ok ? await response.json() : null;
       if (!profile) console.error('Unable to load the signed-in user role.');
       return toUser(session, profile || {});

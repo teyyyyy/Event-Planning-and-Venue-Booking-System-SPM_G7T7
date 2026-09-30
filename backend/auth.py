@@ -2,10 +2,18 @@ from typing import Any
 
 from fastapi import Depends, Header, HTTPException
 
-from coordinator_assignment import db
+
+
+def db():
+    from coordinator_assignment import db as coordinator_db
+
+    return coordinator_db()
 
 COORDINATOR_ROLE = "event coordinator"
+ORGANISER_ROLE = "event organiser"
 VENUE_STAFF_ROLE = "venue staff"
+TECHNICAL_SUPPORT_ROLE = "technical support staff"
+ATTENDEE_ROLE = "attendee"
 
 
 def current_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
@@ -38,9 +46,45 @@ def require_coordinator(user: dict[str, Any] = Depends(current_user)) -> dict[st
     return user
 
 
+def require_organiser(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != ORGANISER_ROLE:
+        raise HTTPException(403, "Event organiser access required.")
+    return user
+
+
 def require_venue_staff(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if str(user.get("role", "")).strip().lower() != VENUE_STAFF_ROLE:
         raise HTTPException(403, "Venue staff access required.")
+    return user
+
+
+def require_technical_support(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != TECHNICAL_SUPPORT_ROLE:
+        raise HTTPException(403, "Technical support access required.")
+    return user
+
+
+def require_attendee(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != ATTENDEE_ROLE:
+        raise HTTPException(403, "Attendee access required.")
+    return user
+
+
+def require_path_user(user_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user["id"]) != user_id:
+        raise HTTPException(403, "You can only access your own account.")
+    return user
+
+
+def require_coordinator_path(coordinator_id: str, user: dict[str, Any] = Depends(require_coordinator)) -> dict[str, Any]:
+    if str(user["id"]) != coordinator_id:
+        raise HTTPException(403, "You can only access your own coordinator requests.")
+    return user
+
+
+def require_technical_support_path(staff_id: str, user: dict[str, Any] = Depends(require_technical_support)) -> dict[str, Any]:
+    if str(user["id"]) != staff_id:
+        raise HTTPException(403, "You can only access your own technical support workspace.")
     return user
 
 

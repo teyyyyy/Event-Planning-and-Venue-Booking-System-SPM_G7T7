@@ -97,7 +97,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(self.store.writes, 0)
 
     def test_other_roles_forbidden(self):
-        for role in ['Event Organiser', 'Event Coordinator', '']:
+        for role in ['Event Organiser', 'Attendee', '']:
             with self.subTest(role=role):
                 self.role(role)
                 self.assertEqual(self.client.get('/api/venue-catalogue').status_code, 403)

@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
 from typing import List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from equipment_request import db, calculate_availability, EVENT_TABLE, EQUIPMENT_TABLE, REQUEST_TABLE, REQUEST_ITEM_TABLE
+from auth import require_technical_support_path
 
 USER_TABLE = "users"
-router = APIRouter(prefix="/api/equipment-update", tags=["Equipment Update"])
+router = APIRouter(prefix="/api/equipment-update", tags=["Equipment Update"], dependencies=[Depends(require_technical_support_path)])
 
 class EquipmentUpdateItemInput(BaseModel):
     equipment_id: str = Field(min_length=1)

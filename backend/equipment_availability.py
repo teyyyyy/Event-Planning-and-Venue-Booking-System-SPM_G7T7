@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from equipment_request import (
     db,
     EVENT_TABLE,
@@ -9,9 +9,10 @@ from equipment_request import (
     RESERVATION_TABLE,
     RESERVATION_ITEM_TABLE,
 )
+from auth import require_technical_support_path
 
 USER_TABLE = "users"
-router = APIRouter(prefix="/api/equipment-availability", tags=["Equipment Availability"])
+router = APIRouter(prefix="/api/equipment-availability", tags=["Equipment Availability"], dependencies=[Depends(require_technical_support_path)])
 
 
 def require_technical_support(client, staff_id: str):
