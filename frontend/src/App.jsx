@@ -240,43 +240,69 @@ function OrganiserWorkspace({ user, logout }) {
   const [editingEvent, setEditingEvent] = useState(null);
 
   return (
-    <>
-      <div className="role-tabs" role="tablist" aria-label="User role views">
-        <button
-          className={activeRole === "organiser" ? "active" : ""}
-          onClick={() => setActiveRole("organiser")}
-        >
-          Create event
-        </button>
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">EVENT ORGANISER</div>
+
+          <nav className="coordinator-side-nav" aria-label="Event Organiser navigation">
+            <button
+              type="button"
+              className={
+                activeRole === "organiser"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("organiser")}
+            >
+              Create event
+            </button>
+
+            <button
+              type="button"
+              className={
+                activeRole === "coordinator"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("coordinator")}
+            >
+              Event status
+            </button>
+          </nav>
+        </div>
 
         <button
-          className={activeRole === "coordinator" ? "active" : ""}
-          onClick={() => setActiveRole("coordinator")}
+          type="button"
+          className="coordinator-logout"
+          onClick={logout}
+          title={user.email}
         >
-          Event status
-        </button>
-
-        <button className="logout-tab" onClick={logout} title={user.email}>
           Log out
         </button>
-      </div>
+      </aside>
 
-      {activeRole === "organiser" ? (
-        <EventOrganiser
-          user={user}
-          editingEvent={editingEvent}
-          onEditComplete={() => setEditingEvent(null)}
-        />
-      ) : (
-        <CoordinatorAssignment
-          user={user}
-          onEditEvent={(event) => {
-            setEditingEvent(event);
-            setActiveRole("organiser");
-          }}
-        />
-      )}
-    </>
+      <div className="coordinator-main">
+        <div className="embedded-existing-page">
+          {activeRole === "organiser" ? (
+            <EventOrganiser
+              user={user}
+              editingEvent={editingEvent}
+              onEditComplete={() => setEditingEvent(null)}
+            />
+          ) : (
+            <CoordinatorAssignment
+              user={user}
+              onEditEvent={(event) => {
+                setEditingEvent(event);
+                setActiveRole("organiser");
+              }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
