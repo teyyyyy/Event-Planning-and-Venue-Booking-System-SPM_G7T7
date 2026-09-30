@@ -4,15 +4,20 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from supabase import Client, create_client
+from auth import require_organiser, require_self
 from coordinator_assignment import assign_event
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
-router = APIRouter()
+def require_organiser_path(organiser_id: str, user=Depends(require_organiser)):
+    return require_self(organiser_id, user)
+
+
+router = APIRouter(dependencies=[Depends(require_organiser_path)])
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL", "")).rstrip("/").removesuffix("/rest/v1")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 EVENT_TABLE = "Event Details"

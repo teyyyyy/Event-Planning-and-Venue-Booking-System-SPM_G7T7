@@ -188,4 +188,14 @@ describe('App', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Venue Catalogue' }));
       expect(screen.getByText('VENUE CATALOGUE PAGE read-only')).toBeInTheDocument();
     });
+
+  tc('FE-APP-019', 'AuthedApp (attendee)', 'An Attendee signs in while attendee features are not implemented.', 'No staff workspace is shown and the attendee role is recognized.',
+    { data: 'role = "Attendee"', steps: '1. Render App as attendee.' },
+    () => {
+      as('Attendee');
+      render(<App />);
+      expect(screen.getByText('Attendee features are not available yet.')).toBeInTheDocument();
+      expect(screen.queryByText('EVENT COORDINATOR')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+    });
 });

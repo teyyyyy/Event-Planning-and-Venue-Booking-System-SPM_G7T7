@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from auth import current_user, require_venue_staff
+from auth import COORDINATOR_ROLE, current_user, require_venue_staff
 from coordinator_assignment import db
 
 router = APIRouter(prefix="/api/venue-catalogue", tags=["Venue catalogue"])
@@ -16,8 +16,8 @@ Day = Literal["monday", "tuesday", "wednesday", "thursday", "friday", "saturday"
 
 
 def require_reader(user=Depends(current_user)):
-    if str(user.get("role", "")).strip().lower() not in {"venue staff", "technical support staff"}:
-        raise HTTPException(403, "Venue Staff or Technical Support Staff access required.")
+    if str(user.get("role", "")).strip().lower() not in {"venue staff", "technical support staff", COORDINATOR_ROLE}:
+        raise HTTPException(403, "Event Coordinator, Venue Staff or Technical Support Staff access required.")
     return user
 
 

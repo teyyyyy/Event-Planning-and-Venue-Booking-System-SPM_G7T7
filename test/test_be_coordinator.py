@@ -324,12 +324,12 @@ def test_organiser_events_empty(use_db):
     assert ca.organiser_events("nobody") == []
 
 
-@tc("BE-COORD-039", "all_events", "All events are requested.", "Every event is returned, ordered by event_date, with coordinator names.",
-    pre="Two events on different dates.", steps="1. Call all_events().")
+@tc("BE-COORD-039", "all_events", "A coordinator requests events.", "Only events assigned to that coordinator are returned.",
+    pre="One assigned event and one unrelated event exist.", steps="1. Call all_events() as coordinator c2.", kind="Security")
 def test_all_events(use_db):
     use_db(world([event(id=1, event_date="2026-12-01", coordinator_id="c2"), event(id=2, event_date="2026-10-01")]), ca)
-    out = ca.all_events()
-    assert [e["id"] for e in out] == [2, 1] and out[1]["coordinator_name"] == "Amy"
+    out = ca.all_events({"id": "c2", "role": "Event Coordinator"})
+    assert [e["id"] for e in out] == [1] and out[0]["coordinator_name"] == "Amy"
 
 
 @tc("BE-COORD-040", "coordinators", "Coordinator list is requested.", "Only coordinators, sorted by name case-insensitively (Amy, Bob, Cat).",

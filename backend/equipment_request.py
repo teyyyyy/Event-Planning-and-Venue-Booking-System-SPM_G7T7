@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client, create_client
+from auth import require_coordinator, require_coordinator_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
@@ -20,7 +21,7 @@ RESERVATION_TABLE = 'Equipment Reservation'
 RESERVATION_ITEM_TABLE = 'Equipment Reservation Item'
 USER_TABLE = 'users'
 
-router = APIRouter(prefix='/api', tags=['Equipment Requests'])
+router = APIRouter(prefix='/api', tags=['Equipment Requests'], dependencies=[Depends(require_coordinator)])
 
 def db() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -161,7 +162,7 @@ def validate_request_items(request_items, availability_rows):
             )
 
 # Get events available for NEW equipment requests
-@router.get('/event-coordinators/{coordinator_id}/events')
+@router.get('/event-coordinators/{coordinator_id}/events', dependencies=[Depends(require_coordinator_path)])
 def coordinator_events(coordinator_id: str):
     client = db()
 
@@ -193,13 +194,13 @@ def equipment_catalogue():
     ).order('equipment_name').execute()
     return result.data or []
 
-@router.get('/event-coordinators/{coordinator_id}/events/{event_id}/equipment-availability')
+@router.get('/event-coordinators/{coordinator_id}/events/{event_id}/equipment-availability', dependencies=[Depends(require_coordinator_path)])
 def equipment_availability(coordinator_id: str, event_id: int):
     client = db()
     event = get_coordinator_event(client, coordinator_id, event_id)
     return calculate_availability(client, event)
 
-@router.post('/event-coordinators/{coordinator_id}/equipment-requests')
+@router.post('/event-coordinators/{coordinator_id}/equipment-requests', dependencies=[Depends(require_coordinator_path)])
 def create_equipment_request(coordinator_id: str, request: EquipmentRequestInput):
     client = db()
     event = get_coordinator_event(client, coordinator_id, request.event_id)
@@ -250,7 +251,7 @@ def create_equipment_request(coordinator_id: str, request: EquipmentRequestInput
         'items': created_items
     }
 
-@router.put('/event-coordinators/{coordinator_id}/equipment-requests/{request_id}')
+@router.put('/event-coordinators/{coordinator_id}/equipment-requests/{request_id}', dependencies=[Depends(require_coordinator_path)])
 def edit_equipment_request(coordinator_id: str, request_id: int, payload: EquipmentRequestEditInput):
     client = db()
 
@@ -319,7 +320,7 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
         'event_id': header['event_id']
     }
 
-@router.get('/event-coordinators/{coordinator_id}/equipment-requests')
+@router.get('/event-coordinators/{coordinator_id}/equipment-requests', dependencies=[Depends(require_coordinator_path)])
 def get_equipment_requests(coordinator_id: str):
     client = db()
 

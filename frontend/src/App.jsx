@@ -17,6 +17,7 @@ function AuthedApp() {
   const isTechnicalSupport = normalizedRole === "technical support staff";
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
+  const isAttendee = normalizedRole === "attendee";
 
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
@@ -30,7 +31,7 @@ function AuthedApp() {
     <div className="auth-screen">
       <div className="auth-card">
         <h2>Access unavailable</h2>
-        <p>Your account does not have a recognised role.</p>
+        <p>{isAttendee ? "Attendee features are not available yet." : "Your account does not have a recognised role."}</p>
         <button type="button" className="primary" onClick={logout}>
           Log out
         </button>
