@@ -10,7 +10,6 @@ from fastapi import Depends, Header, HTTPException
 # auth is imported before the other modules load .env, so load it here for REQUIRE_MFA.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-no
 
 def db():
     from coordinator_assignment import db as coordinator_db
