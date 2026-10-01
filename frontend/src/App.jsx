@@ -12,6 +12,9 @@ import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
 import VenueCatalogue from "./VenueCatalogue";
 
+import AttendeeWorkspace from "./AttendeeWorkspace";
+import Notifications from "./Notifications";
+
 function AuthedApp() {
   const { user, logout } = useAuth();
   const normalizedRole = user.role.trim().toLowerCase();
@@ -21,6 +24,7 @@ function AuthedApp() {
   const isVenueStaff = normalizedRole === "venue staff";
   const isAttendee = normalizedRole === "attendee";
 
+  if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator)
@@ -33,7 +37,7 @@ function AuthedApp() {
     <div className="auth-screen">
       <div className="auth-card">
         <h2>Access unavailable</h2>
-        <p>{isAttendee ? "Attendee features are not available yet." : "Your account does not have a recognised role."}</p>
+        <p>Your account does not have a recognised role.</p>
         <button type="button" className="primary" onClick={logout}>
           Log out
         </button>
@@ -319,6 +323,6 @@ export default function App() {
     );
   }
 
-  if (user) return <AuthedApp />;
+  if (user) return <React.Fragment key={user.id}><AuthedApp /><Notifications /></React.Fragment>;
   return mfa ? <MfaChallenge /> : <Login />;
 }

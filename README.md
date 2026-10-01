@@ -120,3 +120,65 @@ Supabase directly. The backend serves app data (event requests, coordinator
 assignment) via the Supabase service-role key. `frontend/src/api.js` is a helper
 that forwards the signed-in user's Supabase JWT as a `Bearer` token for when those
 routes need to verify the caller.
+
+## Sprint 2 — attendee registration and notifications (38.1, 38.2, 48.1)
+
+Apply `backend/sql/sprint2_registration_notifications.sql` in the Supabase SQL
+Editor **before restarting the backend and frontend with these changes**. The
+migration is transactional and rerunnable. It adds registrations, notifications,
+restricted RPCs, and notification triggers to the existing event and booking
+tables. It does not backfill alerts for historical changes. No live database
+migration is performed by the automated tests.
+
+- **Attendee:** Browse events → Register, or My registered events. Refresh events
+  loads current details. Cancelled events remain in the registration list.
+- **All signed-in users:** Notifications in the top-right corner. The inbox
+  refreshes every 30 seconds and supports manual refresh and Mark as read.
+  View record opens the associated event or booking details; the link works
+  after a page reload and rechecks current permissions.
+- Registration requires the Attendee role, a Confirmed event, and a future
+  start time in Asia/Singapore. NULL capacity means unlimited; zero means full.
+  A transaction locks the event row to serialize registrations and checks
+  capacity and duplicate registration before inserting the attendee and timestamp.
+- Event submission alerts its assigned coordinator, or the coordinator queue
+  when unassigned. Assignment alerts the new assignee. Approval/rejection alerts
+  the organiser. Venue/equipment requests alert the assigned reviewer or relevant
+  staff queue; decisions alert the requester.
+- Confirmed event date/time or approved venue changes alert registered attendees
+  and responsible staff. Cancellation also alerts the organiser. Responsible
+  staff are the event coordinator, venue reviewers, and the technical-support
+  queue when an active equipment request exists. Equipment currently uses a
+  shared staff queue; its existing workflow does not have individual assignments.
+- Alerts are generated in the same database transaction as the triggering change.
+  Equipment request creation now saves its header and items in one RPC so an
+  item-save failure also rolls back the alert. Unchanged saves produce no alerts;
+  recipient IDs are deduplicated per write. The authenticated backend forwards
+  the verified actor ID so that person is excluded.
+- Existing event/booking screens retain their current edit and decision workflows.
+  The triggers also support future equipment Approved/Rejected transitions; this
+  change does not add a separate equipment approval screen.
+- Browser database access to the new tables and RPCs is revoked. The backend
+  checks identity, role, notification ownership, and access to linked records.
+  Attendee withdrawal, waitlists, email, and push notifications remain out of scope.
+
+Verification:
+
+```bash
+backend/.venv/bin/python -m pytest
+cd frontend
+npm test
+npm run build
+```
+
+An isolated PostgreSQL integration suite also validates the migration, registration
+invariants, recipient matrix, rollback, and database permissions:
+
+```bash
+npm install --prefix /tmp/sprint2-sql-test @electric-sql/pglite
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/sprint2_sql.mjs
+```
+
+After applying the migration, verify with Attendee, Event Organiser, Event
+Coordinator, Venue Staff, and Technical Support Staff accounts. Register for a
+future Confirmed event; try a duplicate and a full event; change its venue/time
+or cancel it; check recipient inboxes, record links, and read status after refresh.

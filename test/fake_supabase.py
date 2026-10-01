@@ -84,5 +84,30 @@ class FakeClient:
 
     def table(self, name): return Query(self, name)
 
+    def rpc(self, name, params):
+        from copy import deepcopy
+        from postgrest.exceptions import APIError
+        def execute():
+            if name != "submit_equipment_request":
+                raise NotImplementedError(name)
+            snapshot = deepcopy(self.tables)
+            try:
+                header = self.table("Equipment Request").insert({
+                    "event_id": params["p_event_id"], "created_by": params["p_coordinator_id"],
+                    "status": "Submitted",
+                }).execute().data
+                if not header:
+                    self.tables = snapshot
+                    return Result(data=None)
+                rid = header[0]["request_id"]
+                items = self.table("Equipment Request Item").insert([
+                    {**item, "request_id": rid} for item in params["p_items"]
+                ]).execute().data
+                return Result(data={"request_id": rid, "event_id": params["p_event_id"], "items": items})
+            except Exception as error:
+                self.tables = snapshot
+                raise APIError({"message": str(error), "code": "P0001", "details": None, "hint": None}) from error
+        return SimpleNamespace(execute=execute)
+
     def writes(self, table, op):
         return [p for t, o, p in self.log if t == table and o == op]

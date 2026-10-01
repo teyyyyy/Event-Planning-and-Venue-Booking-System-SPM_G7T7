@@ -3,7 +3,8 @@ from typing import Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from supabase import Client, create_client
+from supabase import Client
+from database import create_client
 from dotenv import load_dotenv
 from auth import require_coordinator, require_organiser, require_path_user, require_self
 

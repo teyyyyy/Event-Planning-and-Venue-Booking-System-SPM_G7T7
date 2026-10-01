@@ -1,0 +1,22 @@
+flowchart LR
+    organiser["Event Organiser<br/>[Person]"]
+    coordinator["Event Coordinator<br/>[Person]"]
+    venueStaff["Venue Staff<br/>[Person]"]
+    technical["Technical Support Staff<br/>[Person]"]
+    attendee["Attendee<br/>[Person]"]
+    gather["Gather<br/>[Software System]<br/>Event planning, venue booking,<br/>equipment arrangements, registrations<br/>and in-app notifications"]
+    identity["Supabase Auth<br/>[External Software System]<br/>Accounts, sessions and TOTP MFA"]
+
+    organiser -->|Creates and submits events; tracks progress| gather
+    coordinator -->|Manages assigned events and arrangements| gather
+    venueStaff -->|Maintains venues; decides booking requests| gather
+    technical -->|Updates equipment requests; checks availability| gather
+    attendee -->|Registers for confirmed events; views registrations| gather
+    gather -->|Authenticates users and verifies sessions| identity
+
+    classDef person fill:#08427b,color:#fff,stroke:#052e56
+    classDef system fill:#1168bd,color:#fff,stroke:#08427b
+    classDef external fill:#666,color:#fff,stroke:#444
+    class organiser,coordinator,venueStaff,technical,attendee person
+    class gather system
+    class identity external

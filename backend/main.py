@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from postgrest.exceptions import APIError
 
 from coordinator_assignment import router
 from event_organiser import router as event_organiser_router
@@ -27,3 +29,35 @@ app.include_router(equipment_request_router)
 app.include_router(equipment_update_router)
 app.include_router(equipment_availability_router)
 app.include_router(venue_catalogue_router)
+
+
+from database import request_actor
+from attendee_registration import router as attendee_router
+from notifications import router as notifications_router
+
+@app.middleware("http")
+async def actor_context(request, call_next):
+    token = request_actor.set({})
+    try:
+        return await call_next(request)
+    finally:
+        request_actor.reset(token)
+
+app.include_router(attendee_router)
+app.include_router(notifications_router)
+
+
+@app.exception_handler(APIError)
+async def database_api_error(request, error):
+    sprint2_objects = ("event_registrations", "notifications", "register_for_event", "submit_equipment_request")
+    missing_setup = error.code in {"PGRST205", "PGRST202", "42P01", "42883"} and any(
+        name in error.message for name in sprint2_objects
+    )
+    message = (
+        "Database setup is incomplete. Run sprint2_registration_notifications.sql "
+        "in the Supabase SQL Editor, then refresh."
+        if missing_setup else "The database request could not be completed. Please try again."
+    )
+    # A handled response retains CORS headers, so the UI can show the actual
+    # failure instead of the browser masking an unhandled 500 as Failed to fetch.
+    return JSONResponse(status_code=503, content={"detail": message})

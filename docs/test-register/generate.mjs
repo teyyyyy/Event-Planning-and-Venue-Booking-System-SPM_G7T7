@@ -26,12 +26,12 @@ const RUN_DATE = process.env.TC_DATE || new Date().toISOString().slice(0, 10);
 const FONT = 'Arial';
 
 const SECTIONS = [
-  { n: '6.1', title: 'Authentication and session', prefixes: ['FE-SUPA', 'FE-AUTH', 'FE-LOGIN', 'FE-API', 'BE-AUTH'],
+  { n: '6.1', title: 'Authentication and session', prefixes: ['FE-SUPA', 'FE-AUTH', 'FE-LOGIN', 'FE-API', 'FE-MFA', 'FE-SEC', 'BE-AUTH'],
     intro: 'Feature codes: SUPA, AUTH, LOGIN, API. Sign-in uses Supabase Auth (email + password). Unit tests replace the Supabase client and the network with test doubles — they verify our code calls the SDK and API correctly, not that Supabase authenticates anyone.',
-    fe: 'frontend/src/__tests__/supabase.test.js, api.test.js, AuthContext.test.jsx, Login.test.jsx', be: 'test/test_be_auth.py' },
-  { n: '6.2', title: 'Application shell and role routing', prefixes: ['FE-APP', 'BE-APP'],
+    fe: 'frontend/src/__tests__/supabase.test.js, api.test.js, AuthContext.test.jsx, Login.test.jsx, MfaChallenge.test.jsx, SecuritySettings.test.jsx', be: 'test/test_be_auth.py' },
+  { n: '6.2', title: 'Application shell and role routing', prefixes: ['FE-APP', 'BE-APP', 'BE-ROLE'],
     intro: 'Feature code: APP. Covers which workspace and navigation each role sees (frontend/src/App.jsx) and the FastAPI application wiring — routers, CORS and request validation (backend/main.py).',
-    fe: 'frontend/src/__tests__/App.test.jsx', be: 'test/test_be_app.py' },
+    fe: 'frontend/src/__tests__/App.test.jsx', be: 'test/test_be_app.py, test/test_role_access.py' },
   { n: '6.3', title: 'Event organiser — event requests', prefixes: ['FE-ORG', 'BE-ORG'],
     intro: 'Feature code: ORG. Creating, drafting, editing and submitting event requests, including schedule validation and multi-day events.',
     fe: 'frontend/src/__tests__/event_organiser.test.jsx', be: 'test/test_be_organiser.py' },
@@ -56,6 +56,9 @@ const SECTIONS = [
   { n: '6.10', title: 'Venue catalogue (Venue Staff, Technical Support)', prefixes: ['FE-VCAT', 'BE-VCAT'],
     intro: 'Feature code: VCAT. Venue staff and technical support browse venue information; only venue staff may edit operating hours, facilities, accessibility and layouts, and all input is validated on the server.',
     fe: 'frontend/src/__tests__/VenueCatalogue.test.jsx', be: 'test/test_be_venue_catalogue.py' },
+  { n: '6.11', title: 'Sprint 2 attendee registration and notifications', prefixes: ['FE-SP2', 'BE-SP2'],
+    intro: 'Stories 38.1, 38.2 and 48.1. Covers attendee browsing and registration, private registration lists, cancelled events, notification ownership, linked-record permissions, read status, polling, refresh and error recovery. Backend tests use database doubles; database capacity, duplicate enforcement and notification triggers are verified separately by test/sprint2_sql.mjs.',
+    fe: 'frontend/src/__tests__/Sprint2.test.jsx', be: 'test/test_sprint2.py' },
 ];
 
 // ---- load + validate -------------------------------------------------------------------
@@ -63,7 +66,7 @@ const all = [...JSON.parse(readFileSync(feFile, 'utf8')), ...JSON.parse(readFile
 const problems = [];
 const seen = new Set();
 for (const t of all) {
-  if (!/^(FE|BE)-[A-Z]+-\d{3}$/.test(t.id)) problems.push(`bad id ${t.id}`);
+  if (!/^(FE|BE)-[A-Z0-9]+-\d{3}$/.test(t.id)) problems.push(`bad id ${t.id}`);
   if (seen.has(t.id)) problems.push(`duplicate id ${t.id}`);
   seen.add(t.id);
   for (const key of ['unit', 'scenario', 'steps', 'expected']) if (!t[key]) problems.push(`${t.id}: missing ${key}`);
@@ -281,7 +284,7 @@ const closing = [
   h1('7. Test execution log'),
   para('Record each meaningful run here — at least every release and every time a Status in §6 changes. "Result" is passed / total.'),
   table([1300, 1300, 2600, 1500, W - 6700], ['Date', 'Run by', 'Scope', 'Result', 'Notes'], [
-    [RUN_DATE, AUTHOR, 'Frontend (Vitest) — all suites', `${feC.pass} / ${feC.total} passed`, `${feC.fail} failed. 11 test files.`],
+    [RUN_DATE, AUTHOR, 'Frontend (Vitest) — all suites', `${feC.pass} / ${feC.total} passed`, `${feC.fail} failed. See the saved Vitest run output for the executed test files.`],
     [RUN_DATE, AUTHOR, 'Backend (pytest) — registered suites', `${beC.pass} / ${beC.total} passed`, `${beC.fail} failed${beC.fail ? ' — a known defect, marked xfail so the suite still exits green (see §8)' : ''}. The older unittest-style tests in test/ also pass but are not registered.`],
   ], { size: 18, rowFill: 'EAF1FA' }),
   para(''),
