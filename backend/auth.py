@@ -1,9 +1,14 @@
 import base64
 import json
 import os
+from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import Depends, Header, HTTPException
+
+# auth is imported before the other modules load .env, so load it here for REQUIRE_MFA.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 
