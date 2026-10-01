@@ -10,6 +10,8 @@ import { supabase } from './utils/supabase';
 
 const AuthContext = createContext(null);
 const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
+// Mirror of the backend's REQUIRE_MFA: set VITE_REQUIRE_MFA=false (with REQUIRE_MFA=false) to skip two-factor in local development.
+const MFA_REQUIRED = String(import.meta.env.VITE_REQUIRE_MFA ?? 'true').trim().toLowerCase() !== 'false';
 
 function toUser(session, profile = {}) {
   const u = session?.user;
@@ -47,6 +49,7 @@ export function AuthProvider({ children }) {
   // A session only becomes a signed-in user once it has completed the second factor (aal2).
   const resolveSession = useCallback(async (session) => {
     if (!session) return { user: null, mfa: null };
+    if (!MFA_REQUIRED) return { user: await hydrateUser(session), mfa: null };
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (aal?.currentLevel === 'aal2') return { user: await hydrateUser(session), mfa: null };
     const { data: factors } = await supabase.auth.mfa.listFactors();
