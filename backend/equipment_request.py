@@ -5,7 +5,8 @@ from typing import List
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from supabase import Client, create_client
+from supabase import Client
+from database import create_client
 from auth import require_coordinator, require_coordinator_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -218,38 +219,23 @@ def create_equipment_request(coordinator_id: str, request: EquipmentRequestInput
     availability_rows = calculate_availability(client, event)
     validate_request_items(request.items, availability_rows)
 
-    header = client.table(REQUEST_TABLE).insert({
-        'event_id': request.event_id,
-        'status': 'Submitted',
-        'created_by': coordinator_id
-    }).execute().data
-
-    if not header:
-        raise HTTPException(status_code=500, detail='Equipment request could not be created.')
-
-    request_id = header[0]['request_id']
-    item_rows = []
-
-    for item in request.items:
-        item_rows.append({
-            'request_id': request_id,
-            'equipment_id': item.equipment_id.strip(),
-            'requested_quantity': item.requested_quantity,
-            'technical_requirements': item.technical_requirements.strip() if item.technical_requirements else ''
-        })
-
+    from postgrest.exceptions import APIError
+    items = [{"equipment_id": item.equipment_id.strip(),
+              "requested_quantity": item.requested_quantity,
+              "technical_requirements": (item.technical_requirements or "").strip()}
+             for item in request.items]
     try:
-        created_items = client.table(REQUEST_ITEM_TABLE).insert(item_rows).execute().data
-    except Exception as error:
-        client.table(REQUEST_TABLE).delete().eq('request_id', request_id).execute()
-        raise HTTPException(status_code=500, detail='Equipment request items could not be saved.') from error
-
-    return {
-        'message': 'Equipment request submitted successfully.',
-        'request_id': request_id,
-        'event_id': request.event_id,
-        'items': created_items
-    }
+        saved = client.rpc("submit_equipment_request", {
+            "p_event_id": request.event_id, "p_coordinator_id": coordinator_id,
+            "p_items": items,
+        }).execute().data
+    except APIError as error:
+        if error.code == "23505":
+            raise HTTPException(409, "An equipment request has already been submitted for this event.") from error
+        raise HTTPException(500, "Equipment request could not be created.") from error
+    if not saved:
+        raise HTTPException(500, "Equipment request could not be created.")
+    return {"message": "Equipment request submitted successfully.", **saved}
 
 @router.put('/event-coordinators/{coordinator_id}/equipment-requests/{request_id}', dependencies=[Depends(require_coordinator_path)])
 def edit_equipment_request(coordinator_id: str, request_id: int, payload: EquipmentRequestEditInput):

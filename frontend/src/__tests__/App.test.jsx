@@ -20,6 +20,9 @@ vi.mock('../venue_approval', () => ({ default: () => <div>VENUE APPROVAL PAGE</d
 vi.mock('../VenueRequest', () => ({ default: () => <div>VENUE REQUEST PAGE</div> }));
 vi.mock('../VenueCatalogue', () => ({ default: ({ canEdit }) => <div>VENUE CATALOGUE PAGE {canEdit ? 'editable' : 'read-only'}</div> }));
 
+vi.mock('../Notifications', () => ({ default: () => <div>NOTIFICATIONS</div> }));
+vi.mock('../AttendeeWorkspace', () => ({ default: ({ logout }) => <div>ATTENDEE WORKSPACE<button onClick={logout}>Log out</button></div> }));
+
 import App from '../App';
 
 const logout = vi.fn();
@@ -190,12 +193,12 @@ describe('App', () => {
       expect(screen.getByText('VENUE CATALOGUE PAGE read-only')).toBeInTheDocument();
     });
 
-  tc('FE-APP-019', 'AuthedApp (attendee)', 'An Attendee signs in while attendee features are not implemented.', 'No staff workspace is shown and the attendee role is recognized.',
+  tc('FE-APP-019', 'AuthedApp (attendee)', 'An Attendee signs in.', 'The attendee workspace opens without staff controls.',
     { data: 'role = "Attendee"', steps: '1. Render App as attendee.' },
     () => {
       as('Attendee');
       render(<App />);
-      expect(screen.getByText('Attendee features are not available yet.')).toBeInTheDocument();
+      expect(screen.getByText('ATTENDEE WORKSPACE')).toBeInTheDocument();
       expect(screen.queryByText('EVENT COORDINATOR')).toBeNull();
       expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
     });

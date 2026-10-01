@@ -63,6 +63,10 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
     )
     if not profile or not profile.data:
         raise HTTPException(403, "User profile not found.")
+    from database import request_actor
+    context = request_actor.get()
+    if context is not None:
+        context["id"] = str(profile.data["id"])
     return profile.data
 
 

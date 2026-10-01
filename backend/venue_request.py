@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
-from supabase import create_client, Client
+from supabase import Client
+from database import create_client
 from auth import require_coordinator, require_coordinator_path
 import os
 

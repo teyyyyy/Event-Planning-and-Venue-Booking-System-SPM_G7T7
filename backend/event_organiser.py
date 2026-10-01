@@ -6,7 +6,8 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from supabase import Client, create_client
+from supabase import Client
+from database import create_client
 from auth import require_organiser, require_self
 from coordinator_assignment import assign_event
 
