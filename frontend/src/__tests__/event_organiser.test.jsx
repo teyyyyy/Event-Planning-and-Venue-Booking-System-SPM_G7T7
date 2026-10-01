@@ -247,4 +247,66 @@ describe('EventOrganiser', () => {
       expect(await screen.findByText('Submitting event...')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled();
     });
+
+  tc('FE-ORG-024', 'EventOrganiser (edit)', 'The backend cannot be reached while saving changes.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again." and the form stays in edit mode.', { kind: 'Negative', steps: '1. Click "Edit". 2. Make the PUT reject. 3. Save.' },
+    async () => {
+      window.scrollTo = vi.fn();
+      backend([row()], () => { throw new TypeError('Failed to fetch'); });
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.submit(form());
+      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-025', 'EventOrganiser (edit)', 'Saving changes succeeds but refreshing the list fails.', 'Dialog: "Event was updated, but the refreshed event list could not be loaded."', { kind: 'Negative', steps: '1. Click "Edit". 2. Let the PUT succeed but the second list load return 500. 3. Save.' },
+    async () => {
+      window.scrollTo = vi.fn();
+      let lists = 0;
+      mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([row()]) : json({}, 500); } return json({ id: 1 }); });
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.submit(form());
+      expect(await screen.findByText('Event was updated, but the refreshed event list could not be loaded.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-026', 'EventOrganiser (draft)', 'The backend cannot be reached while saving a draft.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again."', { kind: 'Negative', steps: '1. Make the POST reject. 2. Click "Save draft".' },
+    async () => {
+      backend([], () => { throw new TypeError('Failed to fetch'); });
+      render(<EventOrganiser />);
+      await screen.findByText('No submitted event requests found for this organiser.');
+      fillForm();
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-027', 'EventOrganiser (draft)', 'The draft is saved but refreshing the list fails.', 'Dialog: "Draft was saved, but the refreshed event list could not be loaded."', { kind: 'Negative', steps: '1. Let the POST succeed but the second list load return 500. 2. Click "Save draft".' },
+    async () => {
+      let lists = 0;
+      mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([]) : json({}, 500); } return json({ id: 1 }); });
+      render(<EventOrganiser />);
+      await screen.findByText('No submitted event requests found for this organiser.');
+      fillForm();
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText('Draft was saved, but the refreshed event list could not be loaded.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-028', 'EventOrganiser (row actions)', 'The backend cannot be reached when submitting a draft row.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again." and the overlay clears.', { kind: 'Negative', steps: '1. Make the row submit POST reject. 2. Click "Submit" on a draft.' },
+    async () => {
+      backend([row({ status: 'Draft' })], () => { throw new TypeError('Failed to fetch'); });
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
+      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
+      expect(screen.queryByText('Submitting event...')).toBeNull();
+    });
+
+  tc('FE-ORG-029', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request" with the draft values loaded.', { steps: '1. Render a draft request. 2. Click "Edit".' },
+    async () => {
+      window.scrollTo = vi.fn();
+      backend([row({ status: 'Draft', event_name: 'Draft gala' })]);
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
+      expect(field('event_name')).toHaveValue('Draft gala');
+    });
 });

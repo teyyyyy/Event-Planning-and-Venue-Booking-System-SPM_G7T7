@@ -91,6 +91,21 @@ Every test carries its case ID, steps and expected result, and the Word register
 cd docs/test-register && npm install && ./build.sh
 ```
 
+### Automatic checks for new code
+
+`scripts/test-all.sh` runs both suites with coverage gates. It fails if a test fails, if a test
+has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (backend must stay at
+100% of lines; frontend thresholds are in `frontend/vitest.config.js`). It runs automatically:
+
+- **On every push / pull request** — `.github/workflows/tests.yml` also builds the Word register and
+  uploads it as the `unit-test-cases` artifact.
+- **On every commit that touches code or tests** — enable once per clone:
+  `git config core.hooksPath .githooks`
+- **In Claude Code** — `.claude/settings.json` re-runs it after any edit to a backend or frontend source file.
+
+When you add a function, add a test with the next free case ID in the matching `test/test_be_*.py`
+or `frontend/src/__tests__/*.test.jsx`, then run `scripts/test-all.sh --register` to refresh the register.
+
 ## Authentication
 
 Accounts live in **Supabase Auth** (`auth.users`). The React app talks to Supabase

@@ -129,3 +129,47 @@ tc('FE-SP2-012', 'Registration pending', 'The registration response has not arri
   expect(screen.getByRole('button', { name: 'Registered' })).toBeDisabled();
   expect(request).toHaveBeenCalledTimes(2);
 });
+
+tc('FE-SP2-013', 'Close notifications', 'The inbox is open on a linked record and the user closes it.', 'The panel disappears and the #notification link is removed from the address.', { steps: '1. Open #notification/1. 2. Click "Close notifications".' }, async () => {
+  window.history.replaceState(null, '', '/#notification/1');
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record') ? { type: 'event', event } : [notification]));
+  render(<Notifications />);
+  expect(await screen.findByText('Latest details')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Close notifications' }));
+  expect(screen.queryByRole('region', { name: 'Notifications' })).toBeNull();
+  expect(window.location.hash).toBe('');
+});
+
+tc('FE-SP2-014', 'Notification deep link', 'The address changes to a notification link while the app is open.', 'The inbox opens by itself and loads that notification\'s record.', { steps: '1. Render with the inbox closed. 2. Change the hash to #notification/1.' }, async () => {
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record') ? { type: 'event', event } : []));
+  render(<Notifications />);
+  expect(screen.queryByRole('region', { name: 'Notifications' })).toBeNull();
+  window.history.replaceState(null, '', '/#notification/1');
+  await act(async () => { window.dispatchEvent(new HashChangeEvent('hashchange')); });
+  expect(await screen.findByText('Latest details')).toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith('/notifications/1/record');
+});
+
+tc('FE-SP2-015', 'Open and leave a record', 'The user clicks View record, then Back to notifications.', 'The linked record is loaded for that notification and Back returns to the inbox list.', { steps: '1. Open the inbox. 2. Click "View record". 3. Click "Back to notifications".' }, async () => {
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record') ? { type: 'event', event } : [notification]));
+  render(<Notifications />);
+  fireEvent.click(await screen.findByRole('button', { name: 'Notifications (1)' }));
+  fireEvent.click(screen.getByRole('link', { name: 'View record' }));
+  expect(await screen.findByText('Latest details')).toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith('/notifications/1/record');
+  fireEvent.click(screen.getByRole('button', { name: 'Back to notifications' }));
+  expect(screen.queryByRole('region', { name: 'Linked record' })).toBeNull();
+  expect(screen.getByText('Gather cancelled.')).toBeInTheDocument();
+});
+
+tc('FE-SP2-016', 'Equipment notification record', 'An equipment request notification is opened.', 'The request number, status and each requested item with quantity are shown.', { steps: '1. Open notification deep link. 2. Inspect the equipment request.' }, async () => {
+  window.history.replaceState(null, '', '/#notification/1');
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record')
+    ? { type: 'equipment_request', event, record: { request_id: 4, status: 'Updated' }, items: [{ equipment_id: 'MIC', requested_quantity: 2, technical_requirements: 'wireless' }] }
+    : [notification]));
+  render(<Notifications />);
+  expect(await screen.findByText('Equipment request #4')).toBeInTheDocument();
+  expect(screen.getByText('Status: Updated')).toBeInTheDocument();
+  expect(screen.getByText('MIC × 2 wireless')).toBeInTheDocument();
+});
+

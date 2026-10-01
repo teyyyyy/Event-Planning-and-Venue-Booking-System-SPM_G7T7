@@ -140,7 +140,7 @@ def test_technical_support_role_guard():
     assert status_of(auth.require_technical_support, {"id": "c1", "role": "Event Coordinator"})[0] == 403
 
 
-@tc("BE-AUTH-019", "require_attendee", "Caller is an Attendee.", "The user is returned; staff roles are rejected.",
+@tc("BE-AUTH-025", "require_attendee", "Caller is an Attendee.", "The user is returned; staff roles are rejected.",
     steps="1. Check attendee and venue-staff profiles.", kind="Security")
 def test_attendee_role_guard():
     user = {"id": "a1", "role": " Attendee "}
@@ -211,3 +211,19 @@ def test_mfa_can_be_disabled(use_db, monkeypatch):
     monkeypatch.setattr(auth, "MFA_REQUIRED", False)
     use_db(client(), auth)
     assert auth.current_user(f"Bearer {jwt('aal1')}") == PROFILE
+
+
+@tc("BE-AUTH-023", "db", "A guard needs the database client.", "auth.db() returns the shared client built by coordinator_assignment.db().",
+    pre="coordinator_assignment.db is stubbed.", steps="1. Stub coordinator_assignment.db. 2. Call auth.db().", kind="Config")
+def test_db_delegates(monkeypatch):
+    import coordinator_assignment
+    monkeypatch.setattr(coordinator_assignment, "db", lambda: "shared-client")
+    assert auth.db() == "shared-client"
+
+
+@tc("BE-AUTH-024", "require_technical_support_path", "Technical support staff open their own workspace, then another staff member's.", "Own id passes; a different id is HTTP 403.",
+    data="path id t1 vs t2, caller t1", steps="1. Call the guard with the caller's own id. 2. Call it with another id.", kind="Security")
+def test_technical_support_path_identity():
+    user = {"id": "t1", "role": "Technical Support Staff"}
+    assert auth.require_technical_support_path("t1", user) is user
+    assert status_of(auth.require_technical_support_path, "t2", user)[0] == 403
