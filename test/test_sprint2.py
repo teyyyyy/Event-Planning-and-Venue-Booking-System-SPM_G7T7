@@ -200,3 +200,10 @@ def test_failed_read_save(world):
     world.fail_error = APIError({'code':'XX000','message':'Write failed','details':None,'hint':None})
     assert client.patch('/api/notifications/1/read').status_code == 503
     assert world.tables['notifications'][0]['is_read'] is False
+
+@tc("BE-SP2-021", "Booking link missing record", "A venue or equipment notification points to a request that no longer exists.", "HTTP 404 \"Linked record not found.\" instead of an error or another record.", steps="1. Point the notification at a missing venue booking. 2. Repeat for an equipment request.", kind="Negative")
+def test_missing_booking_records(world):
+    for kind in ('venue_booking', 'equipment_request'):
+        world.tables['notifications'][0].update(record_type=kind, record_id='999')
+        response = client.get('/api/notifications/1/record')
+        assert (response.status_code, response.json()['detail']) == (404, 'Linked record not found.'), kind

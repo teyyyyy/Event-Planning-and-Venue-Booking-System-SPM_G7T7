@@ -261,3 +261,25 @@ def test_update_all_or_nothing(use_db):
     ])
     assert err(eu.update_event_equipment_requests, "t1", 1, body)[0] == 400
     assert not client.writes("Equipment Request Item", "update")
+
+
+TWO_REQUESTS = {"Equipment Request": [dict(REQ), {**REQ, "request_id": 8}],
+                "Equipment Request Item": [{"request_id": 7, "equipment_id": "MIC", "requested_quantity": 2},
+                                           {"request_id": 8, "equipment_id": "PRJ", "requested_quantity": 1}]}
+
+
+@tc("BE-EQUPD-035", "equipment_request_summary", "Two requests for the same event each have their own items.", "Each summary line describes only that request's items.", pre="Request 7 has MIC x2, request 8 has PRJ x1.",
+    steps="1. Call equipment_request_summary(\"t1\"). 2. Read each description.", kind="Edge")
+def test_summary_items_are_per_request(use_db):
+    use_db(w(**TWO_REQUESTS), eu)
+    out = eu.equipment_request_summary("t1")
+    assert {r["request_id"]: r["equipment_description"] for r in out} == {7: "Microphone × 2", 8: "Projector × 1"}
+
+
+@tc("BE-EQUPD-036", "event_equipment_requests", "Two requests for the same event each have their own items.", "Each request lists only its own items.", pre="Request 7 has MIC x2, request 8 has PRJ x1.",
+    steps="1. Call event_equipment_requests(\"t1\", 1). 2. Compare items per request.", kind="Edge")
+def test_event_requests_items_are_per_request(use_db):
+    use_db(w(**TWO_REQUESTS), eu)
+    out = eu.event_equipment_requests("t1", 1)
+    requests = out["requests"] if isinstance(out, dict) else out
+    assert {r["request_id"]: [i["equipment_id"] for i in r["items"]] for r in requests} == {7: ["MIC"], 8: ["PRJ"]}

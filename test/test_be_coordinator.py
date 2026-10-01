@@ -351,3 +351,23 @@ def test_coordinator_workloads(use_db):
     steps="1. Read ca.EVENT_STATUSES.", kind="Config")
 def test_status_set():
     assert ca.EVENT_STATUSES == {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
+
+
+@tc("BE-COORD-043", "require_organiser_event", "An organiser opens an event request that is theirs, someone else's, or missing.", "Owner passes; another organiser is HTTP 403; unknown event is HTTP 404.",
+    pre="Event 1 belongs to o1.", data="caller o1 / o2, event 1 / 99", steps="1. Call the guard as o1 for event 1. 2. As o2 for event 1. 3. As o1 for event 99.", kind="Security")
+def test_organiser_event_guard(use_db):
+    use_db(world([event()]), ca)
+    user = {"id": "o1", "role": "Event Organiser"}
+    assert ca.require_organiser_event(1, user) is user
+    assert err(ca.require_organiser_event, 1, {"id": "o2", "role": "Event Organiser"})[0] == 403
+    assert err(ca.require_organiser_event, 99, user)[0] == 404
+
+
+@tc("BE-COORD-044", "require_assigned_coordinator_event", "A coordinator manages an event assigned to them, to someone else, or missing.", "Assigned coordinator passes; another coordinator is HTTP 403; unknown event is HTTP 404.",
+    pre="Event 1 is assigned to c1.", data="caller c1 / c2, event 1 / 99", steps="1. Call the guard as c1 for event 1. 2. As c2 for event 1. 3. As c1 for event 99.", kind="Security")
+def test_assigned_coordinator_event_guard(use_db):
+    use_db(world([event(coordinator_id="c1")]), ca)
+    user = {"id": "c1", "role": "Event Coordinator"}
+    assert ca.require_assigned_coordinator_event(1, user) is user
+    assert err(ca.require_assigned_coordinator_event, 1, {"id": "c2", "role": "Event Coordinator"})[0] == 403
+    assert err(ca.require_assigned_coordinator_event, 99, user)[0] == 404

@@ -335,3 +335,44 @@ def test_list_order_and_scope(use_db):
     tables = {"Equipment Request": [{"request_id": 7, "event_id": 1, "created_by": "c1"}, {"request_id": 8, "event_id": 1, "created_by": "c1"}, {"request_id": 9, "event_id": 1, "created_by": "c2"}]}
     use_db(world(**tables), er)
     assert [r["request_id"] for r in er.get_equipment_requests("c1")] == [8, 7]
+
+
+def rpc_fails(client, code):
+    from postgrest.exceptions import APIError
+
+    def rpc(name, params):
+        def execute():
+            raise APIError({"message": "boom", "code": code, "details": None, "hint": None})
+        return type("Call", (), {"execute": staticmethod(execute)})
+    client.rpc = rpc
+
+
+@tc("BE-EQREQ-047", "create_equipment_request", "The submit RPC reports a unique-key violation (a request was created concurrently).", "HTTP 409 telling the user a request already exists for the event.",
+    pre="submit_equipment_request raises code 23505.", steps="1. Make the RPC raise 23505. 2. Call the route.", kind="Negative")
+def test_create_rpc_duplicate(use_db):
+    client = use_db(world(), er)
+    rpc_fails(client, "23505")
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1))) == (409, "An equipment request has already been submitted for this event.")
+
+
+@tc("BE-EQREQ-048", "create_equipment_request", "The submit RPC fails for any other database reason.", "HTTP 500 \"Equipment request could not be created.\" without database details.",
+    pre="submit_equipment_request raises code XX000.", steps="1. Make the RPC raise XX000. 2. Call the route.", kind="Negative")
+def test_create_rpc_other_error(use_db):
+    client = use_db(world(), er)
+    rpc_fails(client, "XX000")
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1))) == (500, "Equipment request could not be created.")
+
+
+@tc("BE-EQREQ-049", "validate_request_items", "Equipment id is only whitespace.", "HTTP 400 \"Equipment is required.\"", data="equipment_id = \"   \"",
+    steps="1. Validate a single item whose id is blank after trimming.", kind="Negative")
+def test_validate_blank_after_trim():
+    assert err(er.validate_request_items, [Item(equipment_id="   ", requested_quantity=1)], avail()) == (400, "Equipment is required.")
+
+
+@tc("BE-EQREQ-050", "get_equipment_requests", "Two requests each have their own items.", "Each request lists only its own items.", pre="Request 7 has MIC, request 8 has PRJ, both created by c1.",
+    steps="1. Call get_equipment_requests(\"c1\"). 2. Compare items per request.", kind="Edge")
+def test_list_items_are_per_request(use_db):
+    tables = {"Equipment Request": [{"request_id": 7, "event_id": 1, "created_by": "c1"}, {"request_id": 8, "event_id": 1, "created_by": "c1"}],
+              "Equipment Request Item": [{"request_id": 7, "equipment_id": "MIC", "requested_quantity": 1}, {"request_id": 8, "equipment_id": "PRJ", "requested_quantity": 1}]}
+    use_db(world(**tables), er)
+    assert {r["request_id"]: [i["equipment_id"] for i in r["items"]] for r in er.get_equipment_requests("c1")} == {7: ["MIC"], 8: ["PRJ"]}

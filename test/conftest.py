@@ -16,6 +16,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 _RESULTS = []
 
 
+def pytest_collection_modifyitems(items):
+    """New test_*.py tests must carry @tc(...) so they appear in the Word register.
+    The older *_test.py acceptance files predate the register and are exempt."""
+    missing = [i.nodeid for i in items if Path(str(i.fspath)).name.startswith("test_") and not hasattr(getattr(i, "function", None), "tc_meta")]
+    if missing:
+        raise pytest.UsageError("Tests missing @tc(...) documentation:\n  " + "\n  ".join(missing))
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     report = (yield).get_result()

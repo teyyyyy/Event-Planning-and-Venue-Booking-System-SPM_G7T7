@@ -4,9 +4,10 @@ import { writeFileSync } from 'node:fs';
 export default class RegisterReporter {
   onFinished(files = []) {
     const path = process.env.TC_RESULTS_PATH;
-    if (!path) return;
     const out = [];
+    const undocumented = [];
     const walk = (task) => {
+      if (task.type === 'test' && !task.meta?.tc) undocumented.push(task.name);
       if (task.type === 'test' && task.meta?.tc) {
         const state = task.result?.state;
         out.push({
@@ -19,6 +20,11 @@ export default class RegisterReporter {
       (task.tasks || []).forEach(walk);
     };
     files.forEach(walk);
-    writeFileSync(path, JSON.stringify(out, null, 1));
+    // A test without tc() would never reach the Word register, so treat it as a failure.
+    if (undocumented.length) {
+      console.error(`\nTests missing tc() documentation:\n  ${undocumented.join('\n  ')}`);
+      process.exitCode = 1;
+    }
+    if (path) writeFileSync(path, JSON.stringify(out, null, 1));
   }
 }
