@@ -11,7 +11,6 @@ from fastapi import Depends, Header, HTTPException
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
-
 def db():
     from coordinator_assignment import db as coordinator_db
 
