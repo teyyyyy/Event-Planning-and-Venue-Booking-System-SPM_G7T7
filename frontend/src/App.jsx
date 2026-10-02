@@ -243,7 +243,6 @@ function CoordinatorWorkspace({ user, logout }) {
 // Event Organiser workspace
 function OrganiserWorkspace({ user, logout }) {
   const [activeRole, setActiveRole] = useState("organiser");
-  const [editingEvent, setEditingEvent] = useState(null);
 
   return (
     <div className="coordinator-workspace">
@@ -292,19 +291,9 @@ function OrganiserWorkspace({ user, logout }) {
       <div className="coordinator-main">
         <div className="embedded-existing-page">
           {activeRole === "organiser" ? (
-            <EventOrganiser
-              user={user}
-              editingEvent={editingEvent}
-              onEditComplete={() => setEditingEvent(null)}
-            />
+            <EventOrganiser user={user} />
           ) : (
-            <CoordinatorAssignment
-              user={user}
-              onEditEvent={(event) => {
-                setEditingEvent(event);
-                setActiveRole("organiser");
-              }}
-            />
+            <CoordinatorAssignment user={user} />
           )}
         </div>
       </div>

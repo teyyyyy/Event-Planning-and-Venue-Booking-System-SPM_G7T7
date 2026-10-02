@@ -8,7 +8,7 @@ vi.mock('../AuthContext', () => ({ useAuth: () => auth.value }));
 vi.mock('../Login', () => ({ default: () => <div>LOGIN SCREEN</div> }));
 vi.mock('../MfaChallenge', () => ({ default: () => <div>MFA SCREEN</div> }));
 vi.mock('../coordinator_assignment', () => ({
-  default: ({ onEditEvent }) => <div>COORDINATOR PAGE<button onClick={() => onEditEvent({ id: 5 })}>trigger edit</button></div>,
+  default: ({ onEditEvent, user }) => <div>{user?.role?.trim().toLowerCase() === 'event organiser' ? 'EVENT STATUS PAGE' : 'COORDINATOR PAGE'}{onEditEvent && <button onClick={() => onEditEvent({ id: 5 })}>trigger edit</button>}</div>,
 }));
 vi.mock('../event_organiser', () => ({
   default: ({ editingEvent, onEditComplete }) => <div>ORGANISER PAGE {editingEvent ? `editing ${editingEvent.id}` : 'new'}<button onClick={onEditComplete}>finish edit</button></div>,
@@ -110,14 +110,16 @@ describe('App', () => {
       expect(screen.getByText('ORGANISER PAGE new')).toBeInTheDocument();
     });
 
-  tc('FE-APP-010', 'AuthedApp (organiser)', 'Organiser opens the "Event status" tab and edits an event.', 'Status view shows; choosing edit switches back to the form pre-filled with that event.',
-    { steps: '1. Render as organiser. 2. Click "Event status". 3. Trigger onEditEvent.' },
+  tc('FE-APP-010', 'AuthedApp (organiser)', 'Organiser opens the "Event status" tab.',
+    'The Event Status view is shown without switching back to the Create event form.',
+    { steps: '1. Render as organiser. 2. Click "Event status".' },
     () => {
       as('event organiser');
       render(<App />);
       fireEvent.click(screen.getByRole('button', { name: 'Event status' }));
-      fireEvent.click(screen.getByText('trigger edit'));
-      expect(screen.getByText('ORGANISER PAGE editing 5')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Event status' })).toHaveClass('active');
+      expect(screen.getByText('EVENT STATUS PAGE')).toBeInTheDocument();
+      expect(screen.queryByText('ORGANISER PAGE editing 5')).not.toBeInTheDocument();
     });
 
   tc('FE-APP-011', 'AuthedApp (venue staff)', 'A Venue Staff user is signed in.', 'The venue-staff sidebar shows with the editable Venue Catalogue open by default and a Log out button.',

@@ -70,6 +70,18 @@ uvicorn main:app --reload --port 8000
 The backend exposes the event-organiser and coordinator-assignment routers; it
 reads `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` from the repo-root `.env`.
 
+## Event change requests
+
+Before using the organiser's **Request changes** action, run
+`backend/sql/event_change_requests.sql` in the Supabase SQL Editor after
+`backend/sql/sprint2_registration_notifications.sql`. The migration stores each
+proposed event version and organiser summary in `event_change_requests`, then
+notifies the assigned coordinator in the same database transaction. Event
+details remain unchanged when a request is submitted. Applying an approved
+proposal to the event details is not implemented yet. Requests are available
+for submitted and active events with an assigned coordinator; Draft, Completed,
+Cancelled, and Rejected events cannot receive change requests.
+
 ## Tests
 
 Unit tests: Vitest + React Testing Library (frontend) and pytest (backend). No database or

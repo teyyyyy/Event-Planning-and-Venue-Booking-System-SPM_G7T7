@@ -6,7 +6,7 @@ import { json, mockFetch, callsTo } from '../test/helpers';
 
 import EventOrganiser from '../event_organiser';
 
-const row = (o = {}) => ({ id: 1, event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 50, description: 'd', start_time: '09:00:00', end_time: '17:00:00', status: 'Submitted', ...o });
+const row = (o = {}) => ({ id: 1, event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 50, description: 'd', start_time: '09:00:00', end_time: '17:00:00', status: 'Draft', ...o });
 const field = (name) => document.querySelector(`[name=${name}]`);
 const form = () => document.querySelector('form.request-form');
 
@@ -20,21 +20,21 @@ const backend = (list = [], other = () => json({})) =>
   mockFetch((url, o) => (url.endsWith('/submitted-requests') ? json(list) : other(url, o)));
 
 describe('EventOrganiser', () => {
-  tc('FE-ORG-001', 'EventOrganiser', 'The organiser page opens.', 'A loading row shows first, then the organiser\'s requests with name, capacity, type, dates and status.',
+  tc('FE-ORG-001', 'EventOrganiser', 'The organiser opens the Create event tab.', 'A loading row shows first, then only Draft records appear with name, capacity, type, dates and status.',
     { pre: 'Backend returns one request.', steps: '1. Render. 2. Wait for the table.' },
     async () => {
       backend([row()]);
       render(<EventOrganiser />);
-      expect(screen.getByText('Loading events for this organiser...')).toBeInTheDocument();
+      expect(screen.getByText('Loading draft events...')).toBeInTheDocument();
       expect(await screen.findByText('Gala')).toBeInTheDocument();
       expect(screen.getByText('50 attendee capacity')).toBeInTheDocument();
-      expect(screen.getByText('Submitted')).toBeInTheDocument();
+      expect(screen.getByText('Draft')).toBeInTheDocument();
     });
 
-  tc('FE-ORG-002', 'EventOrganiser', 'No requests exist for the organiser.', '"No submitted event requests found for this organiser." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
-    async () => { backend([]); render(<EventOrganiser />); expect(await screen.findByText('No submitted event requests found for this organiser.')).toBeInTheDocument(); });
+  tc('FE-ORG-002', 'EventOrganiser', 'No Draft requests exist for the organiser.', '"No draft event requests found for this organiser." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
+    async () => { backend([]); render(<EventOrganiser />); expect(await screen.findByText('No draft event requests found for this organiser.')).toBeInTheDocument(); });
 
-  tc('FE-ORG-003', 'EventOrganiser', 'Loading the requests fails.', 'The message "Unable to load event requests." is shown.', { kind: 'Negative', steps: '1. Return 500. 2. Render.' },
+  tc('FE-ORG-003', 'EventOrganiser', 'Loading the Draft requests fails.', 'The message "Unable to load event requests." is shown.', { kind: 'Negative', steps: '1. Return 500. 2. Render.' },
     async () => { mockFetch(() => json({}, 500)); render(<EventOrganiser />); expect(await screen.findByText('Unable to load event requests.')).toBeInTheDocument(); });
 
   tc('FE-ORG-004', 'EventOrganiser', 'A multi-day request is listed.', 'The date column shows "<start> to <end>" followed by the time range.', { data: '2026-10-01 to 2026-10-03', steps: '1. Render with a multi-day request.' },
@@ -54,7 +54,7 @@ describe('EventOrganiser', () => {
     async () => {
       const f = backend([], () => json({ id: 9 }));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       expect(await screen.findByText('Event request submitted successfully and added to the table.')).toBeInTheDocument();
@@ -67,7 +67,7 @@ describe('EventOrganiser', () => {
     async () => {
       const f = backend([]);
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm({ event_date: '2026-10-05', event_end_date: '2026-10-01' });
       fireEvent.submit(form());
       expect(await screen.findByText('End date cannot be before the start date.')).toBeInTheDocument();
@@ -78,7 +78,7 @@ describe('EventOrganiser', () => {
     async () => {
       const f = backend([]);
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm({ start_time: '09:00', end_time: '09:00' });
       fireEvent.submit(form());
       expect(await screen.findByText('End time must be later than the start time.')).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe('EventOrganiser', () => {
     async () => {
       const f = backend([], () => json({ id: 1 }));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm({ event_end_date: '2026-10-03', end_time: '08:00' });
       fireEvent.submit(form());
       await waitFor(() => expect(callsTo(f, '/requests/submit', 'POST')).toHaveLength(1));
@@ -100,7 +100,7 @@ describe('EventOrganiser', () => {
     async () => {
       backend([], () => json({ detail: 'Event date cannot be in the past.' }, 400));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       expect(await screen.findByText('Submission unsuccessful')).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('EventOrganiser', () => {
     async () => {
       backend([], () => { throw new TypeError('Failed to fetch'); });
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe('EventOrganiser', () => {
       let lists = 0;
       mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([]) : json({}, 500); } return json({ id: 1 }); });
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       expect(await screen.findByText('Event was submitted, but the refreshed event list could not be loaded.')).toBeInTheDocument();
@@ -133,7 +133,7 @@ describe('EventOrganiser', () => {
     async () => {
       const f = backend([], () => json({ id: 3 }));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
       expect(await screen.findByText('Draft saved')).toBeInTheDocument();
@@ -144,43 +144,26 @@ describe('EventOrganiser', () => {
     async () => {
       backend([], () => json({ detail: 'Use a valid event date and time.' }, 400));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
       expect(await screen.findByText('Use a valid event date and time.')).toBeInTheDocument();
     });
 
-  tc('FE-ORG-015', 'EventOrganiser (row actions)', 'Rows in Submitted and Draft status are listed.', 'Submitted rows show only Edit; Draft rows show Submit and Edit.', { data: 'Submitted, Draft, Approved', steps: '1. Render three requests.' },
+  tc('FE-ORG-015', 'EventOrganiser (Draft list)', 'Rows in Submitted, Draft and Approved status are returned.', 'The Create event table shows only the Draft row, with Edit as its only action.', { data: 'Submitted, Draft, Approved', steps: '1. Render three requests.' },
     async () => {
       backend([row({ id: 1, event_name: 'Sub', status: 'Submitted' }), row({ id: 2, event_name: 'Dra', status: 'Draft' }), row({ id: 3, event_name: 'App', status: 'Approved' })]);
       render(<EventOrganiser />);
-      await screen.findByText('Sub');
+      await screen.findByText('Dra');
       const buttons = (n) => Array.from(screen.getByText(n).closest('tr').querySelectorAll('button')).map((b) => b.textContent);
-      expect(buttons('Sub')).toEqual(['Edit']);
-      expect(buttons('Dra')).toEqual(['Submit', 'Edit']);
-      expect(buttons('App')).toEqual([]);
+      expect(buttons('Dra')).toEqual(['Edit']);
+      expect(screen.queryByText('Sub')).not.toBeInTheDocument();
+      expect(screen.queryByText('App')).not.toBeInTheDocument();
     });
 
-  tc('FE-ORG-016', 'EventOrganiser (row actions)', 'Organiser clicks Submit on a Draft row.', 'POST /requests/<id>/submit is sent and "Event request submitted successfully." is shown.', { steps: '1. Render a draft. 2. Click its "Submit".' },
-    async () => {
-      const f = backend([row({ status: 'Draft' })], () => json({ id: 1 }));
-      render(<EventOrganiser />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
-      expect(await screen.findByText('Event request submitted successfully.')).toBeInTheDocument();
-      expect(callsTo(f, '/requests/1/submit', 'POST')).toHaveLength(1);
-    });
-
-  tc('FE-ORG-017', 'EventOrganiser (row actions)', 'The row Submit call is rejected.', 'Error dialog with the backend detail.', { kind: 'Negative', steps: '1. Return 400 for the submit. 2. Click "Submit" on a draft.' },
-    async () => {
-      backend([row({ status: 'Draft' })], () => json({ detail: 'Only completed draft requests can be submitted.' }, 400));
-      render(<EventOrganiser />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
-      expect(await screen.findByText('Only completed draft requests can be submitted.')).toBeInTheDocument();
-    });
-
-  tc('FE-ORG-018', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Submitted row.', 'The form switches to "Update event request", loads the row values (times as HH:MM) and hides "Save draft".', { steps: '1. Render a submitted request. 2. Click "Edit".' },
+  tc('FE-ORG-018', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request", loads the row values (times as HH:MM) and hides "Save draft".', { steps: '1. Render a draft request. 2. Click "Edit".' },
     async () => {
       window.scrollTo = vi.fn();
-      backend([row()]);
+      backend([row({ status: 'Draft' })]);
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
@@ -192,7 +175,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-019', 'EventOrganiser (edit)', 'Organiser saves changes to an existing request.', 'PUT /requests/<id> is sent with the edited values and "Event request updated successfully." is shown.', { data: 'event_name = "Gala 2"', steps: '1. Click "Edit". 2. Change the name. 3. Click "Save changes".' },
     async () => {
       window.scrollTo = vi.fn();
-      const f = backend([row()], () => json({ id: 1 }));
+      const f = backend([row({ status: 'Draft' })], () => json({ id: 1 }));
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.change(field('event_name'), { target: { value: 'Gala 2' } });
@@ -205,7 +188,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-020', 'EventOrganiser (edit)', 'Saving changes is rejected.', 'Error dialog with the backend detail; still in edit mode.', { kind: 'Negative', data: '403 "This event request cannot be updated during its current status."', steps: '1. Click "Edit". 2. Return 403 on PUT. 3. Save.' },
     async () => {
       window.scrollTo = vi.fn();
-      backend([row()], () => json({ detail: 'This event request cannot be updated during its current status.' }, 403));
+      backend([row({ status: 'Draft' })], () => json({ detail: 'This event request cannot be updated during its current status.' }, 403));
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.submit(form());
@@ -229,7 +212,7 @@ describe('EventOrganiser', () => {
     async () => {
       backend([], () => json({ detail: 'Nope' }, 400));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       await screen.findByRole('alertdialog');
@@ -241,7 +224,7 @@ describe('EventOrganiser', () => {
     async () => {
       mockFetch((url) => (url.endsWith('/submitted-requests') ? json([]) : new Promise(() => {})));
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.submit(form());
       expect(await screen.findByText('Submitting event...')).toBeInTheDocument();
@@ -251,7 +234,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-024', 'EventOrganiser (edit)', 'The backend cannot be reached while saving changes.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again." and the form stays in edit mode.', { kind: 'Negative', steps: '1. Click "Edit". 2. Make the PUT reject. 3. Save.' },
     async () => {
       window.scrollTo = vi.fn();
-      backend([row()], () => { throw new TypeError('Failed to fetch'); });
+      backend([row({ status: 'Draft' })], () => { throw new TypeError('Failed to fetch'); });
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.submit(form());
@@ -263,7 +246,7 @@ describe('EventOrganiser', () => {
     async () => {
       window.scrollTo = vi.fn();
       let lists = 0;
-      mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([row()]) : json({}, 500); } return json({ id: 1 }); });
+      mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([row({ status: 'Draft' })]) : json({}, 500); } return json({ id: 1 }); });
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.submit(form());
@@ -274,7 +257,7 @@ describe('EventOrganiser', () => {
     async () => {
       backend([], () => { throw new TypeError('Failed to fetch'); });
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
       expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
@@ -285,19 +268,10 @@ describe('EventOrganiser', () => {
       let lists = 0;
       mockFetch((url) => { if (url.endsWith('/submitted-requests')) { lists += 1; return lists === 1 ? json([]) : json({}, 500); } return json({ id: 1 }); });
       render(<EventOrganiser />);
-      await screen.findByText('No submitted event requests found for this organiser.');
+      await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
       fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
       expect(await screen.findByText('Draft was saved, but the refreshed event list could not be loaded.')).toBeInTheDocument();
-    });
-
-  tc('FE-ORG-028', 'EventOrganiser (row actions)', 'The backend cannot be reached when submitting a draft row.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again." and the overlay clears.', { kind: 'Negative', steps: '1. Make the row submit POST reject. 2. Click "Submit" on a draft.' },
-    async () => {
-      backend([row({ status: 'Draft' })], () => { throw new TypeError('Failed to fetch'); });
-      render(<EventOrganiser />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
-      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
-      expect(screen.queryByText('Submitting event...')).toBeNull();
     });
 
   tc('FE-ORG-029', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request" with the draft values loaded.', { steps: '1. Render a draft request. 2. Click "Edit".' },
@@ -308,5 +282,23 @@ describe('EventOrganiser', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
       expect(field('event_name')).toHaveValue('Draft gala');
+    });
+
+  tc('FE-ORG-030', 'EventOrganiser (Draft list)', 'Only Draft requests exist among the organiser events.',
+    'The Draft row is shown while non-Draft rows are omitted from the Create event table.',
+    { data: 'Draft, Completed, Cancelled, Rejected', kind: 'Edge', steps: '1. Render events in each status. 2. Inspect the Create event table.' },
+    async () => {
+      backend([
+        row({ id: 1, status: 'Draft' }),
+        row({ id: 2, status: 'Completed' }),
+        row({ id: 3, status: 'Cancelled' }),
+        row({ id: 4, status: 'Rejected' }),
+      ]);
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      expect(screen.getByText('Gala')).toBeInTheDocument();
+      expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+      expect(screen.queryByText('Cancelled')).not.toBeInTheDocument();
+      expect(screen.queryByText('Rejected')).not.toBeInTheDocument();
     });
 });
