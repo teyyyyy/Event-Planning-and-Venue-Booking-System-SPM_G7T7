@@ -23,6 +23,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   const [requests, setRequests] = useState([]);
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
+  const [isEditingDraft, setIsEditingDraft] = useState(false);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState(null);
   const [loadingAction, setLoadingAction] = useState(null);
@@ -47,6 +48,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   useEffect(() => {
     if (!editingEvent) return;
     setEditingId(editingEvent.id);
+    setIsEditingDraft(String(editingEvent.status ?? editingEvent.event_status ?? '').trim().toLowerCase() === 'draft');
     setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [
       key,
       key === 'event_name'
@@ -62,6 +64,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
 
   function editRequest(request) {
     setEditingId(request.id);
+    setIsEditingDraft(true);
     setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [key, key.endsWith('_time') ? formTime(request[key]) : key === 'event_end_date' ? (request[key] ?? request.event_date ?? '') : request[key] ?? ''])));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -103,10 +106,24 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     if (scheduleProblem) return setNotice({ type: 'error', text: scheduleProblem });
     setLoadingAction('submit');
     let response;
+    let draftUpdated = false;
     try {
-      response = await fetch(`${API}/event-organisers/${organiserId}/requests/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      const requestsUrl = `${API}/event-organisers/${organiserId}/requests`;
+      if (isEditingDraft) {
+        response = await fetch(`${requestsUrl}/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+        const updateResult = await response.json();
+        if (!response.ok) {
+          setNotice({ type: 'error', text: updateResult.detail || 'Could not update request.' });
+          setLoadingAction(null);
+          return;
+        }
+        draftUpdated = true;
+        response = await fetch(`${requestsUrl}/${editingId}/submit`, { method: 'POST' });
+      } else {
+        response = await fetch(`${requestsUrl}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      }
     } catch (error) {
-      setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
+      setNotice({ type: 'error', text: `${draftUpdated ? 'Draft changes were saved, but submission failed. ' : ''}Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
       return;
     }
@@ -123,7 +140,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
       setLoadingAction(null);
       return;
     }
-    setForm(emptyRequest); setEditingId(null); setNotice({ type: 'success', text: 'Event request submitted successfully and added to the table.' }); setLoadingAction(null);
+    setForm(emptyRequest); setEditingId(null); setIsEditingDraft(false); setNotice({ type: 'success', text: 'Event request submitted successfully and added to the table.' }); setLoadingAction(null);
   }
 
   async function saveDraft() {
@@ -131,7 +148,12 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     setLoadingAction('draft');
     let response;
     try {
-      response = await fetch(`${API}/event-organisers/${organiserId}/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      const requestsUrl = `${API}/event-organisers/${organiserId}/requests`;
+      response = await fetch(editingId && isEditingDraft ? `${requestsUrl}/${editingId}` : requestsUrl, {
+        method: editingId && isEditingDraft ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }),
+      });
     } catch (error) {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
@@ -139,26 +161,26 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     }
     const result = await response.json();
     if (!response.ok) {
-      setNotice({ type: 'error', text: result.detail || 'Event draft could not be saved.' });
+      setNotice({ type: 'error', text: result.detail || (editingId ? 'Event draft could not be updated.' : 'Event draft could not be saved.') });
       setLoadingAction(null);
       return;
     }
     try {
       await loadRequests();
     } catch (error) {
-      setNotice({ type: 'error', text: 'Draft was saved, but the refreshed event list could not be loaded.' });
+      setNotice({ type: 'error', text: `${editingId ? 'Draft was updated' : 'Draft was saved'}, but the refreshed event list could not be loaded.` });
       setLoadingAction(null);
       return;
     }
-    setForm(emptyRequest); setNotice({ type: 'success', title: 'Draft saved', text: 'Event draft saved successfully and added to the table.' }); setLoadingAction(null);
+    setForm(emptyRequest); setEditingId(null); setIsEditingDraft(false); setNotice({ type: 'success', title: 'Draft saved', text: editingId ? 'Event draft updated successfully.' : 'Event draft saved successfully and added to the table.' }); setLoadingAction(null);
   }
 
   return <main className="shell organiser-shell">
     <aside><div className="logo">G</div><div className="side-label">EVENT ORGANISER</div></aside>
     <section className="content">
       <header><div><p className="kicker">Gather / Planning desk</p><h1>Event requests</h1></div><span className="live">● Supabase connected</span></header>
-      <form className="request-form" onSubmit={editingId ? saveChanges : submitForm}>
-        <div className="form-heading"><div><h2>{editingId ? 'Update event request' : 'Create event request'}</h2><p>Capture the details ConnectSphere needs to plan your event.</p></div><div className="form-actions">{!editingId && <button className="secondary" type="button" onClick={saveDraft} disabled={isSubmitting}>{loadingAction === 'draft' ? <span className="spinner" aria-label="Saving draft" /> : 'Save draft'}</button>}<button className="primary" type="submit" disabled={isSubmitting}>{loadingAction === 'submit' || loadingAction === 'edit' ? <span className="spinner" aria-label={editingId ? 'Saving changes' : 'Submitting request'} /> : (editingId ? 'Save changes' : 'Submit request')}</button></div></div>
+      <form className="request-form" onSubmit={editingId && !isEditingDraft ? saveChanges : submitForm}>
+        <div className="form-heading"><div><h2>{editingId ? 'Update event request' : 'Create event request'}</h2><p>Capture the details ConnectSphere needs to plan your event.</p></div><div className="form-actions">{(!editingId || isEditingDraft) && <button className="secondary" type="button" onClick={saveDraft} disabled={isSubmitting}>{loadingAction === 'draft' ? <span className="spinner" aria-label="Saving draft" /> : 'Save draft'}</button>}<button className="primary" type="submit" disabled={isSubmitting}>{loadingAction === 'submit' || loadingAction === 'edit' ? <span className="spinner" aria-label={editingId && !isEditingDraft ? 'Saving changes' : 'Submitting request'} /> : (editingId && !isEditingDraft ? 'Save changes' : 'Submit request')}</button></div></div>
         <div className="form-grid"><label>Event name<input name="event_name" value={form.event_name} onChange={change} required /></label><label>Event type<select name="event_type" value={form.event_type} onChange={change} required><option value="">Select event type</option>{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Start date<input name="event_date" type="date" min={today} value={form.event_date} onChange={change} required /></label><label>End date<input name="event_end_date" type="date" min={form.event_date || today} value={form.event_end_date} onChange={change} required /></label><label>Capacity<select name="event_capacity" value={form.event_capacity} onChange={change} required><option value="">Select capacity</option>{capacityOptions.map(({ label, value }) => <option key={value} value={value}>{label}</option>)}</select></label><label>Start time<select name="start_time" value={form.start_time} onChange={change} required><option value="">Select start time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label>End time<select name="end_time" value={form.end_time} onChange={change} required><option value="">Select end time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label className="wide">Description and planning requirements<textarea name="description" value={form.description} onChange={change} required rows="6" placeholder="Include the purpose, venue requirements, accessibility needs, equipment requirements, and registration needs." /></label></div>
       </form>
       {message && <p className="message">{message}</p>}
