@@ -33,7 +33,7 @@ const SECTIONS = [
     intro: 'Feature code: APP. Covers which workspace and navigation each role sees (frontend/src/App.jsx) and the FastAPI application wiring — routers, CORS and request validation (backend/main.py).',
     fe: 'frontend/src/__tests__/App.test.jsx', be: 'test/test_be_app.py, test/test_role_access.py' },
   { n: '6.3', title: 'Event organiser — event requests', prefixes: ['FE-ORG', 'BE-ORG'],
-    intro: 'Feature code: ORG. Creating, drafting, editing and submitting event requests, including schedule validation and multi-day events.',
+    intro: 'Feature code: ORG. Creating, drafting, editing and submitting event requests, including schedule validation and multi-day events. Organisers can also save change requests against submitted/active events; the assigned coordinator is notified atomically. Database behavior is verified in test/sprint2_sql.mjs.',
     fe: 'frontend/src/__tests__/event_organiser.test.jsx', be: 'test/test_be_organiser.py' },
   { n: '6.4', title: 'Coordinator assignment and event status', prefixes: ['FE-COORD', 'BE-COORD'],
     intro: 'Feature code: COORD. Automatic assignment to the least-loaded coordinator, reassignment, status changes and workload counting.',

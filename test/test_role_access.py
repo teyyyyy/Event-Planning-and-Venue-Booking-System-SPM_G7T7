@@ -154,6 +154,29 @@ def assert_role_access(client, role, user_id):
         else:
             assert response.status_code == 403, f"{role} must not access {method} {path}: {response.status_code} {response.text}"
 
+    change_request_path = f"/api/event-organisers/{user_id}/requests/1/change-requests"
+    proposal = {
+        "request_text": "Update the schedule",
+        "event_name": "Gala",
+        "event_type": "Workshop",
+        "event_date": (date.today() + timedelta(days=10)).isoformat(),
+        "event_end_date": (date.today() + timedelta(days=10)).isoformat(),
+        "event_capacity": 10,
+        "description": "Role access test",
+        "start_time": "09:00",
+        "end_time": "17:00",
+    }
+    change_response = client.post(change_request_path, json=proposal)
+    if role == "Event Organiser":
+        assert change_response.status_code == 200, change_response.text
+    else:
+        assert change_response.status_code == 403, f"{role} must not create event change requests."
+    assert client.post(
+        f"/api/event-organisers/{user_id}-other/requests/1/change-requests",
+        json=proposal,
+    ).status_code == 403
+
+
 
 @tc("BE-ROLE-001", "Role access matrix", "An Event Organiser requests permitted and restricted route families.", "Only the organiser's own event request and profile routes are accessible.", steps="1. Authenticate as an Event Organiser. 2. Request each route in the role matrix.", kind="Security")
 def test_event_organiser_access(monkeypatch):

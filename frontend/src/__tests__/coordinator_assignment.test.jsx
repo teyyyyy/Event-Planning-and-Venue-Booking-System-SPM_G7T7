@@ -8,7 +8,7 @@ import CoordinatorAssignment from '../coordinator_assignment';
 
 const ORGANISER = { id: 'o1', role: 'Event Organiser' };
 const COORDINATOR = { id: 'c1', role: 'Event Coordinator' };
-const ev = (o = {}) => ({ id: 1, event_title: 'Gala', event_date: '2026-10-01', event_end_date: '2026-10-01', event_status: 'Submitted', assigned_coordinator_id: null, coordinator_name: null, coordinator_email: null, ...o });
+const ev = (o = {}) => ({ id: 1, event_title: 'Gala', event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 10, description: 'Initial plan', start_time: '09:00:00', end_time: '17:00:00', event_status: 'Submitted', assigned_coordinator_id: null, coordinator_name: null, coordinator_email: null, ...o });
 
 describe('CoordinatorAssignment', () => {
   tc('FE-COORD-001', 'CoordinatorAssignment (organiser view)', 'An organiser opens the page.', 'Their events are fetched from /event-organisers/<id>/requests and shown with title, date and status; the heading is "Event status".',
@@ -94,45 +94,84 @@ describe('CoordinatorAssignment', () => {
       expect(await screen.findByText('Email unavailable')).toBeInTheDocument();
     });
 
-  tc('FE-COORD-009', 'CoordinatorAssignment', 'An event is Draft and the organiser clicks Submit.', 'POST /event-organisers/<id>/requests/<eventId>/submit is sent, "Request submitted for review." stays on screen and the list reloads.',
-    { pre: 'Event status Draft.', steps: '1. Render. 2. Click "Submit".' },
+  tc('FE-COORD-009', 'CoordinatorAssignment (organiser status)', 'The organiser has only Draft events.',
+    'The Event status table excludes Draft events and displays its empty state.',
+    { pre: 'The organiser has one Draft event.', steps: '1. Render the Event status tab.' },
     async () => {
-      const f = mockFetch((url) => url.endsWith('/submit') ? json({}) : json([ev({ event_status: 'Draft' })]));
+      mockFetch(() => json([ev({ event_status: 'Draft' })]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
-      expect(await screen.findByText('Request submitted for review.')).toBeInTheDocument();
-      expect(callsTo(f, '/requests/1/submit', 'POST')).toHaveLength(1);
-      await waitFor(() => expect(callsTo(f, '/event-organisers/o1/requests', 'GET').length).toBeGreaterThan(1));
+      expect(await screen.findByText('No event requests found.')).toBeInTheDocument();
     });
 
-  tc('FE-COORD-010', 'CoordinatorAssignment', 'Submitting a draft fails.', 'The backend detail is shown.', { kind: 'Negative', steps: '1. Return 400 for submit. 2. Click "Submit".' },
+  tc('FE-COORD-011', 'CoordinatorAssignment (organiser status)', 'Events in different statuses are listed.',
+    'Draft is omitted; active events show Request changes; Completed, Cancelled and Rejected have no action.',
+    { data: 'Draft, Submitted, Approved, Completed, Cancelled, Rejected', steps: '1. Render events in these statuses. 2. Inspect rows and actions.' },
     async () => {
-      mockFetch((url) => url.endsWith('/submit') ? json({ detail: 'Only completed draft requests can be submitted.' }, 400) : json([ev({ event_status: 'Draft' })]));
+      mockFetch(() => json([
+        ev({ id: 1, event_title: 'D', event_status: 'Draft', coordinator_name: 'Zed' }),
+        ev({ id: 2, event_title: 'Sub', event_status: 'Submitted', coordinator_name: 'Zed' }),
+        ev({ id: 3, event_title: 'Appr', event_status: 'Approved', coordinator_name: 'Zed' }),
+        ev({ id: 4, event_title: 'Comp', event_status: 'Completed', coordinator_name: 'Zed' }),
+        ev({ id: 5, event_title: 'Can', event_status: 'Cancelled', coordinator_name: 'Zed' }),
+        ev({ id: 6, event_title: 'Rej', event_status: 'Rejected', coordinator_name: 'Zed' }),
+      ]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
-      expect(await screen.findByText('Only completed draft requests can be submitted.')).toBeInTheDocument();
-    });
-
-  tc('FE-COORD-011', 'CoordinatorAssignment', 'Events in different statuses are listed.', 'Draft shows Submit only; Submitted/Under review/Approved/Planning/Confirmed show Edit; Completed shows neither.',
-    { data: 'Draft, Approved, Completed', steps: '1. Render three events with these statuses.' },
-    async () => {
-      mockFetch(() => json([ev({ id: 1, event_title: 'D', event_status: 'Draft', coordinator_name: 'Zed' }), ev({ id: 2, event_title: 'Appr', event_status: 'Approved', coordinator_name: 'Zed' }), ev({ id: 3, event_title: 'Comp', event_status: 'Completed', coordinator_name: 'Zed' })]));
-      render(<CoordinatorAssignment user={ORGANISER} />);
-      await screen.findByText('D');
+      await screen.findByText('Sub');
       const row = (t) => screen.getByText(t).closest('tr');
-      expect(within(row('D')).queryByRole('button', { name: 'Edit' })).toBeNull();
-      expect(within(row('D')).getByRole('button', { name: 'Submit' })).toBeInTheDocument();
-      expect(within(row('Appr')).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-      expect(within(row('Comp')).queryByRole('button')).toBeNull();
+      expect(screen.queryByText('D')).not.toBeInTheDocument();
+      expect(within(row('Sub')).getByRole('button', { name: 'Request changes' })).toBeInTheDocument();
+      expect(within(row('Appr')).getByRole('button', { name: 'Request changes' })).toBeInTheDocument();
+      for (const name of ['Comp', 'Can', 'Rej']) {
+        expect(within(row(name)).queryByRole('button')).toBeNull();
+      }
     });
 
-  tc('FE-COORD-012', 'CoordinatorAssignment', 'Organiser clicks Edit on an event.', 'onEditEvent is called with that event object.', { steps: '1. Render an Approved event. 2. Click "Edit".' },
+  tc('FE-COORD-012', 'CoordinatorAssignment (organiser status)', 'Organiser requests changes to an active event.',
+    'The existing event values populate an editable form and the complete proposal plus summary are posted for coordinator approval.',
+    { steps: '1. Render an Approved event. 2. Open Request changes. 3. Edit a field and enter the summary. 4. Send for approval.' },
     async () => {
-      const onEditEvent = vi.fn();
-      mockFetch(() => json([ev({ event_status: 'Approved', coordinator_name: 'A' })]));
-      render(<CoordinatorAssignment user={ORGANISER} onEditEvent={onEditEvent} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
-      expect(onEditEvent).toHaveBeenCalledWith(expect.objectContaining({ id: 1, event_title: 'Gala' }));
+      const f = mockFetch((url) => url.endsWith('/change-requests')
+        ? json({ id: 42, event_id: 1 })
+        : json([ev({ event_status: 'Approved', coordinator_name: 'A' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
+      expect(screen.getByLabelText('Event name')).toHaveValue('Gala');
+      expect(screen.getByLabelText('Description and planning requirements')).toHaveValue('Initial plan');
+      fireEvent.change(screen.getByLabelText('Event name'), { target: { value: 'Updated Gala' } });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Change summary for the event coordinator' }), {
+        target: { value: 'Add wheelchair-accessible seating' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send for coordinator approval' }));
+      expect(await screen.findByText('Change request sent to the assigned event coordinator.')).toBeInTheDocument();
+      const [url, options] = callsTo(f, '/requests/1/change-requests', 'POST')[0];
+      expect(url).toContain('/event-organisers/o1/');
+      expect(JSON.parse(options.body)).toEqual({
+        event_name: 'Updated Gala',
+        event_type: 'Workshop',
+        event_date: '2026-10-01',
+        event_end_date: '2026-10-01',
+        event_capacity: 10,
+        description: 'Initial plan',
+        start_time: '09:00',
+        end_time: '17:00',
+        request_text: 'Add wheelchair-accessible seating',
+      });
+    });
+
+  tc('FE-COORD-021', 'CoordinatorAssignment (organiser status)', 'Sending a change request fails validation.',
+    'The error is displayed inside the open proposal form and the typed request remains available for correction.',
+    { kind: 'Negative', steps: '1. Enter change details. 2. Return HTTP 400. 3. Verify the text remains.' },
+    async () => {
+      mockFetch((url) => url.endsWith('/change-requests')
+        ? json({ detail: 'An event coordinator must be assigned before requesting changes.' }, 400)
+        : json([ev({ event_status: 'Under review' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
+      const input = screen.getByRole('textbox', { name: 'Change summary for the event coordinator' });
+      fireEvent.change(input, { target: { value: 'Move the start time' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send for coordinator approval' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('An event coordinator must be assigned before requesting changes.');
+      expect(input).toHaveValue('Move the start time');
     });
 
   const coordinatorBackend = (extra) => mockFetch((url, o) => {

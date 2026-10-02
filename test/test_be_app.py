@@ -61,11 +61,17 @@ def test_http_status_requires_auth():
     assert response.status_code == 401
 
 
-@tc("BE-APP-009", "GET /api/users/{id}/role", "Backend credentials are not configured.", "HTTP 500 with the configuration message.", pre="Service-role key unset.", steps="1. Blank the key. 2. GET /api/users/u1/role.", kind="Config")
-def test_http_missing_credentials(monkeypatch):
-    monkeypatch.setattr(ca, "SUPABASE_SERVICE_ROLE_KEY", None)
-    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "u1", "role": "Attendee"})
-    assert client.get("/api/users/u1/role").status_code == 500
+@tc("BE-APP-009", "GET /api/users/{id}/role", "The authenticated profile is loaded by the path-user guard.",
+    "The profile is returned directly without another database read.",
+    pre="The path-user guard returns the authenticated profile.",
+    steps="1. Replace the database client with a failing stub. 2. GET /api/users/u1/role.")
+def test_http_role_returns_authenticated_profile_without_extra_read(monkeypatch):
+    profile = {"id": "u1", "name": "Attendee", "role": "Attendee", "email": "a@example.com"}
+    monkeypatch.setattr(ca, "db", lambda: pytest.fail("role handler must not query the database"))
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: profile)
+    response = client.get("/api/users/u1/role")
+    assert response.status_code == 200
+    assert response.json() == profile
 
 
 @tc("BE-APP-010", "POST /api/event-organisers/{id}/requests", "A valid draft is posted over HTTP.", "HTTP 200 and the created Draft row.", pre="Database replaced by a fake client.",
@@ -108,6 +114,11 @@ def test_http_data_routes_require_authentication():
         "/api/venue-catalogue",
     ]
     assert all(client.get(path).status_code == 401 for path in paths)
+    response = client.post(
+        "/api/event-organisers/o1/requests/1/change-requests",
+        json={"request_text": "Update the schedule"},
+    )
+    assert response.status_code == 401
 
 
 @tc("BE-APP-015", "Protected API routes", "An authenticated user with an unrelated role requests restricted data.", "HTTP 403 for coordinator, venue, and equipment operations.", steps="1. Authenticate as Event Organiser. 2. Request coordinator, venue approval, and equipment update routes.", kind="Security")

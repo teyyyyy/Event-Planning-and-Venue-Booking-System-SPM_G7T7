@@ -1,9 +1,11 @@
 """Unit tests for backend/event_organiser.py."""
 
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from postgrest.exceptions import APIError
 
 import coordinator_assignment as ca
 import event_organiser as eo
@@ -19,9 +21,13 @@ def make(**kw):
                 description="d", start_time="09:00", end_time="17:00")
     return eo.EventRequest(**{**base, **kw})
 
+def make_change_request(request_text, **kw):
+    return eo.EventChangeRequest(**{**make().model_dump(), **kw, "request_text": request_text})
+
 
 def row(**kw):
-    return {"id": 1, "organiser_id": "o1", "status": "Draft", "event_date": D1, **kw}
+    return {"id": 1, "event_name": "Gala", "organiser_id": "o1", "coordinator_id": "c1",
+            "status": "Draft", "event_date": D1, "event_capacity": 10, **kw}
 
 
 def err(fn, *a, **kw):
@@ -114,6 +120,13 @@ def test_validate_bad_time():
     steps="1. Call validate_request with a past date.", kind="Negative")
 def test_validate_past():
     assert err(eo.validate_request, make(event_date=PAST)) == (400, "Event date cannot be in the past.")
+
+@tc("BE-ORG-051", "validate_request", "An existing event change proposal keeps its already-past date.",
+    "The proposal schedule is accepted because the existing event date is preserved.",
+    data=f"event_date = {PAST}; allow_past_date = true",
+    steps="1. Validate a proposal preserving an event's existing past schedule.", kind="Regression")
+def test_validate_change_request_allows_preserved_past_date():
+    eo.validate_request(make(event_date=PAST), allow_past_date=True)
 
 
 @tc("BE-ORG-014", "validate_request", "Event date is today.", "Accepted (only strictly past dates are rejected).", data="event_date = today",
@@ -266,6 +279,88 @@ def test_submit_wrong_owner(use_db):
     assert err(eo.submit_event_request, "o2", 1)[0] == 400 and client.tables["Event Details"][0]["status"] == "Draft"
 
 
+@tc("BE-ORG-039", "create_event_change_request", "Owner requests changes to a confirmed event assigned to a coordinator.",
+    "The request is stored with its organiser, event and assigned coordinator; that coordinator receives an event notification.",
+    pre="Confirmed event 1 belongs to o1 and is assigned to c1.",
+    data="request_text = Add wheelchair-accessible seating; proposed capacity = 25",
+    steps="1. Submit a change request for event 1.")
+def test_create_event_change_request_saves_and_notifies(use_db):
+    client = setup(use_db, [row(status="Confirmed")])
+    result = eo.create_event_change_request(
+        "o1", 1, make_change_request("  Add wheelchair-accessible seating  ", event_capacity=25)
+    )
+    saved = client.tables["event_change_requests"][0]
+    notification = client.tables["notifications"][0]
+    assert result == saved
+    assert saved["event_id"] == 1
+    assert saved["organiser_id"] == "o1"
+    assert saved["coordinator_id"] == "c1"
+    assert saved["request_text"] == "Add wheelchair-accessible seating"
+    assert saved["proposed_event_capacity"] == 25
+    assert client.tables["Event Details"][0]["event_capacity"] == 10
+    assert notification["recipient_id"] == "c1"
+    assert notification["record_type"] == "event" and notification["record_id"] == "1"
+    assert "Add wheelchair-accessible seating" in notification["description"]
+
+
+@tc("BE-ORG-040", "create_event_change_request", "Owner submits a second request for the same event.",
+    "Both requests remain stored as separate history records.", kind="Edge",
+    steps="1. Submit two distinct change requests for event 1.")
+def test_change_requests_keep_history(use_db):
+    client = setup(use_db, [row(status="Under review")])
+    eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
+    eo.create_event_change_request("o1", 1, make_change_request("Add more seating"))
+    assert [item["request_text"] for item in client.tables["event_change_requests"]] == [
+        "Change the schedule", "Add more seating",
+    ]
+
+
+@tc("BE-ORG-041", "create_event_change_request", "Another organiser submits a request for the event.",
+    "HTTP 403 and no request is recorded.", kind="Security",
+    steps="1. Submit a change request as organiser o2 for event 1.")
+def test_change_request_wrong_owner(use_db):
+    client = setup(use_db, [row(status="Confirmed")])
+    assert err(eo.create_event_change_request, "o2", 1, make_change_request("Change the schedule"))[0] == 403
+    assert client.tables.get("event_change_requests", []) == []
+
+
+@tc("BE-ORG-042", "create_event_change_request", "Requested event does not exist.",
+    "HTTP 404 and nothing is stored.", kind="Negative",
+    steps="1. Submit a change request for missing event 99.")
+def test_change_request_missing_event(use_db):
+    client = setup(use_db)
+    assert err(eo.create_event_change_request, "o1", 99, make_change_request("Change the schedule")) == (404, "Event request not found.")
+    assert client.tables.get("event_change_requests", []) == []
+
+
+@tc("BE-ORG-043", "create_event_change_request", "Event is a Draft, Completed, Cancelled or Rejected.",
+    "HTTP 400 and nothing is stored.", kind="Negative",
+    steps="1. Submit a change request for each unavailable status.")
+def test_change_request_unavailable_statuses(use_db):
+    for status in ("Draft", "Completed", "Cancelled", "Rejected"):
+        client = setup(use_db, [row(status=status)])
+        assert err(eo.create_event_change_request, "o1", 1, make_change_request("Change the schedule"))[0] == 400
+        assert client.tables.get("event_change_requests", []) == []
+
+
+@tc("BE-ORG-044", "create_event_change_request", "An active event has no assigned coordinator.",
+    "HTTP 400 and no request is stored.", kind="Negative",
+    steps="1. Submit a change request before coordinator assignment.")
+def test_change_request_requires_assigned_coordinator(use_db):
+    client = setup(use_db, [row(status="Submitted", coordinator_id=None)])
+    assert err(eo.create_event_change_request, "o1", 1, make_change_request("Change the schedule"))[0] == 400
+    assert client.tables.get("event_change_requests", []) == []
+
+
+@tc("BE-ORG-045", "create_event_change_request", "The request contains only whitespace.",
+    "HTTP 400 before any database access.", kind="Negative",
+    steps="1. Submit a whitespace-only request.")
+def test_change_request_rejects_blank_text(use_db):
+    client = setup(use_db, [row(status="Confirmed")])
+    assert err(eo.create_event_change_request, "o1", 1, make_change_request("   "))[0] == 400
+    assert client.log == []
+
+
 @tc("BE-ORG-036", "organiser_events (submitted-requests)", "Organiser lists their requests.", "Only their rows, ordered by event_date.",
     pre="Rows for o1 (two dates) and o2.", steps="1. Call organiser_events(\"o1\").")
 def test_organiser_events(use_db):
@@ -284,3 +379,63 @@ def test_model_bad_capacity():
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         make(event_capacity="lots")
+
+
+@tc("BE-ORG-046", "create_event_change_request", "Request text exceeds 5,000 characters.",
+    "HTTP 400 before database access.", kind="Negative",
+    steps="1. Submit a change request with more than 5,000 characters.")
+def test_change_request_rejects_oversized_text(use_db):
+    client = setup(use_db, [row(status="Confirmed")])
+    assert err(eo.create_event_change_request, "o1", 1, make_change_request("x" * 5001)) == (400, "Change requests must be 5,000 characters or fewer.")
+    assert client.log == []
+
+
+@tc("BE-ORG-047", "create_event_change_request", "Database RPC returns no saved row.",
+    "HTTP 500 with an explicit save failure.", kind="Negative",
+    steps="1. Stub the database RPC to return no data. 2. Submit a change request.")
+def test_change_request_empty_rpc_result(use_db, monkeypatch):
+    client = setup(use_db, [row(status="Confirmed")])
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(
+        execute=lambda: SimpleNamespace(data=None),
+    ))
+    assert err(eo.create_event_change_request, "o1", 1, make_change_request("Change the schedule")) == (500, "Event change request could not be saved.")
+
+
+@tc("BE-ORG-048", "create_event_change_request", "Database RPC returns a one-row list.",
+    "The first saved row is returned.", kind="Edge",
+    steps="1. Stub the database RPC to return a list containing a saved row.")
+def test_change_request_list_rpc_result(use_db, monkeypatch):
+    client = setup(use_db, [row(status="Confirmed")])
+    saved = {"id": 7, "event_id": 1, "request_text": "Change the schedule"}
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(
+        execute=lambda: SimpleNamespace(data=[saved]),
+    ))
+    assert eo.create_event_change_request("o1", 1, make_change_request("Change the schedule")) == saved
+
+
+@tc("BE-ORG-049", "create_event_change_request", "Database RPC fails with an unmapped error.",
+    "The database error propagates instead of becoming a success-shaped response.", kind="Negative",
+    steps="1. Stub the database RPC to raise an unknown APIError. 2. Submit a change request.")
+def test_change_request_unmapped_database_error(use_db, monkeypatch):
+    client = setup(use_db, [row(status="Confirmed")])
+    error = APIError({"message": "Database unavailable.", "code": "XX000", "details": None, "hint": None})
+
+    def raise_database_error():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(
+        execute=raise_database_error,
+    ))
+    with pytest.raises(APIError, match="Database unavailable"):
+        eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
+
+
+@tc("BE-ORG-050", "create_event_change_request", "Notification insert fails after request insert.",
+    "The test database double rolls back the request, matching the SQL function transaction.", kind="Negative",
+    steps="1. Make notification inserts fail. 2. Submit a change request. 3. Confirm no request remains.")
+def test_change_request_notification_failure_rolls_back(use_db):
+    client = setup(use_db, [row(status="Confirmed")])
+    client.fail_tables.add(("notifications", "insert"))
+    with pytest.raises(RuntimeError, match="simulated failure on notifications"):
+        eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
+    assert client.tables.get("event_change_requests", []) == []

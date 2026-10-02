@@ -171,17 +171,19 @@ def test_health():
 
 
 @tc("BE-COORD-019", "user_role", "Known user id is requested.", "The user's id, name, role and email are returned.",
-    steps="1. Call user_role(\"c1\").")
-def test_user_role_found(use_db):
-    use_db(world(), ca)
-    assert ca.user_role("c1")["role"] == "Event Coordinator"
+    steps="1. Call user_role with the authenticated profile.")
+def test_user_role_returns_authenticated_profile():
+    profile = {"id": "c1", "name": "Bob", "role": "Event Coordinator", "email": "b@x"}
+    assert ca.user_role("c1", profile) == profile
 
 
-@tc("BE-COORD-020", "user_role", "Unknown user id is requested.", "HTTP 404 \"User profile not found.\"",
-    steps="1. Call user_role(\"nope\").", kind="Negative")
-def test_user_role_missing(use_db):
-    use_db(world(), ca)
-    assert err(ca.user_role, "nope") == (404, "User profile not found.")
+@tc("BE-COORD-020", "GET /api/users/{user_id}/role", "The authenticated profile is passed to the route.",
+    "The profile is returned without an additional database read.",
+    steps="1. Pass the authenticated profile to user_role.")
+def test_user_role_does_not_fetch_profile_again(monkeypatch):
+    profile = {"id": "c1", "name": "Bob", "role": "Event Coordinator", "email": "b@x"}
+    monkeypatch.setattr(ca, "db", lambda: pytest.fail("role handler must not query the database"))
+    assert ca.user_role("c1", profile) == profile
 
 
 @tc("BE-COORD-021", "assign_event", "Three coordinators with workloads 2/1/1; a new event is assigned.",
