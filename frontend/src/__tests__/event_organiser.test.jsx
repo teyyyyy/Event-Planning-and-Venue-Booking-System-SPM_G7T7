@@ -160,7 +160,7 @@ describe('EventOrganiser', () => {
       expect(screen.queryByText('App')).not.toBeInTheDocument();
     });
 
-  tc('FE-ORG-018', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request", loads the row values (times as HH:MM) and hides "Save draft".', { steps: '1. Render a draft request. 2. Click "Edit".' },
+  tc('FE-ORG-018', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request", loads the row values (times as HH:MM), and shows "Save draft" and "Submit request".', { steps: '1. Render a draft request. 2. Click "Edit".' },
     async () => {
       window.scrollTo = vi.fn();
       backend([row({ status: 'Draft' })]);
@@ -169,23 +169,25 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
       expect(field('event_name')).toHaveValue('Gala');
       expect(field('start_time')).toHaveValue('09:00');
-      expect(screen.queryByRole('button', { name: 'Save draft' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Submit request' })).toBeInTheDocument();
     });
 
-  tc('FE-ORG-019', 'EventOrganiser (edit)', 'Organiser saves changes to an existing request.', 'PUT /requests/<id> is sent with the edited values and "Event request updated successfully." is shown.', { data: 'event_name = "Gala 2"', steps: '1. Click "Edit". 2. Change the name. 3. Click "Save changes".' },
+  tc('FE-ORG-019', 'EventOrganiser (edit)', 'Organiser submits an edited Draft request.', 'PUT /requests/<id> saves the edited values, then POST /requests/<id>/submit submits the Draft.', { data: 'event_name = "Gala 2"', steps: '1. Click "Edit". 2. Change the name. 3. Click "Submit request".' },
     async () => {
       window.scrollTo = vi.fn();
-      const f = backend([row({ status: 'Draft' })], () => json({ id: 1 }));
+      const f = backend([row({ status: 'Draft', event_date: '2026-10-05', event_end_date: '2026-10-05' })], () => json({ id: 1 }));
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.change(field('event_name'), { target: { value: 'Gala 2' } });
-      fireEvent.submit(form());
-      expect(await screen.findByText('Event request updated successfully.')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Submit request' }));
+      expect(await screen.findByText('Event request submitted successfully and added to the table.')).toBeInTheDocument();
       const [, options] = callsTo(f, '/requests/1', 'PUT')[0];
       expect(JSON.parse(options.body)).toMatchObject({ event_name: 'Gala 2', event_capacity: 50 });
+      expect(callsTo(f, '/requests/1/submit', 'POST')).toHaveLength(1);
     });
 
-  tc('FE-ORG-020', 'EventOrganiser (edit)', 'Saving changes is rejected.', 'Error dialog with the backend detail; still in edit mode.', { kind: 'Negative', data: '403 "This event request cannot be updated during its current status."', steps: '1. Click "Edit". 2. Return 403 on PUT. 3. Save.' },
+  tc('FE-ORG-020', 'EventOrganiser (edit)', 'Updating a Draft before submission is rejected.', 'Error dialog with the backend detail; still in edit mode.', { kind: 'Negative', data: '403 "This event request cannot be updated during its current status."', steps: '1. Click "Edit". 2. Return 403 on PUT. 3. Submit.' },
     async () => {
       window.scrollTo = vi.fn();
       backend([row({ status: 'Draft' })], () => json({ detail: 'This event request cannot be updated during its current status.' }, 403));
@@ -196,16 +198,69 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
     });
 
-  tc('FE-ORG-021', 'EventOrganiser (editingEvent prop)', 'A coordinator opens an event for editing (event from the status view).', 'The form is pre-filled (event_title used as name, end date defaults to start date) and onEditComplete is called.',
-    { data: 'editingEvent = {id: 4, event_title: "Gala", event_date: "2026-10-01"}', steps: '1. Render with editingEvent.' },
+  tc('FE-ORG-031', 'EventOrganiser (edit)', 'Organiser saves changes to an existing Draft.', 'PUT /requests/<id> updates the Draft and a "Draft saved" dialog appears.', { steps: '1. Click "Edit". 2. Change the name. 3. Click "Save draft".' },
+    async () => {
+      window.scrollTo = vi.fn();
+      const f = backend([row({ status: 'Draft', event_date: '2026-10-05', event_end_date: '2026-10-05' })], () => json({ id: 1 }));
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.change(field('event_name'), { target: { value: 'Gala 2' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText('Draft saved')).toBeInTheDocument();
+      const [, options] = callsTo(f, '/requests/1', 'PUT')[0];
+      expect(JSON.parse(options.body)).toMatchObject({ event_name: 'Gala 2', event_capacity: 50 });
+      expect(callsTo(f, '/requests/1/submit', 'POST')).toHaveLength(0);
+    });
+
+  tc('FE-ORG-021', 'EventOrganiser (editingEvent prop)', 'A coordinator opens and saves a submitted event for editing.', 'The form is pre-filled (event_title used as name, end date defaults to start date), onEditComplete is called, and PUT saves the edited event.',
+    { data: 'editingEvent = {id: 4, event_title: "Gala", event_date: "2026-10-01"}', steps: '1. Render with editingEvent. 2. Change the name. 3. Click "Save changes".' },
     async () => {
       const onEditComplete = vi.fn();
-      backend([]);
+      const f = backend([], () => json({ id: 4 }));
       render(<EventOrganiser editingEvent={{ id: 4, event_title: 'Gala', event_date: '2026-10-01', event_capacity: 25 }} onEditComplete={onEditComplete} />);
       await waitFor(() => expect(field('event_name')).toHaveValue('Gala'));
       expect(field('event_end_date')).toHaveValue('2026-10-01');
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
       expect(onEditComplete).toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+      fillForm({ event_name: 'Gala 2', event_date: '2026-10-05', event_end_date: '2026-10-05', event_capacity: '25' });
+      fireEvent.submit(form());
+      expect(await screen.findByText('Event request updated successfully.')).toBeInTheDocument();
+      const [, options] = callsTo(f, '/requests/4', 'PUT')[0];
+      expect(JSON.parse(options.body)).toMatchObject({ event_name: 'Gala 2', event_capacity: 25 });
+    });
+
+  tc('FE-ORG-032', 'EventOrganiser (editingEvent prop)', 'Updating a submitted event is rejected.', 'The backend error appears and the event remains in edit mode.', { kind: 'Negative', steps: '1. Render with a submitted editingEvent. 2. Return 403 for PUT. 3. Save changes.' },
+    async () => {
+      backend([], () => json({ detail: 'This event request cannot be updated during its current status.' }, 403));
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      fireEvent.submit(form());
+      expect(await screen.findByText('This event request cannot be updated during its current status.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-033', 'EventOrganiser (editingEvent prop)', 'Saving a submitted event fails because the backend cannot be reached.', 'The backend connection error appears and the event remains in edit mode.', { kind: 'Negative', steps: '1. Render with a submitted editingEvent. 2. Make the PUT reject. 3. Save changes.' },
+    async () => {
+      backend([], () => { throw new TypeError('Failed to fetch'); });
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      fireEvent.submit(form());
+      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-034', 'EventOrganiser (editingEvent prop)', 'Saving a submitted event succeeds but refreshing the list fails.', 'The update success and refreshed-list error are reported.', { kind: 'Negative', steps: '1. Return an event for the initial list. 2. Let the PUT succeed and the next list load fail. 3. Save changes.' },
+    async () => {
+      let lists = 0;
+      mockFetch((url) => {
+        if (url.endsWith('/submitted-requests')) {
+          lists += 1;
+          return lists === 1 ? json([]) : json({}, 500);
+        }
+        return json({ id: 4 });
+      });
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      fireEvent.submit(form());
+      expect(await screen.findByText('Event was updated, but the refreshed event list could not be loaded.')).toBeInTheDocument();
     });
 
   tc('FE-ORG-022', 'EventOrganiser (notice)', 'The user closes the result dialog.', 'The dialog and backdrop disappear.', { kind: 'State', steps: '1. Trigger an error dialog. 2. Click "Close".' },
@@ -242,7 +297,7 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
     });
 
-  tc('FE-ORG-025', 'EventOrganiser (edit)', 'Saving changes succeeds but refreshing the list fails.', 'Dialog: "Event was updated, but the refreshed event list could not be loaded."', { kind: 'Negative', steps: '1. Click "Edit". 2. Let the PUT succeed but the second list load return 500. 3. Save.' },
+  tc('FE-ORG-025', 'EventOrganiser (edit)', 'Submitting an edited Draft succeeds but refreshing the list fails.', 'Dialog: "Event was submitted, but the refreshed event list could not be loaded."', { kind: 'Negative', steps: '1. Click "Edit". 2. Let the PUT and submit request succeed but the second list load return 500. 3. Submit.' },
     async () => {
       window.scrollTo = vi.fn();
       let lists = 0;
@@ -250,7 +305,7 @@ describe('EventOrganiser', () => {
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.submit(form());
-      expect(await screen.findByText('Event was updated, but the refreshed event list could not be loaded.')).toBeInTheDocument();
+      expect(await screen.findByText('Event was submitted, but the refreshed event list could not be loaded.')).toBeInTheDocument();
     });
 
   tc('FE-ORG-026', 'EventOrganiser (draft)', 'The backend cannot be reached while saving a draft.', 'The dialog says "Cannot reach the backend at <url>. Start FastAPI and try again."', { kind: 'Negative', steps: '1. Make the POST reject. 2. Click "Save draft".' },
