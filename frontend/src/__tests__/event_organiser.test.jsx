@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
 
@@ -29,6 +29,25 @@ describe('EventOrganiser', () => {
       expect(await screen.findByText('Gala')).toBeInTheDocument();
       expect(screen.getByText('50 attendee capacity')).toBeInTheDocument();
       expect(screen.getByText('Submitted')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-024', 'EventOrganiser (clarifications)', 'The organiser views a request with coordinator feedback.', 'Clarification requests are shown read-only beneath the description field for the selected event, not in the table.',
+    { steps: '1. Return an Under review request with coordinator_comments. 2. Click View. 3. Review the read-only clarification section.' },
+    async () => {
+      window.scrollTo = vi.fn();
+      backend([row({ status: 'Under review', coordinator_comments: JSON.stringify(['Confirm the public title', 'Include accessibility details']) }), row({ id: 2, event_name: 'No comments', status: 'Under review', coordinator_comments: '' })]);
+      render(<EventOrganiser />);
+      const requestRow = await screen.findByText('Gala').then((eventName) => eventName.closest('tr'));
+      expect(within(requestRow).queryByText('Confirm the public title')).toBeNull();
+      expect(within(requestRow).getByLabelText('2 coordinator clarification comments')).toHaveTextContent('2');
+      expect(within(screen.getByText('No comments').closest('tr')).queryByLabelText(/coordinator clarification comment/)).toBeNull();
+      fireEvent.click(within(requestRow).getByRole('button', { name: 'View' }));
+      const clarificationSection = screen.getByRole('region', { name: 'Clarification comments' });
+      expect(within(clarificationSection).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Confirm the public title', 'Include accessibility details']);
+      expect(screen.getByLabelText('Description and planning requirements')).toHaveValue('d');
+      expect(screen.getByLabelText('Description and planning requirements')).toBeDisabled();
+      expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull();
+      expect(clarificationSection.querySelectorAll('input, textarea, select')).toHaveLength(0);
     });
 
   tc('FE-ORG-002', 'EventOrganiser', 'No requests exist for the organiser.', '"No submitted event requests found for this organiser." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
@@ -157,7 +176,7 @@ describe('EventOrganiser', () => {
       const buttons = (n) => Array.from(screen.getByText(n).closest('tr').querySelectorAll('button')).map((b) => b.textContent);
       expect(buttons('Sub')).toEqual(['Edit']);
       expect(buttons('Dra')).toEqual(['Submit', 'Edit']);
-      expect(buttons('App')).toEqual([]);
+      expect(buttons('App')).toEqual(['View']);
     });
 
   tc('FE-ORG-016', 'EventOrganiser (row actions)', 'Organiser clicks Submit on a Draft row.', 'POST /requests/<id>/submit is sent and "Event request submitted successfully." is shown.', { steps: '1. Render a draft. 2. Click its "Submit".' },

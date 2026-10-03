@@ -209,4 +209,52 @@ describe('CoordinatorAssignment', () => {
       fireEvent.change(select, { target: { value: '' } });
       expect(f.mock.calls.length).toBe(before);
     });
+
+  tc('FE-COORD-021', 'CoordinatorAssignment (request review)', 'A coordinator opens an assigned submitted request.', 'The dialog displays submitted fields, event and coordinator IDs, field-specific clarification inputs, and an X close button.',
+    { steps: '1. Render an assigned request with all submitted fields. 2. Click "View event request".' },
+    async () => {
+      const f = coordinatorBackend(() => json([ev({
+        event_name: 'Gala', event_type: 'Conference', event_date: '2026-10-01', event_end_date: '2026-10-03',
+        event_capacity: 250, start_time: '09:00:00', end_time: '17:00:00', description: 'Accessibility and equipment needs',
+        assigned_coordinator_id: 'c1',
+      })]));
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View event request' }));
+
+      const dialog = screen.getByRole('dialog', { name: 'Gala' });
+      expect(within(dialog).getByText('Conference')).toBeInTheDocument();
+      expect(within(dialog).getByText('2026-10-01')).toBeInTheDocument();
+      expect(within(dialog).getByText('2026-10-03')).toBeInTheDocument();
+      expect(within(dialog).getByText('250 attendees')).toBeInTheDocument();
+      expect(within(dialog).getByText('09:00')).toBeInTheDocument();
+      expect(within(dialog).getByText('17:00')).toBeInTheDocument();
+      expect(within(dialog).getByText('Accessibility and equipment needs')).toBeInTheDocument();
+      expect(within(dialog).getByText('Event ID')).toBeInTheDocument();
+      expect(within(dialog).getByText('1')).toBeInTheDocument();
+      expect(within(dialog).getByText('Coordinator ID')).toBeInTheDocument();
+      expect(within(dialog).getByText('c1')).toBeInTheDocument();
+      expect(within(dialog).getByLabelText('Clarification request')).toBeInTheDocument();
+      expect(dialog.querySelectorAll('textarea')).toHaveLength(1);
+      expect(within(dialog).getByRole('button', { name: 'Close request details' })).toHaveTextContent('×');
+      expect(callsTo(f).filter(([, options]) => ['POST', 'PUT', 'PATCH'].includes(options?.method))).toHaveLength(0);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close request details' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+
+  tc('FE-COORD-022', 'CoordinatorAssignment (clarification)', 'A coordinator submits a free-text clarification.', 'PUT sends one comment under the selected event ID, appends it to the comments list, and confirms the request was sent.',
+    { steps: '1. Open the request. 2. Enter a clarification. 3. Submit the clarification request.' },
+    async () => {
+      const f = coordinatorBackend((url, options) => url.endsWith('/clarifications') && options.method === 'PUT'
+        ? json({ id: 1, coordinator_comments: ['Confirm format and list AV requirements'] })
+        : null);
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View event request' }));
+      fireEvent.change(screen.getByLabelText('Clarification request'), { target: { value: 'Confirm format and list AV requirements' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Submit clarification request' }));
+
+      expect(await screen.findByText('Clarification request sent to the Event Organiser.')).toBeInTheDocument();
+      const [, options] = callsTo(f, '/events/1/clarifications', 'PUT')[0];
+      expect(JSON.parse(options.body)).toEqual({ comment: 'Confirm format and list AV requirements' });
+      expect(screen.getByLabelText('Clarification request')).toHaveValue('');
+    });
 });

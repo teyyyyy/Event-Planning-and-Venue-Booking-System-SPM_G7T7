@@ -1,4 +1,5 @@
 import os
+import json
 from typing import Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,6 +21,9 @@ class CoordinatorAssignment(BaseModel):
 class EventStatusUpdate(BaseModel):
     event_status: str
 
+class ClarificationUpdate(BaseModel):
+    comment: str
+
 EVENT_STATUSES = {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
 EVENT_TABLE = "Event Details"
 INACTIVE_STATUSES = {"draft", "complete", "completed", "cancelled", "rejected"}
@@ -37,10 +41,22 @@ def coordinator_records(client: Client) -> list[dict[str, Any]]:
     users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return [user for user in users if str(user.get("role", "")).strip().lower() == "event coordinator"]
 
+def parse_coordinator_comments(value: Any) -> list[str]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return [line.strip() for line in value.splitlines() if line.strip()]
+    if isinstance(value, list):
+        return [str(comment).strip() for comment in value if str(comment).strip()]
+    if isinstance(value, dict):
+        return [f"{field}: {comment}" for field, comment in value.items() if str(comment).strip()]
+    return []
+
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
     coordinator_id = assignment.get("coordinator_id") if assignment else None
     coordinator = users.get(str(coordinator_id)) if coordinator_id else None
-    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
+    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None, "coordinator_comments": parse_coordinator_comments(request.get("coordinator_comments"))}
 
 def active_workloads(client: Client, coordinators: list[dict[str, Any]]) -> dict[str, int]:
     current = {item["id"]: item for item in coordinator_records(client)}
@@ -135,6 +151,31 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
     updated = response.data[0]
     users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return view(updated, updated if updated.get("coordinator_id") else None, {str(user["id"]): user for user in users})
+
+@router.put("/api/events/{event_id}/clarifications", dependencies=[Depends(require_assigned_coordinator_event)])
+def update_event_clarifications(event_id: str, update: ClarificationUpdate):
+    cleaned_comment = update.comment.strip()
+    if not cleaned_comment:
+        raise HTTPException(400, "Enter a clarification request before submitting.")
+    if len(cleaned_comment) > 2000:
+        raise HTTPException(400, "Clarification comments must be 2000 characters or fewer.")
+
+    client = db()
+    event = fetch_one(client.table(EVENT_TABLE).select("coordinator_comments").eq("id", event_id))
+    if not event:
+        raise HTTPException(404, "Event request not found.")
+    comments = parse_coordinator_comments(event.get("coordinator_comments"))
+    comments.append(cleaned_comment)
+
+    response = (
+        client.table(EVENT_TABLE)
+        .update({"coordinator_comments": json.dumps(comments, ensure_ascii=False)})
+        .eq("id", event_id)
+        .execute()
+    )
+    if not response.data:
+        raise HTTPException(404, "Event request not found.")
+    return {"id": response.data[0]["id"], "coordinator_comments": comments}
 
 def assign_event(event_id: str):
     client = db()

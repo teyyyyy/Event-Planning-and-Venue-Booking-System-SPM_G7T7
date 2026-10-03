@@ -95,7 +95,7 @@ def client_for_role(monkeypatch, role):
     }
     fake = FakeClient({
         "users": users,
-        "Event Details": [event_row, {**event_row, "id": "1"}],
+        "Event Details": [event_row, {**event_row, "id": "1"}, {**event_row, "id": "2", "coordinator_id": "coordinator-2"}],
         "Venue Booking Requests": [{
             "request_id": 1, "venue_id": 1, "event_id": 1,
             "coordinator_id": USER_IDS["Event Coordinator"],
@@ -175,3 +175,16 @@ def test_attendee_access(monkeypatch):
     profile = {"id": user_id, "role": "Attendee"}
     assert require_attendee(profile) is profile
     assert_role_access(client, "Attendee", user_id)
+
+
+@tc("BE-ROLE-006", "Coordinator clarification access", "Each role attempts to submit clarification feedback.", "Only the assigned Event Coordinator can write comments; other roles are denied, and a coordinator cannot target an event assigned elsewhere.", steps="1. Authenticate with each role. 2. Submit feedback for event 1. 3. Try event 2 as its unassigned coordinator.", kind="Security")
+def test_clarification_role_and_event_assignment_access(monkeypatch):
+    body = {"comment": "Please confirm the event name."}
+    for role in USER_IDS:
+        client, _ = client_for_role(monkeypatch, role)
+        response = client.put("/api/events/1/clarifications", json=body)
+        expected = 200 if role == "Event Coordinator" else 403
+        assert response.status_code == expected, f"{role} clarification response: {response.status_code} {response.text}"
+
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    assert client.put("/api/events/2/clarifications", json=body).status_code == 403

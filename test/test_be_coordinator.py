@@ -293,6 +293,31 @@ def test_status_inactive_to_active(use_db):
     assert count(client, "c1") == 3
 
 
+@tc("BE-COORD-043", "update_event_clarifications", "Assigned coordinator submits a clarification request.", "The trimmed request is appended to the existing coordinator_comments list without changing organiser event fields.", steps="1. Submit a comment when an earlier comment already exists.")
+def test_update_event_clarifications(use_db):
+    original = event(coordinator_id="c1", event_name="Gala", description="Original plan", coordinator_comments='["Earlier question"]')
+    client = use_db(world([original]), ca)
+    result = ca.update_event_clarifications(1, ca.ClarificationUpdate(comment="  Please confirm the event title and AV requirements.  "))
+
+    assert result == {"id": 1, "coordinator_comments": ["Earlier question", "Please confirm the event title and AV requirements."]}
+    assert client.tables["Event Details"][0]["event_name"] == "Gala"
+    assert client.tables["Event Details"][0]["description"] == "Original plan"
+    assert client.tables["Event Details"][0]["coordinator_comments"] == '["Earlier question", "Please confirm the event title and AV requirements."]'
+    assert ca.view(client.tables["Event Details"][0], {"coordinator_id": "c1"}, {"c1": COORDS[0]})["coordinator_comments"] == result["coordinator_comments"]
+
+
+@tc("BE-COORD-044", "update_event_clarifications", "Clarification request is blank.", "HTTP 400 requires a non-empty request.", steps="1. Submit whitespace as the clarification.", kind="Negative")
+def test_update_event_clarifications_rejects_blank_comment(use_db):
+    use_db(world([event(coordinator_id="c1")]), ca)
+    assert err(ca.update_event_clarifications, 1, ca.ClarificationUpdate(comment="  ")) == (400, "Enter a clarification request before submitting.")
+
+
+@tc("BE-COORD-045", "update_event_clarifications", "Clarification exceeds the comment limit.", "HTTP 400 rejects the comment.", steps="1. Submit more than 2000 characters for a field.", kind="Negative")
+def test_update_event_clarifications_rejects_long_comment(use_db):
+    use_db(world([event(coordinator_id="c1")]), ca)
+    assert err(ca.update_event_clarifications, 1, ca.ClarificationUpdate(comment="x" * 2001))[0] == 400
+
+
 @tc("BE-COORD-035", "update_event_status", "Status changes between two active states.", "Workload is unchanged.",
     data="Approved -> Planning", steps="1. Call update_event_status(1, Planning).", kind="Edge")
 def test_status_active_to_active(use_db):
