@@ -5,6 +5,7 @@ from types import SimpleNamespace
 PKS = {
     "Event Details": "id", "users": "id", "Equipment": "equipment_id",
     "Equipment Request": "request_id", "Venue Booking Requests": "request_id",
+    "event_change_requests": "id", "notifications": "id",
     "Equipment Reservation": "reservation_id",
 }
 
@@ -83,6 +84,84 @@ class FakeClient:
         self.auth = SimpleNamespace(get_user=get_user)
 
     def table(self, name): return Query(self, name)
+
+    def rpc(self, name, params):
+        from copy import deepcopy
+        from postgrest.exceptions import APIError
+        def execute():
+            if name == "submit_event_change_request":
+                snapshot = deepcopy(self.tables)
+                try:
+                    event_id = params["p_event_id"]
+                    organiser_id = params["p_organiser_id"]
+                    request_text = params["p_request_text"]
+                    proposal = {
+                        "proposed_event_name": params["p_event_name"],
+                        "proposed_event_type": params["p_event_type"],
+                        "proposed_event_date": params["p_event_date"],
+                        "proposed_event_end_date": params["p_event_end_date"],
+                        "proposed_event_capacity": params["p_event_capacity"],
+                        "proposed_description": params["p_description"],
+                        "proposed_start_time": params["p_start_time"],
+                        "proposed_end_time": params["p_end_time"],
+                    }
+                    event = next(
+                        (row for row in self.tables.get("Event Details", []) if str(row.get("id")) == str(event_id)),
+                        None,
+                    )
+                    if not event:
+                        raise APIError({"message": "Event request not found.", "code": "P0002", "details": None, "hint": None})
+                    if str(event.get("organiser_id")) != str(organiser_id):
+                        raise APIError({"message": "You can only request changes to your own event.", "code": "42501", "details": None, "hint": None})
+                    if str(event.get("status", "")).strip().lower() in {"", "draft", "completed", "cancelled", "rejected"}:
+                        raise APIError({"message": "Change requests are not available for this event status.", "code": "22023", "details": None, "hint": None})
+                    if not event.get("coordinator_id"):
+                        raise APIError({"message": "An event coordinator must be assigned before requesting changes.", "code": "22023", "details": None, "hint": None})
+                    if not request_text.strip() or len(request_text.strip()) > 5000:
+                        raise APIError({"message": "Change requests must contain 1 to 5,000 characters.", "code": "22023", "details": None, "hint": None})
+                    created = self.table("event_change_requests").insert({
+                        "event_id": event_id,
+                        "organiser_id": organiser_id,
+                        "coordinator_id": event["coordinator_id"],
+                        "request_text": request_text.strip(),
+                        **proposal,
+                        "review_status": "Pending",
+                        "reviewed_by": None,
+                        "reviewed_at": None,
+                        "review_comments": None,
+                    }).execute().data
+                    if created:
+                        self.table("notifications").insert({
+                            "recipient_id": event["coordinator_id"],
+                            "description": f'Change request for "{event.get("event_name", "Event")}": {request_text.strip()}',
+                            "record_type": "event",
+                            "record_id": str(event_id),
+                            "is_read": False,
+                        }).execute()
+                    return Result(data=created[0] if created else None)
+                except Exception:
+                    self.tables = snapshot
+                    raise
+            if name != "submit_equipment_request":
+                raise NotImplementedError(name)
+            snapshot = deepcopy(self.tables)
+            try:
+                header = self.table("Equipment Request").insert({
+                    "event_id": params["p_event_id"], "created_by": params["p_coordinator_id"],
+                    "status": "Submitted",
+                }).execute().data
+                if not header:
+                    self.tables = snapshot
+                    return Result(data=None)
+                rid = header[0]["request_id"]
+                items = self.table("Equipment Request Item").insert([
+                    {**item, "request_id": rid} for item in params["p_items"]
+                ]).execute().data
+                return Result(data={"request_id": rid, "event_id": params["p_event_id"], "items": items})
+            except Exception as error:
+                self.tables = snapshot
+                raise APIError({"message": str(error), "code": "P0001", "details": None, "hint": None}) from error
+        return SimpleNamespace(execute=execute)
 
     def writes(self, table, op):
         return [p for t, o, p in self.log if t == table and o == op]

@@ -3,9 +3,9 @@ import { authenticatedFetch as fetch } from './api';
 
 const API = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api').replace(/\/$/, '');
 const emptyRequest = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
-const eventTypes = ['Conference', 'Workshop', 'Seminar', 'Training', 'Meeting', 'Networking', 'Exhibition', 'Social event', 'Other'];
-const capacityOptions = [{ label: '1-25 attendees', value: 25 }, { label: '26-50 attendees', value: 50 }, { label: '51-100 attendees', value: 100 }, { label: '101-250 attendees', value: 250 }, { label: '251-500 attendees', value: 500 }, { label: '501-1000 attendees', value: 1000 }, { label: 'More than 1000 attendees', value: 1001 }];
-const timeOptions = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
+export const eventTypes = ['Conference', 'Workshop', 'Seminar', 'Training', 'Meeting', 'Networking', 'Exhibition', 'Social event', 'Other'];
+export const capacityOptions = [{ label: '1-25 attendees', value: 25 }, { label: '26-50 attendees', value: 50 }, { label: '51-100 attendees', value: 100 }, { label: '101-250 attendees', value: 250 }, { label: '251-500 attendees', value: 500 }, { label: '501-1000 attendees', value: 1000 }, { label: 'More than 1000 attendees', value: 1001 }];
+export const timeOptions = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
 const editableStatuses = ['Submitted'];
 const today = new Date().toISOString().split('T')[0];
 
@@ -37,6 +37,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
   const [viewingRequest, setViewingRequest] = useState(false);
+  const [isEditingDraft, setIsEditingDraft] = useState(false);
   const [message, setMessage] = useState('');
   const [notice, setNotice] = useState(null);
   const [loadingAction, setLoadingAction] = useState(null);
@@ -45,6 +46,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   const organiserId = user?.id || '';
   const editingRequest = requests.find((request) => String(request.id) === String(editingId));
   const currentClarifications = coordinatorComments(editingRequest?.coordinator_comments ?? editingEvent?.coordinator_comments);
+  const draftRequests = requests.filter((request) => String(request.status).trim().toLowerCase() === 'draft');
 
   async function loadRequests() {
     setIsLoadingRequests(true);
@@ -62,6 +64,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   useEffect(() => {
     if (!editingEvent) return;
     setEditingId(editingEvent.id);
+    setIsEditingDraft(String(editingEvent.status ?? editingEvent.event_status ?? '').trim().toLowerCase() === 'draft');
     setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [
       key,
       key === 'event_name'
@@ -85,6 +88,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   function viewRequest(request) {
     setViewingRequest(true);
     setEditingId(request.id);
+    setIsEditingDraft(true);
     setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [key, key.endsWith('_time') ? formTime(request[key]) : key === 'event_end_date' ? (request[key] ?? request.event_date ?? '') : request[key] ?? ''])));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -126,10 +130,24 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     if (scheduleProblem) return setNotice({ type: 'error', text: scheduleProblem });
     setLoadingAction('submit');
     let response;
+    let draftUpdated = false;
     try {
-      response = await fetch(`${API}/event-organisers/${organiserId}/requests/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      const requestsUrl = `${API}/event-organisers/${organiserId}/requests`;
+      if (isEditingDraft) {
+        response = await fetch(`${requestsUrl}/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+        const updateResult = await response.json();
+        if (!response.ok) {
+          setNotice({ type: 'error', text: updateResult.detail || 'Could not update request.' });
+          setLoadingAction(null);
+          return;
+        }
+        draftUpdated = true;
+        response = await fetch(`${requestsUrl}/${editingId}/submit`, { method: 'POST' });
+      } else {
+        response = await fetch(`${requestsUrl}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      }
     } catch (error) {
-      setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
+      setNotice({ type: 'error', text: `${draftUpdated ? 'Draft changes were saved, but submission failed. ' : ''}Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
       return;
     }
@@ -146,7 +164,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
       setLoadingAction(null);
       return;
     }
-    setForm(emptyRequest); setEditingId(null); setNotice({ type: 'success', text: 'Event request submitted successfully and added to the table.' }); setLoadingAction(null);
+    setForm(emptyRequest); setEditingId(null); setIsEditingDraft(false); setNotice({ type: 'success', text: 'Event request submitted successfully and added to the table.' }); setLoadingAction(null);
   }
 
   async function saveDraft() {
@@ -154,7 +172,12 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     setLoadingAction('draft');
     let response;
     try {
-      response = await fetch(`${API}/event-organisers/${organiserId}/requests`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
+      const requestsUrl = `${API}/event-organisers/${organiserId}/requests`;
+      response = await fetch(editingId && isEditingDraft ? `${requestsUrl}/${editingId}` : requestsUrl, {
+        method: editingId && isEditingDraft ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }),
+      });
     } catch (error) {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
@@ -162,34 +185,18 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     }
     const result = await response.json();
     if (!response.ok) {
-      setNotice({ type: 'error', text: result.detail || 'Event draft could not be saved.' });
+      setNotice({ type: 'error', text: result.detail || (editingId ? 'Event draft could not be updated.' : 'Event draft could not be saved.') });
       setLoadingAction(null);
       return;
     }
     try {
       await loadRequests();
     } catch (error) {
-      setNotice({ type: 'error', text: 'Draft was saved, but the refreshed event list could not be loaded.' });
+      setNotice({ type: 'error', text: `${editingId ? 'Draft was updated' : 'Draft was saved'}, but the refreshed event list could not be loaded.` });
       setLoadingAction(null);
       return;
     }
-    setForm(emptyRequest); setNotice({ type: 'success', title: 'Draft saved', text: 'Event draft saved successfully and added to the table.' }); setLoadingAction(null);
-  }
-
-  async function submitRequest(id) {
-    if (isSubmitting) return;
-    setLoadingAction('row-submit');
-    try {
-      const response = await fetch(`${API}/event-organisers/${organiserId}/requests/${id}/submit`, { method: 'POST' });
-      const result = await response.json();
-      if (!response.ok) { setNotice({ type: 'error', text: result.detail || 'Could not submit request.' }); return; }
-      await loadRequests();
-      setNotice({ type: 'success', text: 'Event request submitted successfully.' });
-    } catch (error) {
-      setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
-    } finally {
-      setLoadingAction(null);
-    }
+    setForm(emptyRequest); setEditingId(null); setIsEditingDraft(false); setNotice({ type: 'success', title: 'Draft saved', text: editingId ? 'Event draft updated successfully.' : 'Event draft saved successfully and added to the table.' }); setLoadingAction(null);
   }
 
   return <main className="shell organiser-shell">

@@ -4,7 +4,8 @@ from typing import Any
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from supabase import Client, create_client
+from supabase import Client
+from database import create_client
 from dotenv import load_dotenv
 from auth import require_coordinator, require_organiser, require_path_user, require_self
 
@@ -98,12 +99,8 @@ def require_assigned_coordinator_event(event_id: str, user=Depends(require_coord
 @router.get("/api/health")
 def health_check(): return {"status": "ok", "service": "event-coordinator-assignment"}
 
-@router.get("/api/users/{user_id}/role", dependencies=[Depends(require_path_user)])
-def user_role(user_id: str):
-    client = db()
-    user = fetch_one(client.table("users").select("id,name,role,email").eq("id", user_id))
-    if not user:
-        raise HTTPException(404, "User profile not found.")
+@router.get("/api/users/{user_id}/role")
+def user_role(user_id: str, user: dict[str, Any] = Depends(require_path_user)):
     return user
 
 @router.post("/api/events/{event_id}/assign-coordinator", dependencies=[Depends(require_organiser_event)])

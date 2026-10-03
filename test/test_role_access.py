@@ -1,6 +1,9 @@
 """HTTP access matrix for the five assigned user roles."""
 
 from datetime import date, timedelta
+from types import SimpleNamespace
+import attendee_registration as ar
+import notifications as nt
 from fastapi.testclient import TestClient
 
 import coordinator_assignment as ca
@@ -48,10 +51,11 @@ ROLE_PATHS = {
         "/api/equipment-availability/{user_id}/events",
         "/api/venue-catalogue",
     ),
-    "Attendee": (),
+    "Attendee": ("/api/attendee/events", "/api/attendee/registrations"),
 }
 
 ROLE_ACTIONS = {
+    "Attendee": ("POST", "/api/attendee/events/1/register", None, {201}),
     "Event Organiser": (
         "POST", "/api/event-organisers/{user_id}/requests",
         {
@@ -108,9 +112,12 @@ def client_for_role(monkeypatch, role):
     })
     for module, attribute in (
         (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"),
-        (va, "db"), (vc, "db"), (vr, "get_supabase"),
+        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"),
     ):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
+    fake.tables["notifications"] = [{"id": 1, "recipient_id": user_id, "record_type": "event", "record_id": "1", "is_read": False}]
+    # This matrix verifies role dispatch; real RPC invariants have SQL tests.
+    monkeypatch.setattr(fake, "rpc", lambda name, params: SimpleNamespace(execute=lambda: SimpleNamespace(data={"event_id": 1, "attendee_id": user_id})))
     monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: profile)
     return TestClient(main.app), user_id
 
@@ -121,6 +128,9 @@ def assert_role_access(client, role, user_id):
         for path in ROLE_PATHS[role]
     }
     allowed.add(f"/api/users/{user_id}/role")
+    allowed.add("/api/notifications")
+    assert client.patch("/api/notifications/1/read").status_code == 200
+    assert client.patch("/api/notifications/999/read").status_code == 404
 
     for path in allowed:
         response = client.get(path)
@@ -143,6 +153,29 @@ def assert_role_access(client, role, user_id):
             assert response.status_code in allowed_statuses, f"{role} should access {method} {path}: {response.status_code} {response.text}"
         else:
             assert response.status_code == 403, f"{role} must not access {method} {path}: {response.status_code} {response.text}"
+
+    change_request_path = f"/api/event-organisers/{user_id}/requests/1/change-requests"
+    proposal = {
+        "request_text": "Update the schedule",
+        "event_name": "Gala",
+        "event_type": "Workshop",
+        "event_date": (date.today() + timedelta(days=10)).isoformat(),
+        "event_end_date": (date.today() + timedelta(days=10)).isoformat(),
+        "event_capacity": 10,
+        "description": "Role access test",
+        "start_time": "09:00",
+        "end_time": "17:00",
+    }
+    change_response = client.post(change_request_path, json=proposal)
+    if role == "Event Organiser":
+        assert change_response.status_code == 200, change_response.text
+    else:
+        assert change_response.status_code == 403, f"{role} must not create event change requests."
+    assert client.post(
+        f"/api/event-organisers/{user_id}-other/requests/1/change-requests",
+        json=proposal,
+    ).status_code == 403
+
 
 
 @tc("BE-ROLE-001", "Role access matrix", "An Event Organiser requests permitted and restricted route families.", "Only the organiser's own event request and profile routes are accessible.", steps="1. Authenticate as an Event Organiser. 2. Request each route in the role matrix.", kind="Security")
@@ -169,7 +202,7 @@ def test_technical_support_access(monkeypatch):
     assert_role_access(client, "Technical Support Staff", user_id)
 
 
-@tc("BE-ROLE-005", "Role access matrix", "An Attendee requests route families while attendee features are not implemented.", "The Attendee can access their own profile only; staff routes are denied.", steps="1. Authenticate as an Attendee. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-005", "Role access matrix", "An Attendee requests registration, notification and staff route families.", "The Attendee can browse events, view their registrations, register and access their own notifications/profile; staff routes are denied.", steps="1. Authenticate as an Attendee. 2. Request each route in the role matrix.", kind="Security")
 def test_attendee_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Attendee")
     profile = {"id": user_id, "role": "Attendee"}

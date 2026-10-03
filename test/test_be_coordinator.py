@@ -171,17 +171,19 @@ def test_health():
 
 
 @tc("BE-COORD-019", "user_role", "Known user id is requested.", "The user's id, name, role and email are returned.",
-    steps="1. Call user_role(\"c1\").")
-def test_user_role_found(use_db):
-    use_db(world(), ca)
-    assert ca.user_role("c1")["role"] == "Event Coordinator"
+    steps="1. Call user_role with the authenticated profile.")
+def test_user_role_returns_authenticated_profile():
+    profile = {"id": "c1", "name": "Bob", "role": "Event Coordinator", "email": "b@x"}
+    assert ca.user_role("c1", profile) == profile
 
 
-@tc("BE-COORD-020", "user_role", "Unknown user id is requested.", "HTTP 404 \"User profile not found.\"",
-    steps="1. Call user_role(\"nope\").", kind="Negative")
-def test_user_role_missing(use_db):
-    use_db(world(), ca)
-    assert err(ca.user_role, "nope") == (404, "User profile not found.")
+@tc("BE-COORD-020", "GET /api/users/{user_id}/role", "The authenticated profile is passed to the route.",
+    "The profile is returned without an additional database read.",
+    steps="1. Pass the authenticated profile to user_role.")
+def test_user_role_does_not_fetch_profile_again(monkeypatch):
+    profile = {"id": "c1", "name": "Bob", "role": "Event Coordinator", "email": "b@x"}
+    monkeypatch.setattr(ca, "db", lambda: pytest.fail("role handler must not query the database"))
+    assert ca.user_role("c1", profile) == profile
 
 
 @tc("BE-COORD-021", "assign_event", "Three coordinators with workloads 2/1/1; a new event is assigned.",
@@ -376,3 +378,23 @@ def test_coordinator_workloads(use_db):
     steps="1. Read ca.EVENT_STATUSES.", kind="Config")
 def test_status_set():
     assert ca.EVENT_STATUSES == {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
+
+
+@tc("BE-COORD-043", "require_organiser_event", "An organiser opens an event request that is theirs, someone else's, or missing.", "Owner passes; another organiser is HTTP 403; unknown event is HTTP 404.",
+    pre="Event 1 belongs to o1.", data="caller o1 / o2, event 1 / 99", steps="1. Call the guard as o1 for event 1. 2. As o2 for event 1. 3. As o1 for event 99.", kind="Security")
+def test_organiser_event_guard(use_db):
+    use_db(world([event()]), ca)
+    user = {"id": "o1", "role": "Event Organiser"}
+    assert ca.require_organiser_event(1, user) is user
+    assert err(ca.require_organiser_event, 1, {"id": "o2", "role": "Event Organiser"})[0] == 403
+    assert err(ca.require_organiser_event, 99, user)[0] == 404
+
+
+@tc("BE-COORD-044", "require_assigned_coordinator_event", "A coordinator manages an event assigned to them, to someone else, or missing.", "Assigned coordinator passes; another coordinator is HTTP 403; unknown event is HTTP 404.",
+    pre="Event 1 is assigned to c1.", data="caller c1 / c2, event 1 / 99", steps="1. Call the guard as c1 for event 1. 2. As c2 for event 1. 3. As c1 for event 99.", kind="Security")
+def test_assigned_coordinator_event_guard(use_db):
+    use_db(world([event(coordinator_id="c1")]), ca)
+    user = {"id": "c1", "role": "Event Coordinator"}
+    assert ca.require_assigned_coordinator_event(1, user) is user
+    assert err(ca.require_assigned_coordinator_event, 1, {"id": "c2", "role": "Event Coordinator"})[0] == 403
+    assert err(ca.require_assigned_coordinator_event, 99, user)[0] == 404

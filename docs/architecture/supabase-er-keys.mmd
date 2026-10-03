@@ -1,0 +1,71 @@
+erDiagram
+    direction LR
+    EVENT_DETAILS ||..o{ EVENT_REGISTRATIONS : "event_id"
+    USERS ||..o{ EVENT_REGISTRATIONS : "attendee_id"
+    USERS ||..o{ NOTIFICATIONS : "recipient_id"
+    VENUES ||..o{ VENUE_BOOKING_REQUESTS : "venue_id"
+    EVENT_DETAILS ||..o{ VENUE_BOOKING_REQUESTS : "event_id"
+    USERS ||..o{ VENUE_BOOKING_REQUESTS : "coordinator_id"
+    USERS |o..o{ VENUE_BOOKING_REQUESTS : "venue_staff_id"
+    EVENT_DETAILS ||..o{ EQUIPMENT_REQUEST : "event_id"
+    USERS |o..o{ EQUIPMENT_REQUEST : "created_by"
+    USERS |o..o{ EQUIPMENT_REQUEST : "updated_by"
+    EQUIPMENT_REQUEST ||--o{ EQUIPMENT_REQUEST_ITEM : "request_id"
+    EQUIPMENT ||--o{ EQUIPMENT_REQUEST_ITEM : "equipment_id"
+    USERS |o..o{ EQUIPMENT_REQUEST_ITEM : "updated_by"
+    EVENT_DETAILS ||..o{ EQUIPMENT_RESERVATION : "event_id"
+    EQUIPMENT_REQUEST ||..o{ EQUIPMENT_RESERVATION : "request_id"
+    USERS ||..o{ EQUIPMENT_RESERVATION : "reserved_by"
+    EQUIPMENT_RESERVATION ||..o{ EQUIPMENT_RESERVATION_ITEM : "reservation_id"
+    EQUIPMENT ||..o{ EQUIPMENT_RESERVATION_ITEM : "equipment_id"
+
+    USERS {
+        uuid id PK "NOT NULL"
+    }
+    EVENT_DETAILS {
+        bigint id PK "NOT NULL"
+    }
+    EVENT_REGISTRATIONS {
+        bigint id PK "NOT NULL"
+        bigint event_id FK "NOT NULL"
+        uuid attendee_id FK "NOT NULL"
+    }
+    NOTIFICATIONS {
+        bigint id PK "NOT NULL"
+        uuid recipient_id FK "NOT NULL"
+    }
+    VENUES {
+        bigint venue_id PK "NOT NULL"
+    }
+    VENUE_BOOKING_REQUESTS {
+        bigint request_id PK "NOT NULL"
+        bigint venue_id FK "NOT NULL"
+        bigint event_id FK "NOT NULL"
+        uuid coordinator_id FK "NOT NULL"
+        uuid venue_staff_id FK "nullable"
+    }
+    EQUIPMENT {
+        text equipment_id PK "NOT NULL"
+    }
+    EQUIPMENT_REQUEST {
+        bigint request_id PK "NOT NULL"
+        bigint event_id FK "NOT NULL"
+        uuid created_by FK "nullable"
+        uuid updated_by FK "nullable"
+    }
+    EQUIPMENT_REQUEST_ITEM {
+        bigint request_id PK,FK "NOT NULL"
+        text equipment_id PK,FK "NOT NULL"
+        uuid updated_by FK "nullable"
+    }
+    EQUIPMENT_RESERVATION {
+        bigint reservation_id PK "NOT NULL"
+        bigint event_id FK "NOT NULL"
+        bigint request_id FK "NOT NULL"
+        uuid reserved_by FK "NOT NULL"
+    }
+    EQUIPMENT_RESERVATION_ITEM {
+        bigint reservation_item_id PK "NOT NULL"
+        bigint reservation_id FK "NOT NULL"
+        text equipment_id FK "NOT NULL"
+    }

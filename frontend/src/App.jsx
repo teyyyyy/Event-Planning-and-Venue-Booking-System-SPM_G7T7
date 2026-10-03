@@ -12,6 +12,9 @@ import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
 import VenueCatalogue from "./VenueCatalogue";
 
+import AttendeeWorkspace from "./AttendeeWorkspace";
+import Notifications from "./Notifications";
+
 function AuthedApp() {
   const { user, logout } = useAuth();
   const normalizedRole = user.role.trim().toLowerCase();
@@ -21,6 +24,7 @@ function AuthedApp() {
   const isVenueStaff = normalizedRole === "venue staff";
   const isAttendee = normalizedRole === "attendee";
 
+  if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator)
@@ -33,7 +37,7 @@ function AuthedApp() {
     <div className="auth-screen">
       <div className="auth-card">
         <h2>Access unavailable</h2>
-        <p>{isAttendee ? "Attendee features are not available yet." : "Your account does not have a recognised role."}</p>
+        <p>Your account does not have a recognised role.</p>
         <button type="button" className="primary" onClick={logout}>
           Log out
         </button>
@@ -239,7 +243,6 @@ function CoordinatorWorkspace({ user, logout }) {
 // Event Organiser workspace
 function OrganiserWorkspace({ user, logout }) {
   const [activeRole, setActiveRole] = useState("organiser");
-  const [editingEvent, setEditingEvent] = useState(null);
 
   return (
     <div className="coordinator-workspace">
@@ -288,19 +291,9 @@ function OrganiserWorkspace({ user, logout }) {
       <div className="coordinator-main">
         <div className="embedded-existing-page">
           {activeRole === "organiser" ? (
-            <EventOrganiser
-              user={user}
-              editingEvent={editingEvent}
-              onEditComplete={() => setEditingEvent(null)}
-            />
+            <EventOrganiser user={user} />
           ) : (
-            <CoordinatorAssignment
-              user={user}
-              onEditEvent={(event) => {
-                setEditingEvent(event);
-                setActiveRole("organiser");
-              }}
-            />
+            <CoordinatorAssignment user={user} />
           )}
         </div>
       </div>
@@ -319,6 +312,6 @@ export default function App() {
     );
   }
 
-  if (user) return <AuthedApp />;
+  if (user) return <React.Fragment key={user.id}><AuthedApp /><Notifications /></React.Fragment>;
   return mfa ? <MfaChallenge /> : <Login />;
 }

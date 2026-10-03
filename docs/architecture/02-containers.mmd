@@ -1,0 +1,22 @@
+flowchart TB
+    users["Organiser · Coordinator · Venue Staff<br/>Technical Support Staff · Attendee<br/>[People]"]
+    identity["Supabase Auth<br/>[External System: managed authentication]<br/>Password login, JWT sessions, TOTP MFA"]
+
+    subgraph gather["Gather — software system boundary"]
+        web["Web Application<br/>[Container: React / JavaScript, Vite]<br/>Role-specific workspaces, event forms,<br/>registration pages and notification inbox"]
+        api["Backend API<br/>[Container: Python / FastAPI, Uvicorn]<br/>Authentication guards, role and ownership checks,<br/>event, venue, equipment and attendee operations"]
+        data[("Application Database<br/>[Container: PostgreSQL hosted by Supabase]<br/>Profiles, events, venues, equipment,<br/>bookings, registrations and notifications<br/>Transactional RPCs and notification triggers")]
+        web -->|HTTP JSON + bearer JWT; local port 8000| api
+        api -->|HTTPS via Supabase Data API / PostgREST; service-role credentials; CRUD and RPC| data
+    end
+
+    users -->|Uses browser interface; Vite dev port 5173| web
+    web -->|HTTPS via supabase-js; login, refresh and MFA| identity
+    api -->|HTTPS via supabase-py; validates bearer token| identity
+
+    classDef person fill:#08427b,color:#fff,stroke:#052e56
+    classDef container fill:#1168bd,color:#fff,stroke:#08427b
+    classDef external fill:#666,color:#fff,stroke:#444
+    class users person
+    class web,api,data container
+    class identity external

@@ -1,8 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { authenticatedFetch as fetch } from './api';
+import { capacityOptions, eventTypes, timeOptions } from './event_organiser';
 
 const API = 'http://127.0.0.1:8000/api';
 const EVENT_STATUSES = ['Under review', 'Approved', 'Planning', 'Confirmed', 'Completed', 'Cancelled', 'Rejected'];
+const EMPTY_PROPOSAL = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
 
 function EventRows({ events, onAssign, onStatusChange, onSubmit, onEdit, onViewRequest, coordinators, canManage = false }) {
   return events.length ? events.map((event) => <tr key={event.id}>
@@ -72,20 +74,33 @@ function RequestDetailsDialog({ event, onClose, onSubmitClarifications }) {
   </div>;
 }
 
-export default function CoordinatorAssignment({ user, onEditEvent }) {
+export default function CoordinatorAssignment({ user }) {
   const [events, setEvents] = useState([]);
   const [coordinators, setCoordinators] = useState([]);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const isCoordinator = user.role.trim().toLowerCase().includes('coordinator');
+  const isOrganiser = user.role.trim().toLowerCase() === 'event organiser';
   const [activeTab, setActiveTab] = useState(isCoordinator ? 'management' : 'status');
   const [message, setMessage] = useState('');
+  const [changeRequestEvent, setChangeRequestEvent] = useState(null);
+  const [changeProposal, setChangeProposal] = useState(EMPTY_PROPOSAL);
+  const [changeRequestText, setChangeRequestText] = useState('');
+  const [changeRequestMessage, setChangeRequestMessage] = useState('');
+  const [isSubmittingChangeRequest, setIsSubmittingChangeRequest] = useState(false);
+  const changeRequestFormRef = useRef(null);
+  const changeCapacityOptions = capacityOptions.some(({ value }) => String(value) === String(changeProposal.event_capacity))
+    ? capacityOptions
+    : [{ label: `Current capacity (${changeProposal.event_capacity})`, value: changeProposal.event_capacity }, ...capacityOptions];
 
   // keepMessage: leave the caller's success/error message on screen after the reload.
   async function loadOrganiser(keepMessage = false) {
     try {
       const statusResponse = await fetch(`${API}/event-organisers/${user.id}/requests`);
       if (!statusResponse.ok) throw new Error(`Backend returned ${statusResponse.status}`);
-      setEvents(await statusResponse.json());
+      const requests = await statusResponse.json();
+      setEvents(isOrganiser
+        ? requests.filter((event) => String(event.event_status).trim().toLowerCase() !== 'draft')
+        : requests);
       if (!keepMessage) setMessage('');
     } catch (error) {
       setMessage(`Unable to load event status. Start the backend at http://localhost:8000. (${error.message})`);
@@ -97,13 +112,18 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     else loadOrganiser();
   }, [isCoordinator, user.id]);
 
+  useEffect(() => {
+    changeRequestFormRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [changeRequestEvent]);
+
   async function loadReassignment(keepMessage = false) {
     try {
       const [eventResponse, coordinatorResponse] = await Promise.all([fetch(`${API}/events`), fetch(`${API}/coordinators`)]);
       if (!eventResponse.ok || !coordinatorResponse.ok) throw new Error('Unable to load event tasks');
       const allEvents = await eventResponse.json();
       setEvents(allEvents.filter((event) => event.assigned_coordinator_id === user.id));
-      setCoordinators(await coordinatorResponse.json()); if (!keepMessage) setMessage('');
+      setCoordinators(await coordinatorResponse.json());
+      if (!keepMessage) setMessage('');
     } catch (error) { setMessage(`Unable to load event tasks. (${error.message})`); }
   }
 
@@ -140,9 +160,58 @@ export default function CoordinatorAssignment({ user, onEditEvent }) {
     await loadOrganiser(true);
   }
 
-  function editEvent(eventId) {
-    const event = events.find((item) => item.id === eventId);
-    onEditEvent?.(event);
+  function startChangeRequest(event) {
+    setChangeRequestEvent(event);
+    setChangeRequestMessage('');
+    setChangeProposal({
+      event_name: event.event_name ?? event.event_title ?? '',
+      event_type: event.event_type ?? '',
+      event_date: event.event_date ?? '',
+      event_end_date: event.event_end_date ?? event.event_date ?? '',
+      event_capacity: event.event_capacity ?? '',
+      description: event.description ?? '',
+      start_time: String(event.start_time ?? '').slice(0, 5),
+      end_time: String(event.end_time ?? '').slice(0, 5),
+    });
+    setChangeRequestText('');
+  }
+
+  async function submitChangeRequest(submitEvent) {
+    submitEvent.preventDefault();
+    if (!changeRequestEvent || isSubmittingChangeRequest) return;
+    setIsSubmittingChangeRequest(true);
+    setChangeRequestMessage('');
+    try {
+      const response = await fetch(`${API}/event-organisers/${user.id}/requests/${changeRequestEvent.id}/change-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...changeProposal, event_capacity: Number(changeProposal.event_capacity), request_text: changeRequestText }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setChangeRequestMessage(result.detail || 'Could not send the change request.');
+        return;
+      }
+      setChangeRequestEvent(null);
+      setChangeProposal(EMPTY_PROPOSAL);
+      setChangeRequestText('');
+      setMessage('Change request sent to the assigned event coordinator.');
+    } catch (error) {
+      setChangeRequestMessage(`Unable to send change request. (${error.message})`);
+    } finally {
+      setIsSubmittingChangeRequest(false);
+    }
+  }
+
+  function cancelChangeRequest() {
+    setChangeRequestEvent(null);
+    setChangeProposal(EMPTY_PROPOSAL);
+    setChangeRequestText('');
+    setChangeRequestMessage('');
+  }
+
+  function updateProposal(event) {
+    setChangeProposal((current) => ({ ...current, [event.target.name]: event.target.value }));
   }
 
   async function loadManagement() {
