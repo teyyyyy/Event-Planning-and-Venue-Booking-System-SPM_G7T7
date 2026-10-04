@@ -1,8 +1,9 @@
 import os
-from typing import Any
+from typing import Any, Literal
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
 from dotenv import load_dotenv
@@ -20,6 +21,10 @@ class CoordinatorAssignment(BaseModel):
 
 class EventStatusUpdate(BaseModel):
     event_status: str
+
+class EventChangeRequestReview(BaseModel):
+    decision: Literal["Approved", "Rejected"]
+    review_comments: str | None = None
 
 EVENT_STATUSES = {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
 EVENT_TABLE = "Event Details"
@@ -41,7 +46,69 @@ def coordinator_records(client: Client) -> list[dict[str, Any]]:
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
     coordinator_id = assignment.get("coordinator_id") if assignment else None
     coordinator = users.get(str(coordinator_id)) if coordinator_id else None
-    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None}
+    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None, "has_pending_change_request": bool(request.get("has_pending_change_request")), "latest_change_request": request.get("latest_change_request")}
+
+def change_request_view(
+    change_request: dict[str, Any],
+    events: dict[str, dict[str, Any]],
+    users: dict[str, dict[str, Any]],
+):
+    event = events.get(str(change_request.get("event_id")))
+    organiser = users.get(str(change_request.get("organiser_id")))
+    coordinator = users.get(str(change_request.get("coordinator_id")))
+    return {
+        "id": change_request["id"],
+        "event_id": change_request.get("event_id"),
+        "organiser_id": change_request.get("organiser_id"),
+        "coordinator_id": change_request.get("coordinator_id"),
+        "request_text": change_request.get("request_text"),
+        "review_status": change_request.get("review_status"),
+        "reviewed_by": change_request.get("reviewed_by"),
+        "reviewed_at": change_request.get("reviewed_at"),
+        "review_comments": change_request.get("review_comments"),
+        "created_at": change_request.get("created_at"),
+        "organiser_name": organiser.get("name") if organiser else None,
+        "organiser_email": organiser.get("email") if organiser else None,
+        "coordinator_name": coordinator.get("name") if coordinator else None,
+        "coordinator_email": coordinator.get("email") if coordinator else None,
+        "event": view(event, event if event and event.get("coordinator_id") else None, users) if event else None,
+        "proposal": {
+            "event_name": change_request.get("proposed_event_name"),
+            "event_type": change_request.get("proposed_event_type"),
+            "event_date": change_request.get("proposed_event_date"),
+            "event_end_date": change_request.get("proposed_event_end_date"),
+            "event_capacity": change_request.get("proposed_event_capacity"),
+            "description": change_request.get("proposed_description"),
+            "start_time": change_request.get("proposed_start_time"),
+            "end_time": change_request.get("proposed_end_time"),
+        },
+    }
+
+def with_pending_change_request_flags(client: Client, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    event_ids = [event["id"] for event in events]
+    if not event_ids:
+        return events
+    change_requests = (
+        client.table("event_change_requests")
+        .select("event_id,review_status,review_comments,reviewed_at,created_at,id")
+        .in_("event_id", event_ids)
+        .order("created_at", desc=True)
+        .order("id", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    latest_by_event = {}
+    for change_request in change_requests:
+        latest_by_event.setdefault(str(change_request["event_id"]), change_request)
+    return [
+        {
+            **event,
+            "has_pending_change_request": latest_by_event.get(str(event["id"]), {}).get("review_status") == "Pending",
+            "latest_change_request": latest_by_event.get(str(event["id"])),
+        }
+        for event in events
+    ]
 
 def active_workloads(client: Client, coordinators: list[dict[str, Any]]) -> dict[str, int]:
     current = {item["id"]: item for item in coordinator_records(client)}
@@ -156,13 +223,75 @@ def assign_event(event_id: str):
 def organiser_events(organiser_id: str):
     client = db(); users = client.table("users").select("id,name,role,email").execute().data or []
     requests = client.table(EVENT_TABLE).select("*").eq("organiser_id", organiser_id).order("event_date").execute().data or []
-    return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in requests]
+    return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in with_pending_change_request_flags(client, requests)]
 
 @router.get("/api/events")
 def all_events(user: dict[str, Any] = Depends(require_coordinator)):
     client = db(); users = coordinator_records(client)
     events = client.table(EVENT_TABLE).select("*").eq("coordinator_id", user["id"]).order("event_date").execute().data or []
     return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in events]
+
+@router.get("/api/event-change-requests")
+def event_change_requests(user: dict[str, Any] = Depends(require_coordinator)):
+    client = db()
+    rows = (
+        client.table("event_change_requests")
+        .select("*")
+        .eq("coordinator_id", user["id"])
+        .order("created_at", desc=True)
+        .execute()
+        .data
+        or []
+    )
+    event_ids = [row.get("event_id") for row in rows if row.get("event_id") is not None]
+    events = client.table(EVENT_TABLE).select("*").in_("id", event_ids).execute().data if event_ids else []
+    user_ids = {
+        str(value)
+        for row in rows
+        for value in (row.get("organiser_id"), row.get("coordinator_id"))
+        if value is not None
+    }
+    user_ids.update(str(event["coordinator_id"]) for event in (events or []) if event.get("coordinator_id") is not None)
+    users = client.table("users").select("id,name,role,email").in_("id", list(user_ids)).execute().data if user_ids else []
+    event_map = {str(event["id"]): event for event in (events or [])}
+    user_map = {str(user["id"]): user for user in (users or [])}
+    return [change_request_view(row, event_map, user_map) for row in rows]
+
+@router.patch("/api/event-change-requests/{request_id}/review")
+def review_event_change_request(
+    request_id: int,
+    review: EventChangeRequestReview,
+    user: dict[str, Any] = Depends(require_coordinator),
+):
+    review_comments = (review.review_comments or "").strip()
+    if review.decision == "Rejected" and not review_comments:
+        raise HTTPException(400, "A reason is required when rejecting a change request.")
+
+    client = db()
+    try:
+        result = client.rpc(
+            "review_event_change_request",
+            {
+                "p_request_id": request_id,
+                "p_coordinator_id": user["id"],
+                "p_decision": review.decision,
+                "p_review_comments": review_comments or None,
+            },
+        ).execute()
+    except APIError as error:
+        if error.code == "P0002":
+            raise HTTPException(404, error.message) from error
+        if error.code == "42501":
+            raise HTTPException(403, error.message) from error
+        if error.code == "22023":
+            raise HTTPException(400, error.message) from error
+        if error.code == "55000":
+            raise HTTPException(409, error.message) from error
+        raise
+
+    if not result.data:
+        raise HTTPException(500, "Event change request could not be reviewed.")
+    return result.data[0] if isinstance(result.data, list) else result.data
 
 @router.get("/api/coordinators", dependencies=[Depends(require_coordinator)])
 def coordinators(): return sorted(coordinator_records(db()), key=lambda user: user.get("name", "").lower())

@@ -77,10 +77,12 @@ Before using the organiser's **Request changes** action, run
 `backend/sql/sprint2_registration_notifications.sql`. The migration stores each
 proposed event version and organiser summary in `event_change_requests`, then
 notifies the assigned coordinator in the same database transaction. Event
-details remain unchanged when a request is submitted. Applying an approved
-proposal to the event details is not implemented yet. Requests are available
-for submitted and active events with an assigned coordinator; Draft, Completed,
-Cancelled, and Rejected events cannot receive change requests.
+details remain unchanged when a request is submitted. Coordinators can approve
+requests to apply the proposed details or reject them with a required reason.
+Organisers can see the latest decision and rejection reason in their event
+status list. Requests are available for submitted and active events with an
+assigned coordinator; Draft, Completed, Cancelled, and Rejected events cannot
+receive change requests.
 
 ## Tests
 

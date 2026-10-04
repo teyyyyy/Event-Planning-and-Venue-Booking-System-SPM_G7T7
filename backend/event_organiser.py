@@ -187,6 +187,8 @@ def create_event_change_request(organiser_id: str, event_id: int, request: Event
             raise HTTPException(403, "You can only request changes to your own event.") from error
         if error.code == "22023":
             raise HTTPException(400, error.message) from error
+        if error.code == "23505":
+            raise HTTPException(400, "This event already has a pending change request.") from error
         raise
 
     if not result.data:

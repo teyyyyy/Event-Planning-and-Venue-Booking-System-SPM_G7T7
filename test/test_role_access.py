@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import attendee_registration as ar
 import notifications as nt
 from fastapi.testclient import TestClient
+from postgrest.exceptions import APIError
 
 import coordinator_assignment as ca
 import equipment_availability as ea
@@ -37,6 +38,7 @@ ROLE_PATHS = {
         "/api/coordinators",
         "/api/coordinator-workloads",
         "/api/event-coordinators/{user_id}/events",
+        "/api/event-change-requests",
         "/api/equipment",
         "/api/venues",
         "/api/venue-booking-requests/venues/1",
@@ -109,6 +111,16 @@ def client_for_role(monkeypatch, role):
             "end_datetime": "2026-10-10T17:00:00+00:00",
         }],
         "Venues": [{"venue_id": 1, "name": "Hall A"}],
+        "event_change_requests": [{
+            "id": 1, "event_id": 1, "organiser_id": USER_IDS["Event Organiser"],
+            "coordinator_id": USER_IDS["Event Coordinator"], "request_text": "Update the schedule",
+            "review_status": "Pending", "created_at": "2026-09-01T00:00:00+00:00",
+            "proposed_event_name": "Updated Gala", "proposed_event_type": "Workshop",
+            "proposed_event_date": (date.today() + timedelta(days=10)).isoformat(),
+            "proposed_event_end_date": (date.today() + timedelta(days=10)).isoformat(),
+            "proposed_event_capacity": 10, "proposed_description": "Updated details",
+            "proposed_start_time": "09:00", "proposed_end_time": "17:00",
+        }],
     })
     for module, attribute in (
         (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"),
@@ -117,7 +129,27 @@ def client_for_role(monkeypatch, role):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
     fake.tables["notifications"] = [{"id": 1, "recipient_id": user_id, "record_type": "event", "record_id": "1", "is_read": False}]
     # This matrix verifies role dispatch; real RPC invariants have SQL tests.
-    monkeypatch.setattr(fake, "rpc", lambda name, params: SimpleNamespace(execute=lambda: SimpleNamespace(data={"event_id": 1, "attendee_id": user_id})))
+    def role_rpc(name, params):
+        if name == "review_event_change_request":
+            if params["p_coordinator_id"] != USER_IDS["Event Coordinator"]:
+                raise APIError({"message": "You can only review change requests assigned to you.", "code": "42501", "details": None, "hint": None})
+            data = {
+                "id": params["p_request_id"], "event_id": 1,
+                "organiser_id": USER_IDS["Event Organiser"],
+                "coordinator_id": USER_IDS["Event Coordinator"],
+                "request_text": "Update the schedule", "review_status": params["p_decision"],
+                "reviewed_by": params["p_coordinator_id"], "reviewed_at": "2026-10-04T00:00:00+00:00",
+                "review_comments": params["p_review_comments"],
+                "proposed_event_name": "Updated Gala", "proposed_event_type": "Workshop",
+                "proposed_event_date": event_row["event_date"], "proposed_event_end_date": event_row["event_end_date"],
+                "proposed_event_capacity": 10, "proposed_description": "Updated details",
+                "proposed_start_time": "09:00", "proposed_end_time": "17:00",
+            }
+        else:
+            data = {"event_id": 1, "attendee_id": user_id}
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
+
+    monkeypatch.setattr(fake, "rpc", role_rpc)
     monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: profile)
     return TestClient(main.app), user_id
 
@@ -154,6 +186,15 @@ def assert_role_access(client, role, user_id):
         else:
             assert response.status_code == 403, f"{role} must not access {method} {path}: {response.status_code} {response.text}"
 
+    review_response = client.patch(
+        "/api/event-change-requests/1/review",
+        json={"decision": "Approved", "coordinator_id": "coordinator-2"},
+    )
+    if role == "Event Coordinator":
+        assert review_response.status_code == 200, review_response.text
+    else:
+        assert review_response.status_code == 403, f"{role} must not review event change requests."
+
     change_request_path = f"/api/event-organisers/{user_id}/requests/1/change-requests"
     proposal = {
         "request_text": "Update the schedule",
@@ -188,6 +229,20 @@ def test_event_organiser_access(monkeypatch):
 def test_event_coordinator_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Event Coordinator")
     assert_role_access(client, "Event Coordinator", user_id)
+
+
+@tc("BE-ROLE-006", "Role access matrix", "A different coordinator attempts to review a request assigned to coordinator-1.",
+    "The request is denied even though the caller has the Event Coordinator role.",
+    steps="1. Authenticate as coordinator-2. 2. Review coordinator-1's request.", kind="Security")
+def test_coordinator_cannot_review_unassigned_change_request(monkeypatch):
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    monkeypatch.setitem(
+        main.app.dependency_overrides,
+        current_user,
+        lambda: {"id": "coordinator-2", "name": "Other coordinator", "role": "Event Coordinator"},
+    )
+    response = client.patch("/api/event-change-requests/1/review", json={"decision": "Approved"})
+    assert response.status_code == 403
 
 
 @tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue reads and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")

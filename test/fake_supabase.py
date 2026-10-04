@@ -119,6 +119,11 @@ class FakeClient:
                         raise APIError({"message": "An event coordinator must be assigned before requesting changes.", "code": "22023", "details": None, "hint": None})
                     if not request_text.strip() or len(request_text.strip()) > 5000:
                         raise APIError({"message": "Change requests must contain 1 to 5,000 characters.", "code": "22023", "details": None, "hint": None})
+                    if any(
+                        str(row.get("event_id")) == str(event_id) and row.get("review_status") == "Pending"
+                        for row in self.tables.get("event_change_requests", [])
+                    ):
+                        raise APIError({"message": "This event already has a pending change request.", "code": "22023", "details": None, "hint": None})
                     created = self.table("event_change_requests").insert({
                         "event_id": event_id,
                         "organiser_id": organiser_id,
@@ -139,6 +144,67 @@ class FakeClient:
                             "is_read": False,
                         }).execute()
                     return Result(data=created[0] if created else None)
+                except Exception:
+                    self.tables = snapshot
+                    raise
+            if name == "review_event_change_request":
+                request = next(
+                    (
+                        row for row in self.tables.get("event_change_requests", [])
+                        if str(row.get("id")) == str(params["p_request_id"])
+                    ),
+                    None,
+                )
+                if not request:
+                    raise APIError({"message": "Event change request not found.", "code": "P0002", "details": None, "hint": None})
+                if str(request.get("coordinator_id")) != str(params["p_coordinator_id"]):
+                    raise APIError({"message": "You can only review change requests assigned to you.", "code": "42501", "details": None, "hint": None})
+                if request.get("review_status") != "Pending":
+                    raise APIError({"message": "This event change request has already been reviewed.", "code": "55000", "details": None, "hint": None})
+                decision = params["p_decision"]
+                comments = params.get("p_review_comments")
+                if decision not in {"Approved", "Rejected"}:
+                    raise APIError({"message": "Decision must be Approved or Rejected.", "code": "22023", "details": None, "hint": None})
+                if decision == "Rejected" and not str(comments or "").strip():
+                    raise APIError({"message": "A reason is required when rejecting a change request.", "code": "22023", "details": None, "hint": None})
+                event = next(
+                    (
+                        row for row in self.tables.get("Event Details", [])
+                        if str(row.get("id")) == str(request.get("event_id"))
+                    ),
+                    None,
+                )
+                if not event:
+                    raise APIError({"message": "Event request not found.", "code": "P0002", "details": None, "hint": None})
+                event_name = event.get("event_name") or "Event"
+                snapshot = deepcopy(self.tables)
+                try:
+                    if decision == "Approved":
+                        event.update({
+                            "event_name": request.get("proposed_event_name"),
+                            "event_type": request.get("proposed_event_type"),
+                            "event_date": request.get("proposed_event_date"),
+                            "event_end_date": request.get("proposed_event_end_date"),
+                            "event_capacity": request.get("proposed_event_capacity"),
+                            "description": request.get("proposed_description"),
+                            "start_time": request.get("proposed_start_time"),
+                            "end_time": request.get("proposed_end_time"),
+                        })
+                    request.update({
+                        "review_status": decision,
+                        "reviewed_by": params["p_coordinator_id"],
+                        "reviewed_at": "2026-10-04T00:00:00+00:00",
+                        "review_comments": str(comments).strip() if comments else None,
+                    })
+                    reason = f": {comments.strip()}" if decision == "Rejected" else ""
+                    self.table("notifications").insert({
+                        "recipient_id": request["organiser_id"],
+                        "description": f'Change request for "{event_name}" was {decision.lower()}{reason}',
+                        "record_type": "event",
+                        "record_id": str(event["id"]),
+                        "is_read": False,
+                    }).execute()
+                    return Result(data=dict(request))
                 except Exception:
                     self.tables = snapshot
                     raise

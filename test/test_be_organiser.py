@@ -36,8 +36,8 @@ def err(fn, *a, **kw):
     return info.value.status_code, info.value.detail
 
 
-def setup(use_db, events=()):
-    return use_db(FakeClient({"Event Details": list(events)}), eo)
+def setup(use_db, events=(), change_requests=()):
+    return use_db(FakeClient({"Event Details": list(events), "event_change_requests": list(change_requests)}), eo)
 
 
 @tc("BE-ORG-001", "db", "Supabase credentials are missing.", "HTTP 500 \"Backend Supabase credentials are not configured.\"",
@@ -303,16 +303,32 @@ def test_create_event_change_request_saves_and_notifies(use_db):
     assert "Add wheelchair-accessible seating" in notification["description"]
 
 
-@tc("BE-ORG-040", "create_event_change_request", "Owner submits a second request for the same event.",
-    "Both requests remain stored as separate history records.", kind="Edge",
-    steps="1. Submit two distinct change requests for event 1.")
-def test_change_requests_keep_history(use_db):
+@tc("BE-ORG-040", "create_event_change_request", "Owner submits a second request while one is pending for the same event.",
+    "HTTP 400 and only the first pending request remains stored.", kind="Negative",
+    steps="1. Submit a change request for event 1. 2. Submit another before review.")
+def test_change_requests_reject_second_pending(use_db):
     client = setup(use_db, [row(status="Under review")])
     eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
-    eo.create_event_change_request("o1", 1, make_change_request("Add more seating"))
+    assert err(eo.create_event_change_request, "o1", 1, make_change_request("Add more seating")) == (
+        400,
+        "This event already has a pending change request.",
+    )
     assert [item["request_text"] for item in client.tables["event_change_requests"]] == [
-        "Change the schedule", "Add more seating",
+        "Change the schedule",
     ]
+
+
+@tc("BE-ORG-049", "create_event_change_request", "The same event only has reviewed change-request history.",
+    "A new Pending request can be submitted after an earlier request is Approved or Rejected.",
+    pre="Event 1 has Approved and Rejected historical requests, but no Pending request.",
+    steps="1. Seed reviewed requests. 2. Submit a new change request.", kind="State")
+def test_change_request_allowed_after_review(use_db):
+    client = setup(use_db, [row(status="Confirmed")], [
+        {"id": 7, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1", "request_text": "Old approved", "review_status": "Approved"},
+        {"id": 8, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1", "request_text": "Old rejected", "review_status": "Rejected"},
+    ])
+    eo.create_event_change_request("o1", 1, make_change_request("New request"))
+    assert [item["review_status"] for item in client.tables["event_change_requests"]] == ["Approved", "Rejected", "Pending"]
 
 
 @tc("BE-ORG-041", "create_event_change_request", "Another organiser submits a request for the event.",
@@ -428,6 +444,32 @@ def test_change_request_unmapped_database_error(use_db, monkeypatch):
     ))
     with pytest.raises(APIError, match="Database unavailable"):
         eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
+
+
+@tc("BE-ORG-051", "create_event_change_request", "A change request is submitted while another one is pending.",
+    "HTTP 400 explains that only one pending request is allowed.", kind="State",
+    steps="1. Make the submission RPC return a 23505 APIError. 2. Submit a change request.")
+def test_change_request_pending_conflict(use_db, monkeypatch):
+    client = setup(use_db, [row(status="Confirmed")])
+    error = APIError({
+        "message": "A pending change request already exists.",
+        "code": "23505",
+        "details": None,
+        "hint": None,
+    })
+
+    def raise_database_error():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(
+        execute=raise_database_error,
+    ))
+    assert err(
+        eo.create_event_change_request,
+        "o1",
+        1,
+        make_change_request("Change the schedule"),
+    ) == (400, "This event already has a pending change request.")
 
 
 @tc("BE-ORG-050", "create_event_change_request", "Notification insert fails after request insert.",

@@ -53,6 +53,10 @@ const submitChangeRequest = (eventId, organiserId, summary, proposal = {}) => q(
     proposal.end_time ?? '15:00',
   ],
 );
+const reviewChangeRequest = (requestId, coordinatorId, decision, comments = null) => q(
+  'select * from review_event_change_request($1,$2,$3,$4)',
+  [requestId, coordinatorId, decision, comments],
+);
 const blocked = async (sql,params,code) => {
   try { await q(sql,params); assert.fail('Expected database rejection'); }
   catch (e) { assert.equal(e.code,code,e.message); }
@@ -95,17 +99,52 @@ await expectRecipients(['c']);
 assert.equal((await notifications())[0].record_type, 'event');
 assert.match((await notifications())[0].description, /Add wheelchair-accessible seating/);
 await clear();
+await blocked('select * from submit_event_change_request($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [1, ids.o, 'Add more seating', 'Gather updated', 'Conference', '2099-02-01', '2099-02-02', 25, 'Updated event plan', '10:00', '15:00'], '22023');
+assert.equal((await q('select count(*)::int as n from event_change_requests where event_id=1')).rows[0].n,1);
+await blocked(
+  'select * from review_event_change_request($1,$2,$3,$4)',
+  [1, ids.d, 'Approved', null],
+  '42501',
+);
+await blocked(
+  'select * from review_event_change_request($1,$2,$3,$4)',
+  [1, ids.c, 'Rejected', '   '],
+  '22023',
+);
+await actor('c');
+const rejected = await reviewChangeRequest(1, ids.c, 'Rejected', 'Please revise the proposed event schedule.');
+assert.equal(rejected.rows[0].review_status, 'Rejected');
+assert.equal(rejected.rows[0].reviewed_by, ids.c);
+assert.equal(rejected.rows[0].review_comments, 'Please revise the proposed event schedule.');
+await expectRecipients(['o']);
+assert.match((await notifications())[0].description, /rejected: Please revise the proposed event schedule/);
+await clear();
+assert.equal((await q('select event_name from "Event Details" where id=1')).rows[0].event_name, 'Gather',
+  'Rejecting a proposal must not modify the event');
+await actor('o');
 await submitChangeRequest(1, ids.o, 'Add more seating');
 assert.equal((await q('select count(*)::int as n from event_change_requests where event_id=1')).rows[0].n,2);
+await clear();
+await actor('c');
+const approved = await reviewChangeRequest(2, ids.c, 'Approved');
+assert.equal(approved.rows[0].review_status, 'Approved');
+assert.equal(approved.rows[0].reviewed_by, ids.c);
+assert.ok(approved.rows[0].reviewed_at);
+await expectRecipients(['o']);
+assert.match((await notifications())[0].description, /was approved/);
+await clear();
 assert.deepEqual(
   (await q('select event_name,event_type,event_date::text,event_end_date::text,event_capacity,description,start_time,end_time from "Event Details" where id=1')).rows[0],
   {
-    event_name: 'Gather', event_type: 'Workshop', event_date: '2099-01-01',
-    event_end_date: '2099-01-01', event_capacity: 1, description: 'Original event',
-    start_time: '12:00:00', end_time: '13:00:00',
+    event_name: 'Gather updated', event_type: 'Conference', event_date: '2099-02-01',
+    event_end_date: '2099-02-02', event_capacity: 25, description: 'Updated event plan',
+    start_time: '10:00:00', end_time: '15:00:00',
   },
-  'Submitting change requests must leave the event details untouched',
+  'Approving a proposal must apply all proposed event details',
 );
+await actor('o');
+await submitChangeRequest(1, ids.o, 'Add more seating');
+assert.equal((await q('select count(*)::int as n from event_change_requests where event_id=1')).rows[0].n,3);
 await blocked('select * from submit_event_change_request($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [1, ids.c, 'Wrong owner', 'X', 'Workshop', '2099-02-01', '2099-02-01', 10, 'X', '10:00', '11:00'], '42501');
 await blocked('select * from submit_event_change_request($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [1, ids.o, '   ', 'X', 'Workshop', '2099-02-01', '2099-02-01', 10, 'X', '10:00', '11:00'], '22023');
 await clear();
@@ -124,6 +163,10 @@ await blocked(
   [4, ids.o, 'Move into the past', 'Historical updated', 'Workshop', '2019-12-31', '2020-01-01', 10, 'Revised', '12:00', '13:00'],
   '22023',
 );
+await clear();
+await actor('c');
+await reviewChangeRequest(3, ids.c, 'Approved');
+await expectRecipients(['o']);
 await clear();
 await actor('o');
 await db.exec(`
@@ -144,7 +187,7 @@ await blocked(
 );
 assert.equal(
   (await q('select count(*)::int as n from event_change_requests where event_id=1')).rows[0].n,
-  2,
+  3,
   'A failed coordinator notification must roll back its change-request row',
 );
 await db.exec('drop trigger reject_change_request_notification on notifications; drop function reject_change_request_notification();');
@@ -219,6 +262,7 @@ assert.equal((await notifications()).length,0);
 const grants = (await q(`select has_function_privilege('authenticated','register_for_event(bigint,uuid)','execute') as register, has_table_privilege('authenticated','notifications','select') as read, has_function_privilege('anon','emit_notifications(text[],text,text,text)','execute') as emit`)).rows[0];
 assert.deepEqual(grants,{register:false,read:false,emit:false});
 assert.equal((await q(`select has_function_privilege('authenticated','submit_event_change_request(bigint,uuid,text,text,text,date,date,integer,text,time without time zone,time without time zone)','execute') as execute`)).rows[0].execute,false);
-assert.equal((await q(`select to_regprocedure('public.review_event_change_request(bigint,uuid,text,text)') as fn`)).rows[0].fn,null);
-console.log('PASS: migrations rerun, role checks, duplicate/capacity/start guards, change proposal persistence without event mutation, coordinator notification, actor exclusion, deduplication, no-op saves, transaction rollback, cancellation retention, database permissions.');
+assert.equal((await q(`select has_function_privilege('authenticated','review_event_change_request(bigint,uuid,text,text)','execute') as execute`)).rows[0].execute,false);
+assert.equal((await q(`select has_function_privilege('service_role','review_event_change_request(bigint,uuid,text,text)','execute') as execute`)).rows[0].execute,true);
+console.log('PASS: migrations rerun, role checks, duplicate/capacity/start guards, transactional approval and rejection, required rejection reasons, organiser review metadata, coordinator notification, actor exclusion, deduplication, no-op saves, transaction rollback, cancellation retention, database permissions.');
 await db.close();
