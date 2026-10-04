@@ -60,6 +60,10 @@ create index if not exists event_change_requests_pending_coordinator
   on public.event_change_requests(coordinator_id, created_at desc)
   where review_status = 'Pending';
 
+create unique index if not exists event_change_requests_one_pending_per_event
+  on public.event_change_requests(event_id)
+  where review_status = 'Pending';
+
 alter table public.event_change_requests enable row level security;
 revoke all on public.event_change_requests from anon, authenticated;
 grant all on public.event_change_requests to service_role;
@@ -121,6 +125,16 @@ begin
       using errcode = '22023';
   end if;
 
+  if exists (
+    select 1
+    from public.event_change_requests
+    where event_id = p_event_id
+      and review_status = 'Pending'
+  ) then
+    raise exception 'This event already has a pending change request.'
+      using errcode = '22023';
+  end if;
+
   if p_event_name is null or length(trim(p_event_name)) = 0
     or p_event_type is null or length(trim(p_event_type)) = 0
     or p_event_date is null or p_event_end_date is null
@@ -166,11 +180,107 @@ begin
 end;
 $$;
 
+create or replace function public.review_event_change_request(
+  p_request_id bigint,
+  p_coordinator_id uuid,
+  p_decision text,
+  p_review_comments text
+)
+returns public.event_change_requests
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  change_request public.event_change_requests%rowtype;
+  event_row public."Event Details"%rowtype;
+begin
+  if p_decision is null or p_decision not in ('Approved', 'Rejected') then
+    raise exception 'Decision must be Approved or Rejected.'
+      using errcode = '22023';
+  end if;
+
+  if p_decision = 'Rejected'
+    and (p_review_comments is null or length(trim(p_review_comments)) = 0) then
+    raise exception 'A reason is required when rejecting a change request.'
+      using errcode = '22023';
+  end if;
+
+  select * into change_request
+  from public.event_change_requests
+  where id = p_request_id
+  for update;
+
+  if not found then
+    raise exception 'Event change request not found.' using errcode = 'P0002';
+  end if;
+
+  if change_request.coordinator_id is distinct from p_coordinator_id then
+    raise exception 'You can only review change requests assigned to you.'
+      using errcode = '42501';
+  end if;
+
+  if change_request.review_status <> 'Pending' then
+    raise exception 'This event change request has already been reviewed.'
+      using errcode = '55000';
+  end if;
+
+  select * into event_row
+  from public."Event Details"
+  where id = change_request.event_id
+  for update;
+
+  if not found then
+    raise exception 'Event request not found.' using errcode = 'P0002';
+  end if;
+
+  if p_decision = 'Approved' then
+    update public."Event Details"
+    set event_name = change_request.proposed_event_name,
+        event_type = change_request.proposed_event_type,
+        event_date = change_request.proposed_event_date,
+        event_end_date = change_request.proposed_event_end_date,
+        event_capacity = change_request.proposed_event_capacity,
+        description = change_request.proposed_description,
+        start_time = change_request.proposed_start_time,
+        end_time = change_request.proposed_end_time
+    where id = change_request.event_id;
+  end if;
+
+  update public.event_change_requests
+  set review_status = p_decision,
+      reviewed_by = p_coordinator_id,
+      reviewed_at = now(),
+      review_comments = nullif(trim(p_review_comments), '')
+  where id = p_request_id
+  returning * into change_request;
+
+  perform public.emit_notifications(
+    array[change_request.organiser_id::text],
+    format(
+      'Change request for "%s" was %s%s',
+      coalesce(event_row.event_name, 'Event'),
+      lower(p_decision),
+      case when p_decision = 'Rejected' then format(': %s', trim(p_review_comments)) else '' end
+    ),
+    'event',
+    event_row.id::text
+  );
+
+  return change_request;
+end;
+$$;
+
 revoke all on function public.submit_event_change_request(
   bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone
 ) from public, anon, authenticated;
 grant execute on function public.submit_event_change_request(
   bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone
 ) to service_role;
+
+revoke all on function public.review_event_change_request(bigint, uuid, text, text)
+  from public, anon, authenticated;
+grant execute on function public.review_event_change_request(bigint, uuid, text, text)
+  to service_role;
 
 commit;

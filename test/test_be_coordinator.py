@@ -1,7 +1,10 @@
 """Unit tests for backend/coordinator_assignment.py."""
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi import HTTPException
+from postgrest.exceptions import APIError
 
 import coordinator_assignment as ca
 from fake_supabase import FakeClient
@@ -15,8 +18,12 @@ COORDS = [
 ORGANISER = {"id": "o1", "name": "Olly", "role": "Event Organiser", "email": "o@x", "active_event_count": None}
 
 
-def world(events=None, users=None):
-    client = FakeClient({"users": users or [*COORDS, ORGANISER], "Event Details": events or []})
+def world(events=None, users=None, change_requests=None):
+    client = FakeClient({
+        "users": users or [*COORDS, ORGANISER],
+        "Event Details": events or [],
+        "event_change_requests": change_requests or [],
+    })
     return client
 
 
@@ -320,6 +327,240 @@ def test_organiser_events(use_db):
     assert [e["id"] for e in out] == [2, 1] and out[1]["coordinator_name"] == "Bob" and out[0]["coordinator_name"] is None
 
 
+@tc("BE-COORD-047", "organiser_events", "One organiser event has a pending change request.",
+    "That event is marked has_pending_change_request true; reviewed history does not block another event.",
+    pre="Event 1 has Pending history; Event 2 has Approved history.", steps="1. Call organiser_events(\"o1\").")
+def test_organiser_events_marks_pending_change_requests(use_db):
+    events = [event(id=1, event_date="2026-11-01", coordinator_id="c1"), event(id=2, event_date="2026-10-01", coordinator_id="c1")]
+    change_requests = [
+        {"id": 1, "event_id": 1, "review_status": "Rejected", "review_comments": "Provide a revised schedule", "created_at": "2026-02-01T00:00:00Z"},
+        {"id": 2, "event_id": 1, "review_status": "Pending", "created_at": "2026-03-01T00:00:00Z"},
+        {"id": 3, "event_id": 2, "review_status": "Approved", "review_comments": None, "created_at": "2026-02-15T00:00:00Z"},
+    ]
+    use_db(world(events, change_requests=change_requests), ca)
+    out = {item["id"]: item for item in ca.organiser_events("o1")}
+    assert out[1]["has_pending_change_request"] is True
+    assert out[1]["latest_change_request"]["review_status"] == "Pending"
+    assert out[2]["has_pending_change_request"] is False
+    assert out[2]["latest_change_request"]["review_status"] == "Approved"
+    assert out[2]["latest_change_request"]["review_comments"] is None
+
+
+def change_request(**overrides):
+    return {
+        "id": 11, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1",
+        "review_status": "Pending", "request_text": "Move the event",
+        "proposed_event_name": "Morning Gala", "proposed_event_type": "Workshop",
+        "proposed_event_date": "2026-10-02", "proposed_event_end_date": "2026-10-03",
+        "proposed_event_capacity": 50, "proposed_description": "Updated plan",
+        "proposed_start_time": "08:00", "proposed_end_time": "12:00",
+        **overrides,
+    }
+
+
+@tc("BE-COORD-048", "review_event_change_request", "Assigned coordinator approves a pending request.",
+    "The request is Approved and all proposed event fields are applied; reviewer and review time are recorded.",
+    steps="1. Seed a pending request. 2. Approve it as its assigned coordinator.")
+def test_approve_event_change_request_applies_proposal(use_db):
+    client = use_db(world([event(status="Confirmed", event_type="Workshop", event_capacity=10)], [*COORDS, ORGANISER], [change_request()]), ca)
+    reviewed = ca.review_event_change_request(
+        11, ca.EventChangeRequestReview(decision="Approved"), {"id": "c1", "role": "Event Coordinator"}
+    )
+    assert reviewed["review_status"] == "Approved"
+    assert reviewed["reviewed_by"] == "c1"
+    assert reviewed["reviewed_at"]
+    assert client.tables["Event Details"][0] == {
+        **event(status="Confirmed", event_type="Workshop", event_capacity=10),
+        "event_name": "Morning Gala", "event_type": "Workshop",
+        "event_date": "2026-10-02", "event_end_date": "2026-10-03",
+        "event_capacity": 50, "description": "Updated plan",
+        "start_time": "08:00", "end_time": "12:00",
+    }
+    assert client.tables["notifications"][0]["recipient_id"] == "o1"
+    assert "was approved" in client.tables["notifications"][0]["description"]
+
+
+@tc("BE-COORD-049", "review_event_change_request", "Assigned coordinator rejects a pending request with a reason.",
+    "The request is Rejected and the event details remain unchanged.",
+    steps="1. Seed a pending request. 2. Reject with a reason.")
+def test_reject_event_change_request_preserves_event(use_db):
+    client = use_db(world([event(status="Confirmed", event_capacity=10)], [*COORDS, ORGANISER], [change_request()]), ca)
+    original_event = dict(client.tables["Event Details"][0])
+    reviewed = ca.review_event_change_request(
+        11,
+        ca.EventChangeRequestReview(decision="Rejected", review_comments="Please revise the event schedule."),
+        {"id": "c1", "role": "Event Coordinator"},
+    )
+    assert reviewed["review_status"] == "Rejected"
+    assert reviewed["review_comments"] == "Please revise the event schedule."
+    assert reviewed["reviewed_by"] == "c1"
+    assert client.tables["Event Details"][0] == original_event
+    assert client.tables["notifications"][0]["recipient_id"] == "o1"
+    assert "Please revise the event schedule." in client.tables["notifications"][0]["description"]
+
+
+@tc("BE-COORD-050", "review_event_change_request", "A coordinator rejects without a reason.",
+    "HTTP 400 and the database is not called.", kind="Negative",
+    steps="1. Attempt to reject a pending request with a blank reason.")
+def test_reject_event_change_request_requires_reason(use_db):
+    client = use_db(world(change_requests=[change_request()]), ca)
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Rejected", review_comments="  "),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (400, "A reason is required when rejecting a change request.")
+    assert not client.log
+
+
+@tc("BE-COORD-051", "review_event_change_request", "Another coordinator attempts to review the request.",
+    "HTTP 403 and the request remains Pending.", kind="Security",
+    steps="1. Attempt to approve c1's request as coordinator c2.")
+def test_review_event_change_request_wrong_coordinator(use_db):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c2", "role": "Event Coordinator"},
+    )[0] == 403
+    assert client.tables["event_change_requests"][0]["review_status"] == "Pending"
+
+
+@tc("BE-COORD-052", "review_event_change_request", "A coordinator reviews an already-decided request.",
+    "HTTP 409; a completed decision cannot be overwritten.", kind="State",
+    steps="1. Seed an Approved request. 2. Attempt to reject it.")
+def test_review_event_change_request_cannot_be_overwritten(use_db):
+    client = use_db(
+        world(
+            [event(status="Confirmed", event_capacity=50)],
+            [*COORDS, ORGANISER],
+            [change_request(review_status="Approved", reviewed_by="c1", review_comments=None)],
+        ),
+        ca,
+    )
+    original_event = dict(client.tables["Event Details"][0])
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Rejected", review_comments="Try again."),
+        {"id": "c1", "role": "Event Coordinator"},
+    )[0] == 409
+    assert client.tables["Event Details"][0] == original_event
+    assert client.tables["event_change_requests"][0]["review_status"] == "Approved"
+
+
+@tc("BE-COORD-053", "review_event_change_request", "The requested change request does not exist.",
+    "HTTP 404 with the database error message.", kind="Negative",
+    steps="1. Make the review RPC return a P0002 APIError. 2. Attempt to approve the request.")
+def test_review_event_change_request_missing_request(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    error = APIError({"message": "Change request not found.", "code": "P0002", "details": None, "hint": None})
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=execute))
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (404, "Change request not found.")
+
+
+@tc("BE-COORD-054", "review_event_change_request", "The coordinator is not assigned to the change request.",
+    "HTTP 403 with the database error message.", kind="Security",
+    steps="1. Make the review RPC return a 42501 APIError. 2. Attempt to approve the request.")
+def test_review_event_change_request_unassigned_coordinator(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    error = APIError({"message": "Request is assigned to another coordinator.", "code": "42501", "details": None, "hint": None})
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=execute))
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (403, "Request is assigned to another coordinator.")
+
+
+@tc("BE-COORD-055", "review_event_change_request", "The review RPC rejects an invalid decision.",
+    "HTTP 400 with the database error message.", kind="Negative",
+    steps="1. Make the review RPC return a 22023 APIError. 2. Attempt to approve the request.")
+def test_review_event_change_request_invalid_decision(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    error = APIError({"message": "Decision must be Approved or Rejected.", "code": "22023", "details": None, "hint": None})
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=execute))
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (400, "Decision must be Approved or Rejected.")
+
+
+@tc("BE-COORD-056", "review_event_change_request", "A reviewed request is submitted for another review.",
+    "HTTP 409 with the database error message.", kind="State",
+    steps="1. Make the review RPC return a 55000 APIError. 2. Attempt to approve the request.")
+def test_review_event_change_request_already_reviewed_error(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    error = APIError({"message": "Change request has already been reviewed.", "code": "55000", "details": None, "hint": None})
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=execute))
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (409, "Change request has already been reviewed.")
+
+
+@tc("BE-COORD-057", "review_event_change_request", "The review RPC returns no updated request.",
+    "HTTP 500 with an explicit review failure.", kind="Negative",
+    steps="1. Make the review RPC return no data. 2. Attempt to approve the request.")
+def test_review_event_change_request_empty_rpc_result(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(
+        execute=lambda: SimpleNamespace(data=[]),
+    ))
+    assert err(
+        ca.review_event_change_request,
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (500, "Event change request could not be reviewed.")
+
+
+@tc("BE-COORD-058", "review_event_change_request", "The review RPC fails with an unmapped database error.",
+    "The original APIError propagates instead of becoming a success-shaped response.", kind="Negative",
+    steps="1. Make the review RPC return an unknown APIError. 2. Attempt to approve the request.")
+def test_review_event_change_request_unmapped_database_error(use_db, monkeypatch):
+    client = use_db(world([event()], [*COORDS, ORGANISER], [change_request()]), ca)
+    error = APIError({"message": "Database unavailable.", "code": "XX000", "details": None, "hint": None})
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=execute))
+    with pytest.raises(APIError, match="Database unavailable"):
+        ca.review_event_change_request(
+            11,
+            ca.EventChangeRequestReview(decision="Approved"),
+            {"id": "c1", "role": "Event Coordinator"},
+        )
+
+
 @tc("BE-COORD-038", "organiser_events", "Organiser has no events.", "An empty list is returned.", steps="1. Call organiser_events(\"nobody\").", kind="Edge")
 def test_organiser_events_empty(use_db):
     use_db(world([event()]), ca)
@@ -332,6 +573,31 @@ def test_all_events(use_db):
     use_db(world([event(id=1, event_date="2026-12-01", coordinator_id="c2"), event(id=2, event_date="2026-10-01")]), ca)
     out = ca.all_events({"id": "c2", "role": "Event Coordinator"})
     assert [e["id"] for e in out] == [1] and out[0]["coordinator_name"] == "Amy"
+
+
+@tc("BE-COORD-045", "event_change_requests", "A coordinator opens the Event Change Request tab.",
+    "Only requests assigned to that coordinator are returned, newest first, with event, organiser and proposal details.",
+    pre="Two requests are assigned to c1 and one to c2.", steps="1. Call event_change_requests as coordinator c1.", kind="Security")
+def test_event_change_requests_for_assigned_coordinator(use_db):
+    change_requests = [
+        {"id": 1, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1", "request_text": "Move earlier", "review_status": "Pending", "created_at": "2026-02-01T00:00:00Z", "proposed_event_name": "Morning Gala", "proposed_event_type": "Workshop", "proposed_event_date": "2026-10-01", "proposed_event_end_date": "2026-10-01", "proposed_event_capacity": 50, "proposed_description": "Updated plan", "proposed_start_time": "08:00:00", "proposed_end_time": "12:00:00"},
+        {"id": 2, "event_id": 2, "organiser_id": "o1", "coordinator_id": "c2", "request_text": "Different coordinator", "review_status": "Pending", "created_at": "2026-03-01T00:00:00Z"},
+        {"id": 3, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1", "request_text": "Add seating", "review_status": "Approved", "created_at": "2026-04-01T00:00:00Z", "proposed_event_name": "Seated Gala"},
+    ]
+    use_db(world([event(id=1, coordinator_id="c1"), event(id=2, coordinator_id="c2")], change_requests=change_requests), ca)
+    out = ca.event_change_requests({"id": "c1", "role": "Event Coordinator"})
+    assert [item["id"] for item in out] == [3, 1]
+    assert out[1]["event"]["event_title"] == "Gala"
+    assert out[1]["organiser_name"] == "Olly"
+    assert out[1]["proposal"]["event_name"] == "Morning Gala"
+    assert out[1]["request_text"] == "Move earlier"
+
+
+@tc("BE-COORD-046", "change_request_view", "A change request references an event that is no longer available.",
+    "The request is still returned with event set to None and its proposal intact.", steps="1. Call change_request_view without an event map.", kind="Edge")
+def test_change_request_view_missing_event():
+    out = ca.change_request_view({"id": 9, "event_id": 99, "organiser_id": "o1", "coordinator_id": "c1", "proposed_event_name": "Updated"}, {}, {"o1": ORGANISER, "c1": COORDS[0]})
+    assert out["event"] is None and out["proposal"]["event_name"] == "Updated" and out["coordinator_name"] == "Bob"
 
 
 @tc("BE-COORD-040", "coordinators", "Coordinator list is requested.", "Only coordinators, sorted by name case-insensitively (Amy, Bob, Cat).",
