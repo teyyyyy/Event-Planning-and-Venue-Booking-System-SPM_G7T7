@@ -72,40 +72,25 @@ export default function VenueCalendar({ venues, apiBaseUrl }) {
 
   return (
     <div className="request-form">
-      <div className="form-heading">
-        <div>
-          <h2>Venue Availability</h2>
-          <p>Select a venue to view confirmed bookings on the calendar.</p>
-        </div>
-      </div>
-
       {/* Calendar Controls */}
-      <div
-        style={{
-          display: "flex",
-          gap: "20px",
-          marginBottom: "20px",
-          alignItems: "center",
-        }}
-      >
-        <select
-          value={calendarVenueId}
-          onChange={(e) => setCalendarVenueId(e.target.value)}
-          style={{
-            padding: "8px",
-            borderRadius: "4px",
-            border: "1px solid #ccd5e2",
-          }}
-        >
-          <option value="">Select a venue to view...</option>
-          {venues.map((v) => (
-            <option key={v.venue_id} value={v.venue_id}>
-              {v.name}
-            </option>
-          ))}
-        </select>
+      <div className="equipment-items-heading" style={{ marginTop: "18px" }}>
+        {/* Left Side: Venue Dropdown */}
+        <div className="selector" style={{ margin: 0 }}>
+          <select
+            value={calendarVenueId}
+            onChange={(e) => setCalendarVenueId(e.target.value)}
+          >
+            <option value="">Select a venue to view...</option>
+            {venues.map((v) => (
+              <option key={v.venue_id} value={v.venue_id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        {/* Right Side: Date Range Controls */}
+        <div className="form-actions" style={{ alignItems: "center" }}>
           <button
             type="button"
             className="secondary"
@@ -113,17 +98,18 @@ export default function VenueCalendar({ venues, apiBaseUrl }) {
           >
             ← Prev Week
           </button>
-          <strong
+          <span
             style={{
               minWidth: "150px",
               textAlign: "center",
-              fontSize: "14px",
               color: "#1c2940",
+              fontSize: "13px",
+              fontWeight: 500,
             }}
           >
             {weekDays[0].toLocaleDateString()} -{" "}
             {weekDays[6].toLocaleDateString()}
-          </strong>
+          </span>
           <button
             type="button"
             className="secondary"

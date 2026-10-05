@@ -8,6 +8,7 @@ import EquipmentUpdate from "./EquipmentUpdate";
 import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
+import VenueStaffCalendar from "./VenueStaffCalendar";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -40,15 +41,66 @@ function AuthedApp() {
 
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
+  const [activeSection, setActiveSection] = useState("venue-approval");
+
   return (
-    <>
-      <div className="role-tabs">
-        <button className="logout-tab" onClick={logout} title={email}>
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">VENUE STAFF</div>
+
+          <nav className="coordinator-side-nav">
+            <button
+              type="button"
+              className={
+                activeSection === "venue-approval"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveSection("venue-approval")}
+            >
+              Venue Approval
+            </button>
+
+            <button
+              type="button"
+              className={
+                activeSection === "venue-calendar"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveSection("venue-calendar")}
+            >
+              Venue Availability Calendar
+            </button>
+          </nav>
+        </div>
+
+        <button
+          type="button"
+          className="coordinator-logout"
+          onClick={logout}
+          title={email}
+        >
           Log out
         </button>
+      </aside>
+
+      <div className="coordinator-main">
+        {activeSection === "venue-approval" && (
+          <div className="embedded-existing-page">
+            <VenueApproval />
+          </div>
+        )}
+
+        {activeSection === "venue-calendar" && (
+          <div className="embedded-existing-page">
+            <VenueStaffCalendar />
+          </div>
+        )}
       </div>
-      <VenueApproval />
-    </>
+    </div>
   );
 }
 
