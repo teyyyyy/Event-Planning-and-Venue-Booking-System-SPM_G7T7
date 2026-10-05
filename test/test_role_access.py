@@ -11,6 +11,7 @@ import coordinator_assignment as ca
 import equipment_availability as ea
 import equipment_request as er
 import equipment_update as eu
+import event_changes as ec
 import event_organiser as eo
 import main
 import venue_approval as va
@@ -32,6 +33,7 @@ ROLE_PATHS = {
     "Event Organiser": (
         "/api/event-organisers/{user_id}/submitted-requests",
         "/api/event-organisers/{user_id}/requests",
+        "/api/events/1/change-log",
     ),
     "Event Coordinator": (
         "/api/events",
@@ -39,6 +41,7 @@ ROLE_PATHS = {
         "/api/coordinator-workloads",
         "/api/event-coordinators/{user_id}/events",
         "/api/event-change-requests",
+        "/api/events/1/change-log",
         "/api/equipment",
         "/api/venues",
         "/api/venue-booking-requests/venues/1",
@@ -47,11 +50,13 @@ ROLE_PATHS = {
     "Venue Staff": (
         "/api/venue-booking-requests",
         "/api/venue-catalogue",
+        "/api/events/1/change-log",
     ),
     "Technical Support Staff": (
         "/api/equipment-update/{user_id}/requests/summary",
         "/api/equipment-availability/{user_id}/events",
         "/api/venue-catalogue",
+        "/api/events/1/change-log",
     ),
     "Attendee": ("/api/attendee/events", "/api/attendee/registrations"),
 }
@@ -111,6 +116,8 @@ def client_for_role(monkeypatch, role):
             "end_datetime": "2026-10-10T17:00:00+00:00",
         }],
         "Venues": [{"venue_id": 1, "name": "Hall A"}],
+        "Equipment Request": [{"request_id": 1, "event_id": 1, "status": "Submitted", "created_by": USER_IDS["Event Coordinator"]}],
+        "event_change_log": [{"id": 1, "event_id": 1, "change_type": "Significant", "changed_by": USER_IDS["Event Coordinator"]}],
         "event_change_requests": [{
             "id": 1, "event_id": 1, "organiser_id": USER_IDS["Event Organiser"],
             "coordinator_id": USER_IDS["Event Coordinator"], "request_text": "Update the schedule",
@@ -124,7 +131,7 @@ def client_for_role(monkeypatch, role):
     })
     for module, attribute in (
         (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"),
-        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"),
+        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"),
     ):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
     fake.tables["notifications"] = [{"id": 1, "recipient_id": user_id, "record_type": "event", "record_id": "1", "is_read": False}]
@@ -145,6 +152,9 @@ def client_for_role(monkeypatch, role):
                 "proposed_event_capacity": 10, "proposed_description": "Updated details",
                 "proposed_start_time": "09:00", "proposed_end_time": "17:00",
             }
+        elif name == "process_event_change_request":
+            data = {"change_request": {"id": params["p_request_id"], "processing_status": "Processed"},
+                    "venue_requests": [], "equipment_requests": []}
         else:
             data = {"event_id": 1, "attendee_id": user_id}
         return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
@@ -195,6 +205,12 @@ def assert_role_access(client, role, user_id):
     else:
         assert review_response.status_code == 403, f"{role} must not review event change requests."
 
+    process_response = client.post("/api/event-change-requests/1/process")
+    if role == "Event Coordinator":
+        assert process_response.status_code == 200, process_response.text
+    else:
+        assert process_response.status_code == 403, f"{role} must not process event change requests."
+
     change_request_path = f"/api/event-organisers/{user_id}/requests/1/change-requests"
     proposal = {
         "request_text": "Update the schedule",
@@ -219,13 +235,13 @@ def assert_role_access(client, role, user_id):
 
 
 
-@tc("BE-ROLE-001", "Role access matrix", "An Event Organiser requests permitted and restricted route families.", "Only the organiser's own event request and profile routes are accessible.", steps="1. Authenticate as an Event Organiser. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-001", "Role access matrix", "An Event Organiser requests permitted and restricted route families.", "Only the organiser's own event request, event change history and profile routes are accessible; processing change requests is denied.", steps="1. Authenticate as an Event Organiser. 2. Request each route in the role matrix.", kind="Security")
 def test_event_organiser_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Event Organiser")
     assert_role_access(client, "Event Organiser", user_id)
 
 
-@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, equipment, venue-planning and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, change history, change-request processing, equipment, venue-planning and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
 def test_event_coordinator_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Event Coordinator")
     assert_role_access(client, "Event Coordinator", user_id)
@@ -245,19 +261,19 @@ def test_coordinator_cannot_review_unassigned_change_request(monkeypatch):
     assert response.status_code == 403
 
 
-@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue reads and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue reads, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_venue_staff_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Venue Staff")
     assert_role_access(client, "Venue Staff", user_id)
 
 
-@tc("BE-ROLE-004", "Role access matrix", "A Technical Support Staff member requests permitted and restricted route families.", "Equipment update, availability, venue catalogue reads and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Technical Support Staff. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-004", "Role access matrix", "A Technical Support Staff member requests permitted and restricted route families.", "Equipment update, availability, venue catalogue reads, change history for events with equipment requests and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Technical Support Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_technical_support_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Technical Support Staff")
     assert_role_access(client, "Technical Support Staff", user_id)
 
 
-@tc("BE-ROLE-005", "Role access matrix", "An Attendee requests registration, notification and staff route families.", "The Attendee can browse events, view their registrations, register and access their own notifications/profile; staff routes are denied.", steps="1. Authenticate as an Attendee. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-005", "Role access matrix", "An Attendee requests registration, notification and staff route families.", "The Attendee can browse events, view their registrations, register and access their own notifications/profile; staff routes and event change history are denied.", steps="1. Authenticate as an Attendee. 2. Request each route in the role matrix.", kind="Security")
 def test_attendee_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Attendee")
     profile = {"id": user_id, "role": "Attendee"}

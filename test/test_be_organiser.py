@@ -429,7 +429,7 @@ def test_change_request_list_rpc_result(use_db, monkeypatch):
     assert eo.create_event_change_request("o1", 1, make_change_request("Change the schedule")) == saved
 
 
-@tc("BE-ORG-049", "create_event_change_request", "Database RPC fails with an unmapped error.",
+@tc("BE-ORG-052", "create_event_change_request", "Database RPC fails with an unmapped error.",
     "The database error propagates instead of becoming a success-shaped response.", kind="Negative",
     steps="1. Stub the database RPC to raise an unknown APIError. 2. Submit a change request.")
 def test_change_request_unmapped_database_error(use_db, monkeypatch):
@@ -446,7 +446,7 @@ def test_change_request_unmapped_database_error(use_db, monkeypatch):
         eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
 
 
-@tc("BE-ORG-051", "create_event_change_request", "A change request is submitted while another one is pending.",
+@tc("BE-ORG-053", "create_event_change_request", "A change request is submitted while another one is pending.",
     "HTTP 400 explains that only one pending request is allowed.", kind="State",
     steps="1. Make the submission RPC return a 23505 APIError. 2. Submit a change request.")
 def test_change_request_pending_conflict(use_db, monkeypatch):

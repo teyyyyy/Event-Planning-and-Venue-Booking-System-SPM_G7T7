@@ -8,6 +8,7 @@ from supabase import Client
 from database import create_client
 from dotenv import load_dotenv
 from auth import require_coordinator, require_organiser, require_path_user, require_self
+from event_changes import change_impact, live_arrangements
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -52,6 +53,7 @@ def change_request_view(
     change_request: dict[str, Any],
     events: dict[str, dict[str, Any]],
     users: dict[str, dict[str, Any]],
+    arrangements: dict[str, Any] | None = None,
 ):
     event = events.get(str(change_request.get("event_id")))
     organiser = users.get(str(change_request.get("organiser_id")))
@@ -71,6 +73,10 @@ def change_request_view(
         "organiser_email": organiser.get("email") if organiser else None,
         "coordinator_name": coordinator.get("name") if coordinator else None,
         "coordinator_email": coordinator.get("email") if coordinator else None,
+        "processing_status": change_request.get("processing_status"),
+        "processed_at": change_request.get("processed_at"),
+        "processing_summary": change_request.get("processing_summary"),
+        "impact": change_impact(change_request, event, arrangements or {}),
         "event": view(event, event if event and event.get("coordinator_id") else None, users) if event else None,
         "proposal": {
             "event_name": change_request.get("proposed_event_name"),
@@ -88,9 +94,10 @@ def with_pending_change_request_flags(client: Client, events: list[dict[str, Any
     event_ids = [event["id"] for event in events]
     if not event_ids:
         return events
+    # "*" also returns the processing columns once significant_event_changes.sql is applied.
     change_requests = (
         client.table("event_change_requests")
-        .select("event_id,review_status,review_comments,reviewed_at,created_at,id")
+        .select("*")
         .in_("event_id", event_ids)
         .order("created_at", desc=True)
         .order("id", desc=True)
@@ -255,7 +262,8 @@ def event_change_requests(user: dict[str, Any] = Depends(require_coordinator)):
     users = client.table("users").select("id,name,role,email").in_("id", list(user_ids)).execute().data if user_ids else []
     event_map = {str(event["id"]): event for event in (events or [])}
     user_map = {str(user["id"]): user for user in (users or [])}
-    return [change_request_view(row, event_map, user_map) for row in rows]
+    arrangements = live_arrangements(client, event_ids)
+    return [change_request_view(row, event_map, user_map, arrangements) for row in rows]
 
 @router.patch("/api/event-change-requests/{request_id}/review")
 def review_event_change_request(

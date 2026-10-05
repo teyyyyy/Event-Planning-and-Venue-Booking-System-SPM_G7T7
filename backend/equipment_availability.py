@@ -2,6 +2,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from equipment_request import (
     db,
+    live_requests,
     EVENT_TABLE,
     EQUIPMENT_TABLE,
     REQUEST_TABLE,
@@ -187,7 +188,7 @@ def availability_events(staff_id: str):
     client = db()
     require_technical_support(client, staff_id)
 
-    request_headers = (
+    request_headers = live_requests(
         client.table(REQUEST_TABLE)
         .select("request_id,event_id,status")
         .order("request_id", desc=True)
@@ -270,7 +271,7 @@ def event_availability(staff_id: str, event_id: int):
     require_technical_support(client, staff_id)
     event = get_event(client, event_id)
 
-    request_headers = (
+    request_headers = live_requests(
         client.table(REQUEST_TABLE)
         .select("request_id,event_id,status")
         .eq("event_id", event_id)

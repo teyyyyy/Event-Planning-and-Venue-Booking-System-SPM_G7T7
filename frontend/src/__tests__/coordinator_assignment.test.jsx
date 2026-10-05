@@ -125,7 +125,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-011', 'CoordinatorAssignment (organiser status)', 'Events in different statuses are listed.',
-    'Draft is omitted; active events show Request changes unless one is already pending; Completed, Cancelled and Rejected have no action.',
+    'Draft is omitted; active events show Request changes unless one is already pending; Completed, Cancelled and Rejected have no action besides their change history.',
     { data: 'Draft, Submitted, Approved, Planning with pending change, Completed, Cancelled, Rejected', steps: '1. Render events in these statuses. 2. Inspect rows and actions.' },
     async () => {
       mockFetch(() => json([
@@ -147,7 +147,7 @@ describe('CoordinatorAssignment', () => {
       expect(within(row('Plan')).queryByRole('button', { name: 'Request changes' })).toBeNull();
       expect(within(row('Rej')).getByText(/Reason: Please revise the event details\./)).toBeInTheDocument();
       for (const name of ['Comp', 'Can', 'Rej']) {
-        expect(within(row(name)).queryByRole('button')).toBeNull();
+        expect(within(row(name)).getAllByRole('button').map((button) => button.textContent)).toEqual(['History']);
       }
     });
 
@@ -602,4 +602,238 @@ describe('CoordinatorAssignment', () => {
       );
       expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
     });
+  // ---- Stories 10.2 and 44.4: significant changes and change-request processing ----
+  const significantImpact = (o = {}) => ({
+    change_type: 'Significant', significant_fields: ['start_time', 'end_time'], affects_venue: true, affects_equipment: true,
+    venue_requests: [{ request_id: 5, status: 'Approved' }], equipment_requests: [{ request_id: 9, status: 'Approved' }], ...o,
+  });
+  const ordinaryImpact = { change_type: 'Ordinary', significant_fields: [], affects_venue: false, affects_equipment: false, venue_requests: [], equipment_requests: [] };
+  const openChangeRequests = async (requests, extra) => {
+    const f = coordinatorBackend((url, options) => (extra && extra(url, options)) || (url.endsWith('/event-change-requests') ? json(requests) : null));
+    render(<CoordinatorAssignment user={COORDINATOR} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Event Change Request' }));
+    return f;
+  };
+  const viewRequest = async (name) => {
+    fireEvent.click(within(await screen.findByRole('row', { name: new RegExp(name) })).getByRole('button', { name: 'View' }));
+    return screen.getByRole('form', { name: 'Event change request details' });
+  };
+
+  tc('FE-COORD-039', 'CoordinatorAssignment (change request significance)', 'An organiser edits a change request proposal.',
+    'An ordinary-edit note shows until a schedule or capacity field changes; a Significant change note then names the fields and the arrangements that would return to Pending.',
+    { data: 'name edit; start time 09:00 → 10:00; capacity 10 → 100', steps: '1. Open Request changes. 2. Edit the name. 3. Edit the start time. 4. Restore it and edit the capacity.' },
+    async () => {
+      mockFetch(() => json([ev({ event_status: 'Confirmed', coordinator_name: 'Zed' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
+      expect(screen.getByText('Ordinary edit: venue and equipment arrangements are not affected.')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Event name'), { target: { value: 'Gala Night' } });
+      expect(screen.getByText('Ordinary edit: venue and equipment arrangements are not affected.')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '10:00' } });
+      expect(screen.getByText(/\(Start time\)\. If approved, any venue booking and equipment requests for this event will return to Pending for re-review\./)).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Start time'), { target: { value: '09:00' } });
+      fireEvent.change(screen.getByLabelText('Capacity'), { target: { value: '100' } });
+      expect(screen.getByText(/\(Capacity\)\. If approved, any venue booking for this event will return to Pending for re-review\./)).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-040', 'CoordinatorAssignment (organiser status)', 'Approved change requests carry a significant-change classification.',
+    'The decision column shows the change type with its processing state; an unknown processing state shows the type only.',
+    { data: 'Significant/Awaiting processing; Ordinary/Not required; Significant/Processed; Significant/none', steps: '1. Render events whose latest change requests have each classification.' },
+    async () => {
+      const approved = (title, change_type, processing_status) => ev({
+        id: title, event_title: title, event_status: 'Confirmed', coordinator_name: 'Zed',
+        latest_change_request: { review_status: 'Approved', change_type, processing_status },
+      });
+      mockFetch(() => json([
+        approved('Awaiting gala', 'Significant', 'Awaiting processing'), approved('Ordinary gala', 'Ordinary', 'Not required'),
+        approved('Processed gala', 'Significant', 'Processed'), approved('Legacy gala', 'Significant', null),
+      ]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      await screen.findByText('Awaiting gala');
+      const row = (title) => screen.getByText(title).closest('tr');
+      expect(within(row('Awaiting gala')).getByText('Significant change · awaiting coordinator processing')).toBeInTheDocument();
+      expect(within(row('Ordinary gala')).getByText('Ordinary change · no processing needed')).toBeInTheDocument();
+      expect(within(row('Processed gala')).getByText('Significant change · processed')).toBeInTheDocument();
+      expect(within(row('Legacy gala')).getByText('Significant change')).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-041', 'CoordinatorAssignment (change history)', "A user opens an event's change history from the status table.",
+    'History loads /events/<id>/change-log into a row under the event and becomes Hide history; clicking again closes it.',
+    { steps: '1. Click History for an event. 2. Wait for the history. 3. Click Hide history.' },
+    async () => {
+      const f = mockFetch((url) => url.includes('/change-log')
+        ? json([{ id: 1, change_type: 'Significant', created_at: '2026-10-05T00:00:00Z', changed_fields: ['start_time'], significant_fields: ['start_time'],
+          previous_values: { start_time: '09:00:00' }, new_values: { start_time: '10:00:00' } }])
+        : json([ev({ event_status: 'Confirmed', coordinator_name: 'Zed' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      const button = await screen.findByRole('button', { name: 'Change history for Gala' });
+      expect(button).toHaveTextContent('History');
+      fireEvent.click(button);
+      expect(await screen.findByRole('list', { name: 'Event change history' })).toBeInTheDocument();
+      expect(callsTo(f, '/events/1/change-log')).toHaveLength(1);
+      expect(button).toHaveAttribute('aria-expanded', 'true');
+      expect(button).toHaveTextContent('Hide history');
+      fireEvent.click(button);
+      expect(screen.queryByRole('list', { name: 'Event change history' })).toBeNull();
+      expect(button).toHaveAttribute('aria-expanded', 'false');
+    });
+
+  tc('FE-COORD-042', 'CoordinatorAssignment (event change request tab)', 'Change requests have different impacts and processing states.',
+    'The Impact column shows a Significant or Ordinary badge (— when unknown) and the Processing column shows the processing state (— when none).',
+    { steps: '1. Open Event Change Request with a significant pending, an ordinary approved and a legacy approved request.' },
+    async () => {
+      await openChangeRequests([
+        changeReq({ id: 11, impact: significantImpact(), proposal: { event_name: 'Moved gala' } }),
+        changeReq({ id: 12, review_status: 'Approved', processing_status: 'Not required', impact: ordinaryImpact, proposal: { event_name: 'Renamed gala' } }),
+        changeReq({ id: 13, review_status: 'Approved', proposal: { event_name: 'Legacy gala' } }),
+      ]);
+      const cells = (name) => within(screen.getByRole('row', { name: new RegExp(name) })).getAllByRole('cell').map((cell) => cell.textContent);
+      await screen.findByText('Moved gala');
+      expect(cells('Moved gala').slice(3, 5)).toEqual(['Significant', '—']);
+      expect(cells('Renamed gala').slice(3, 5)).toEqual(['Ordinary', 'Not required']);
+      expect(cells('Legacy gala').slice(3, 5)).toEqual(['—', '—']);
+      expect(screen.getByText('Significant')).toHaveClass('change-badge', 'significant');
+      expect(screen.getByText('Ordinary')).toHaveClass('change-badge', 'ordinary');
+    });
+
+  tc('FE-COORD-043', 'CoordinatorAssignment (event change request detail)', 'A coordinator reviews pending requests with different impacts.',
+    'A significant request names its fields and the live venue booking and equipment request that approval returns to Pending; one with no live requests says nothing will be reopened; an ordinary request says arrangements are unaffected.',
+    { steps: '1. Expand each pending request and read its impact note.' },
+    async () => {
+      await openChangeRequests([
+        changeReq({ id: 11, impact: significantImpact(), proposal: { event_name: 'Moved gala' } }),
+        changeReq({ id: 12, impact: significantImpact({ significant_fields: ['event_capacity'], affects_equipment: false, venue_requests: [], equipment_requests: [] }), proposal: { event_name: 'Bigger gala' } }),
+        changeReq({ id: 13, impact: ordinaryImpact, proposal: { event_name: 'Renamed gala' } }),
+      ]);
+      expect(within(await viewRequest('Moved gala')).getByText(/\(Start time, End time\)\. Approving returns venue booking #5, equipment request #9 to Pending for re-review\./)).toBeInTheDocument();
+      expect(within(await viewRequest('Bigger gala')).getByText(/\(Capacity\)\. This event has no live venue or equipment requests for it to reopen yet\./)).toBeInTheDocument();
+      expect(within(await viewRequest('Renamed gala')).getByText('Ordinary edit: venue and equipment arrangements are not affected.')).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-044', 'CoordinatorAssignment (event change request review)', 'The coordinator approves a significant change request.',
+    'The message says affected requests are back to Pending and need processing; the row shows Awaiting processing and the detail offers Process change, naming the requests it replaces.',
+    { steps: '1. Expand a significant pending request. 2. Click Approve.' },
+    async () => {
+      await openChangeRequests([changeReq({ impact: significantImpact() }), changeReq({ id: 12, proposal: { event_name: 'Other gala' } })], (url, options) => url.endsWith('/review') && options.method === 'PATCH'
+        ? json({ id: 11, review_status: 'Approved', change_type: 'Significant', significant_fields: ['start_time', 'end_time'], affects_venue: true, affects_equipment: true, processing_status: 'Awaiting processing' })
+        : null);
+      await viewRequest('Morning Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      expect(await screen.findByText(/Affected venue and equipment requests are back to Pending; process the change to re-initiate them\./)).toBeInTheDocument();
+      expect(screen.getByRole('row', { name: /Other gala Olly Pending/ })).toBeInTheDocument();
+      expect(screen.getByRole('row', { name: /Morning Gala Olly Approved Significant Awaiting processing/ })).toBeInTheDocument();
+      expect(screen.getByText(/Processing replaces venue booking #5, equipment request #9 with new Pending requests linked to this change request/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Process change' })).toBeEnabled();
+    });
+
+  tc('FE-COORD-045', 'CoordinatorAssignment (event change request review)', 'The coordinator approves an ordinary change request that had no impact preview.',
+    'The standard approval message is shown and the detail says no processing is needed.',
+    { kind: 'Edge', data: 'response change_type Ordinary, processing_status Not required, no field list', steps: '1. Expand a pending request without impact. 2. Click Approve.' },
+    async () => {
+      await openChangeRequests([changeReq()], (url, options) => url.endsWith('/review') && options.method === 'PATCH'
+        ? json({ id: 11, review_status: 'Approved', change_type: 'Ordinary', processing_status: 'Not required' })
+        : null);
+      fireEvent.click(await screen.findByRole('button', { name: 'View' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+      expect(await screen.findByText('Change request approved and event details updated.')).toBeInTheDocument();
+      expect(screen.getByText('Ordinary edit: venue and equipment arrangements are not affected, so no processing is needed.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Process change' })).toBeNull();
+    });
+
+  tc('FE-COORD-046', 'CoordinatorAssignment (event change request processing)', 'The coordinator processes an approved significant change request.',
+    'POST /event-change-requests/<id>/process is sent; the request shows Processed with its date and the summary of the new linked requests, and a success message is shown.',
+    { steps: '1. Expand an approved request awaiting processing. 2. Click Process change.' },
+    async () => {
+      const summary = 'Venue booking #5 replaced by #31. Equipment request #9 replaced by #32.';
+      const f = await openChangeRequests(
+        [changeReq({ review_status: 'Approved', processing_status: 'Awaiting processing', impact: significantImpact() }), changeReq({ id: 12, proposal: { event_name: 'Other gala' } })],
+        (url, options) => url.endsWith('/process') && options.method === 'POST'
+          ? json({ change_request: { id: 11, processing_status: 'Processed', processed_at: '2026-10-05T10:00:00Z', processing_summary: summary },
+            venue_requests: [{ request_id: 31, previous_request_id: 5 }], equipment_requests: [{ request_id: 32, previous_request_id: 9 }] })
+          : null,
+      );
+      await viewRequest('Morning Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Process change' }));
+      expect(await screen.findByText(`Change request processed. ${summary}`)).toBeInTheDocument();
+      expect(screen.getByRole('row', { name: /Other gala Olly Pending/ })).toBeInTheDocument();
+      expect(screen.getByText('Change processed on 2026-10-05.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Process change' })).toBeNull();
+      expect(screen.getByRole('row', { name: /Morning Gala Olly Approved Significant Processed/ })).toBeInTheDocument();
+      expect(callsTo(f, '/event-change-requests/11/process', 'POST')).toHaveLength(1);
+    });
+
+  tc('FE-COORD-047', 'CoordinatorAssignment (event change request processing)', 'Processing fails.',
+    'While in flight the button reads Processing... and is disabled; then the backend detail, a fallback message or the network error is shown and the request stays Awaiting processing.',
+    { kind: 'Negative', data: '409 "This change request has already been processed."; 500 without detail; network failure', steps: '1. Click Process change once for each failure.' },
+    async () => {
+      let respond;
+      const responses = [
+        () => new Promise((resolve) => { respond = resolve; }),
+        () => json({}, 500),
+        () => { throw new Error('Failed to fetch'); },
+      ];
+      await openChangeRequests(
+        [changeReq({ review_status: 'Approved', processing_status: 'Awaiting processing', impact: significantImpact({ venue_requests: [], equipment_requests: [] }) })],
+        (url, options) => url.endsWith('/process') && options.method === 'POST' ? responses.shift()() : null,
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'View' }));
+      expect(screen.getByText(/None of the affected venue or equipment requests are live, so processing only records the change as handled\./)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Process change' }));
+      expect(await screen.findByRole('button', { name: 'Processing...' })).toBeDisabled();
+      respond(json({ detail: 'This change request has already been processed.' }, 409));
+      expect(await screen.findByRole('alert')).toHaveTextContent('This change request has already been processed.');
+      fireEvent.click(screen.getByRole('button', { name: 'Process change' }));
+      expect(await screen.findByText('Could not process the change request.')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Process change' }));
+      expect(await screen.findByText('Unable to process the change request. (Failed to fetch)')).toBeInTheDocument();
+      expect(screen.getByRole('row', { name: /Awaiting processing/ })).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-048', 'CoordinatorAssignment (event change request detail)', 'A processed request has no recorded processing time.',
+    '"Change processed." is shown with its summary.', { kind: 'Edge', steps: '1. Expand a processed request without processed_at.' },
+    async () => {
+      await openChangeRequests([changeReq({ review_status: 'Approved', processing_status: 'Processed', processing_summary: 'No active venue booking needed a new request.' })]);
+      const detail = await viewRequest('Morning Gala');
+      expect(within(detail).getByText('Change processed.')).toBeInTheDocument();
+      expect(within(detail).getByText(/No active venue booking needed a new request\./)).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-049', 'CoordinatorAssignment (coordinator view)', 'Loading change requests fails, then the coordinator returns to Event management.',
+    "The load error is shown; Event management reloads the coordinator's events and clears the error.",
+    { kind: 'Negative', steps: '1. Return HTTP 500 for /event-change-requests. 2. Open Event Change Request. 3. Click Event management.' },
+    async () => {
+      const f = coordinatorBackend((url) => url.endsWith('/event-change-requests') ? json({}, 500) : null);
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Event Change Request' }));
+      expect(await screen.findByText('Unable to load event change requests. (Backend returned 500)')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Event management' }));
+      expect(await screen.findByRole('heading', { name: 'Event management', level: 1 })).toBeInTheDocument();
+      await waitFor(() => expect(callsTo(f, '/api/events')).toHaveLength(2));
+      await waitFor(() => expect(screen.queryByText(/Unable to load event change requests/)).toBeNull());
+    });
+
+  tc('FE-COORD-050', 'CoordinatorAssignment (event change request tab)', 'Change requests arrive with missing details.',
+    'Fallbacks are shown: the event title or "Request #<id>", the organiser email or "Unknown organiser", Pending for a missing status, "Not recorded" for a missing date; unknown statuses sort last and the detail form opens with empty fields.',
+    { kind: 'Edge', data: 'no proposal, organiser name, status or date; an unknown status "Withdrawn" with no event', steps: '1. Open Event Change Request. 2. Inspect the rows. 3. Expand the request without an event.' },
+    async () => {
+      await openChangeRequests([
+        { id: 22, review_status: 'Withdrawn' },
+        { id: 21, organiser_email: 'o@x', event: ev({ event_title: 'Fallback gala', event_name: undefined, event_end_date: undefined }) },
+      ]);
+      await screen.findByText('Fallback gala');
+      const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+      expect(rows.map((row) => within(row).getAllByRole('cell').map((cell) => cell.textContent))).toEqual([
+        ['Fallback gala', 'o@x', 'Pending', '—', '—', 'Not recorded', 'View'],
+        ['Request #22', 'Unknown organiser', 'Withdrawn', '—', '—', 'Not recorded', 'View'],
+      ]);
+      const detail = await viewRequest('Request #22');
+      expect(within(detail).getByText('Submitted by the event organiser for coordinator review.')).toBeInTheDocument();
+      expect(within(detail).getByLabelText('Event name')).toHaveValue('');
+      expect(within(detail).getByLabelText('Reason for change')).toHaveValue('');
+      expect(within(detail).queryByRole('button', { name: 'Approve' })).toBeNull();
+      const fallback = await viewRequest('Fallback gala');
+      expect(within(fallback).getByRole('heading', { level: 2 })).toHaveTextContent('Event change request: Fallback gala');
+      expect(within(fallback).getByLabelText('Event name').closest('label')).toHaveTextContent('Original: Fallback gala');
+    });
+
 });

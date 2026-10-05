@@ -225,3 +225,20 @@ def test_get_request(use_db):
 def test_get_request_forbidden(use_db):
     use_db(world(), va)
     assert err(va.get_request, 1, {"id": "s2"})[0] == 403
+
+
+@tc("BE-VENUE-034", "view", "A booking was initiated by processing an approved event change request; an older one was not.",
+    "The change request id is returned so venue staff can see why the booking needs review; ordinary bookings return None.",
+    data="change_request_id = 11", steps="1. Call view for a booking with and without change_request_id.")
+def test_view_change_request_link():
+    assert va.view({**BOOKING, "change_request_id": 11}, EVENT, VENUE, {})["change_request_id"] == 11
+    assert va.view(BOOKING, EVENT, VENUE, {})["change_request_id"] is None
+
+
+@tc("BE-VENUE-035", "decide", "Venue staff try to approve a booking that was superseded by a change-request replacement.",
+    "HTTP 409 \"This request has already been superseded.\"; the row is unchanged.", pre="Booking status = Superseded.",
+    steps="1. Call decide on the superseded booking.", kind="State")
+def test_decide_superseded(use_db):
+    client = use_db(world([{**BOOKING, "status": "Superseded"}]), va)
+    assert err(va.decide, 1, STAFF, {"status": "Approved"}) == (409, "This request has already been superseded.")
+    assert client.tables[va.BOOKING_TABLE][0]["status"] == "Superseded"

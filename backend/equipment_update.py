@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from equipment_request import db, calculate_availability, EVENT_TABLE, EQUIPMENT_TABLE, REQUEST_TABLE, REQUEST_ITEM_TABLE
+from equipment_request import db, calculate_availability, live_requests, require_live_request, EVENT_TABLE, EQUIPMENT_TABLE, REQUEST_TABLE, REQUEST_ITEM_TABLE
 from auth import require_technical_support_path
 
 USER_TABLE = "users"
@@ -48,9 +48,9 @@ def equipment_request_summary(staff_id: str):
     client = db()
     require_technical_support(client, staff_id)
 
-    headers = client.table(REQUEST_TABLE).select(
+    headers = live_requests(client.table(REQUEST_TABLE).select(
         "request_id,event_id,status,created_at,updated_at"
-    ).order("created_at", desc=True).execute().data or []
+    ).order("created_at", desc=True).execute().data or [])
 
     if not headers:
         return []
@@ -111,9 +111,9 @@ def event_equipment_requests(staff_id: str, event_id: int):
     require_technical_support(client, staff_id)
     event = get_event(client, event_id)
 
-    headers = client.table(REQUEST_TABLE).select(
+    headers = live_requests(client.table(REQUEST_TABLE).select(
         "request_id,event_id,status,created_by,updated_by,created_at,updated_at,latest_update_summary"
-    ).eq("event_id", event_id).order("request_id").execute().data or []
+    ).eq("event_id", event_id).order("request_id").execute().data or [])
 
     equipment_rows = client.table(EQUIPMENT_TABLE).select(
         "equipment_id,equipment_name,total_quantity,under_maintenance_count"
@@ -204,6 +204,7 @@ def update_event_equipment_requests(staff_id: str, event_id: int, payload: Event
     # Validate everything before saving
     for request_update in payload.requests:
         request_header = get_request_header(client, request_update.request_id)
+        require_live_request(request_header)
 
         if request_header["event_id"] != event_id:
             raise HTTPException(

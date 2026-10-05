@@ -1,12 +1,52 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { authenticatedFetch as fetch } from './api';
 import { capacityOptions, eventTypes, timeOptions } from './event_organiser';
+import EventChangeHistory from './EventChangeHistory';
+import { arrangementLabel, classifyChange, fieldLabels } from './eventChanges';
 
 const API = 'http://127.0.0.1:8000/api';
 const EVENT_STATUSES = ['Under review', 'Approved', 'Planning', 'Confirmed', 'Completed', 'Cancelled', 'Rejected'];
 const EMPTY_PROPOSAL = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
 
 const formatTime = (value) => String(value ?? '').slice(0, 5);
+const PROCESSING_LABELS = { 'Awaiting processing': 'awaiting coordinator processing', Processed: 'processed', 'Not required': 'no processing needed' };
+
+function requestList({ venue_requests: venue = [], equipment_requests: equipment = [] }) {
+  return [...venue.map(({ request_id: id }) => `venue booking #${id}`), ...equipment.map(({ request_id: id }) => `equipment request #${id}`)].join(', ');
+}
+
+// Story 10.2: tells the organiser, while editing, whether the proposal is a significant change.
+function ChangeSignificance({ event, proposal }) {
+  const { significant, significantFields, affectsVenue, affectsEquipment } = classifyChange(event, proposal);
+  return significant
+    ? <p className="change-impact significant" aria-live="polite"><strong>Significant change</strong> ({fieldLabels(significantFields)}). If approved, any {arrangementLabel(affectsVenue, affectsEquipment)} for this event will return to Pending for re-review.</p>
+    : <p className="change-impact ordinary" aria-live="polite">Ordinary edit: venue and equipment arrangements are not affected.</p>;
+}
+
+// Stories 10.2 and 44.4: what the change does to confirmed arrangements, and processing once approved.
+function ChangeImpact({ request, onProcess, isProcessing, error }) {
+  const { impact, processing_status: status } = request;
+  if (status === 'Processed') {
+    return <div className="change-impact processed"><strong>Change processed{request.processed_at ? ` on ${String(request.processed_at).slice(0, 10)}` : ''}.</strong> {request.processing_summary}</div>;
+  }
+  if (!impact) return null;
+  if (impact.change_type !== 'Significant') {
+    return <div className="change-impact ordinary">Ordinary edit: venue and equipment arrangements are not affected{status === 'Not required' ? ', so no processing is needed' : ''}.</div>;
+  }
+  const affected = requestList(impact);
+  if (status === 'Awaiting processing') {
+    return <div className="change-impact significant">
+      <p><strong>Significant change approved</strong> ({fieldLabels(impact.significant_fields)}). {affected
+        ? `Processing replaces ${affected} with new Pending requests linked to this change request and notifies venue staff and technical support.`
+        : 'None of the affected venue or equipment requests are live, so processing only records the change as handled.'}</p>
+      {error && <p className="message" role="alert">{error}</p>}
+      <button className="primary" type="button" onClick={() => onProcess(request)} disabled={isProcessing}>{isProcessing ? 'Processing...' : 'Process change'}</button>
+    </div>;
+  }
+  return <div className="change-impact significant"><strong>Significant change</strong> ({fieldLabels(impact.significant_fields)}). {affected
+    ? `Approving returns ${affected} to Pending for re-review.`
+    : 'This event has no live venue or equipment requests for it to reopen yet.'}</div>;
+}
 
 function ChangeRequestField({ label, originalValue, proposedValue, wide = false, children }) {
   const isChanged = String(originalValue ?? '') !== String(proposedValue ?? '');
@@ -18,17 +58,21 @@ function ChangeRequestField({ label, originalValue, proposedValue, wide = false,
   </label>;
 }
 
-function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, coordinators, canManage = false, showChangeDecision = false }) {
-  return events.length ? events.map((event) => <tr key={event.id}>
+function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, coordinators, canManage = false, showChangeDecision = false, historyEventId = null, onToggleHistory }) {
+  const columnCount = 5 + (canManage ? 0 : 1) + (showChangeDecision ? 1 : 0);
+  return events.length ? events.map((event) => <React.Fragment key={event.id}><tr>
     <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
     <td>{canManage ? <select aria-label={`Status for ${event.event_title}`} value={event.event_status || ''} onChange={(e) => onStatusChange(event.id, e.target.value)}>{EVENT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select> : <span className="pill">{event.event_status}</span>}</td>
     <td>{canManage ? <select aria-label={`Coordinator for ${event.event_title}`} value={event.assigned_coordinator_id || ''} onChange={(e) => onAssign(event.id, e.target.value)}>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select> : event.coordinator_name ? <span>{event.coordinator_name}<br /><small>{event.coordinator_email || 'Email unavailable'}</small></span> : <button className="assign" onClick={() => onAssign(event.id)}>Assign coordinator</button>}</td>
-    {showChangeDecision && <td>{event.latest_change_request ? <><span className="pill">{event.latest_change_request.review_status}</span>{event.latest_change_request.review_status === 'Rejected' && event.latest_change_request.review_comments && <small className="change-request-reason">Reason: {event.latest_change_request.review_comments}</small>}</> : '—'}</td>}
+    {showChangeDecision && <td>{event.latest_change_request ? <><span className="pill">{event.latest_change_request.review_status}</span>{event.latest_change_request.review_status === 'Rejected' && event.latest_change_request.review_comments && <small className="change-request-reason">Reason: {event.latest_change_request.review_comments}</small>}{event.latest_change_request.change_type && <small className="change-request-reason">{event.latest_change_request.change_type} change{PROCESSING_LABELS[event.latest_change_request.processing_status] ? ` · ${PROCESSING_LABELS[event.latest_change_request.processing_status]}` : ''}</small>}</> : '—'}</td>}
     {!canManage && <td>{String(event.event_status).trim().toLowerCase() === 'draft' && <button className="assign" onClick={() => onSubmit(event.id)}>Submit</button>}{!['draft', 'completed', 'cancelled', 'rejected'].includes(String(event.event_status).trim().toLowerCase()) && (event.has_pending_change_request ? <span className="pill">Pending change request</span> : <button className="assign" onClick={() => onRequestChanges(event)}>Request changes</button>)}</td>}
-  </tr>) : <tr><td className="empty" colSpan={4 + (canManage ? 0 : 1) + (showChangeDecision ? 1 : 0)}>No event requests found.</td></tr>;
+    <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
+  </tr>
+  {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
+  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>No event requests found.</td></tr>;
 }
 
-function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError }) {
+function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError, onProcess, processingChangeRequestId }) {
   const statusPriority = { pending: 0, approved: 1, rejected: 2 };
   const sortedRequests = [...requests].sort((first, second) => {
     const firstPriority = statusPriority[String(first.review_status || 'Pending').trim().toLowerCase()] ?? 3;
@@ -44,15 +88,17 @@ function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, revi
         <td>{eventName}</td>
         <td>{request.organiser_name || request.organiser_email || 'Unknown organiser'}</td>
         <td>{request.review_status || 'Pending'}</td>
+        <td>{request.impact ? <span className={`change-badge ${request.impact.change_type === 'Significant' ? 'significant' : 'ordinary'}`}>{request.impact.change_type}</span> : '—'}</td>
+        <td>{request.processing_status || '—'}</td>
         <td>{request.created_at ? String(request.created_at).slice(0, 10) : 'Not recorded'}</td>
         <td><button className="assign" type="button" onClick={() => onSelect(isExpanded ? null : request)} aria-expanded={isExpanded} aria-controls={`change-request-detail-${request.id}`}>{isExpanded ? 'Hide' : 'View'}</button></td>
       </tr>
-      {isExpanded && <tr id={`change-request-detail-${request.id}`}><td className="change-request-detail-cell" colSpan="5"><ChangeRequestDetail request={request} onReview={onReview} isReviewing={reviewingChangeRequestId === request.id} reviewError={reviewError} /></td></tr>}
+      {isExpanded && <tr id={`change-request-detail-${request.id}`}><td className="change-request-detail-cell" colSpan="7"><ChangeRequestDetail request={request} onReview={onReview} isReviewing={reviewingChangeRequestId === request.id} reviewError={reviewError} onProcess={onProcess} isProcessing={processingChangeRequestId === request.id} /></td></tr>}
     </React.Fragment>;
-  }) : <tr><td className="empty" colSpan="5">No event change requests found.</td></tr>;
+  }) : <tr><td className="empty" colSpan="7">No event change requests found.</td></tr>;
 }
 
-function ChangeRequestDetail({ request, onReview, isReviewing, reviewError }) {
+function ChangeRequestDetail({ request, onReview, isReviewing, reviewError, onProcess, isProcessing }) {
   const [reviewComments, setReviewComments] = useState('');
   if (!request) return null;
   const proposal = request.proposal || EMPTY_PROPOSAL;
@@ -60,6 +106,7 @@ function ChangeRequestDetail({ request, onReview, isReviewing, reviewError }) {
   const isPending = (request.review_status || 'Pending') === 'Pending';
   return <form className="request-form" aria-label="Event change request details">
     <div className="form-heading"><div><h2>Event change request: {proposal.event_name || current.event_title}</h2><p>Submitted by {request.organiser_name || request.organiser_email || 'the event organiser'} for coordinator review.</p></div><span className="pill">{request.review_status || 'Pending'}</span></div>
+    <ChangeImpact request={request} onProcess={onProcess} isProcessing={isProcessing} error={isPending ? '' : reviewError} />
     <div className="form-grid">
       <ChangeRequestField label="Event name" originalValue={current.event_name || current.event_title} proposedValue={proposal.event_name}>
         <input aria-label="Event name" value={proposal.event_name || ''} readOnly />
@@ -115,6 +162,8 @@ export default function CoordinatorAssignment({ user }) {
   const [selectedChangeRequest, setSelectedChangeRequest] = useState(null);
   const [reviewingChangeRequestId, setReviewingChangeRequestId] = useState(null);
   const [changeRequestReviewError, setChangeRequestReviewError] = useState('');
+  const [processingChangeRequestId, setProcessingChangeRequestId] = useState(null);
+  const [historyEventId, setHistoryEventId] = useState(null);
   const changeRequestFormRef = useRef(null);
   const changeCapacityOptions = capacityOptions.some(({ value }) => String(value) === String(changeProposal.event_capacity))
     ? capacityOptions
@@ -186,6 +235,16 @@ export default function CoordinatorAssignment({ user }) {
       const updatedRequest = {
         ...request,
         ...result,
+        // The database classifies the applied change; rejected requests have no impact.
+        impact: result.change_type ? {
+          venue_requests: [],
+          equipment_requests: [],
+          ...request.impact,
+          change_type: result.change_type,
+          significant_fields: result.significant_fields || [],
+          affects_venue: Boolean(result.affects_venue),
+          affects_equipment: Boolean(result.affects_equipment),
+        } : null,
         event: decision === 'Approved' && request.event
           ? {
             ...request.event,
@@ -203,12 +262,43 @@ export default function CoordinatorAssignment({ user }) {
       };
       setCoordinatorChangeRequests((current) => current.map((item) => item.id === request.id ? updatedRequest : item));
       setSelectedChangeRequest(updatedRequest);
-      setMessage(decision === 'Approved' ? 'Change request approved and event details updated.' : 'Change request rejected.');
+      setMessage(decision !== 'Approved'
+        ? 'Change request rejected.'
+        : result.processing_status === 'Awaiting processing'
+          ? 'Change request approved and event details updated. Affected venue and equipment requests are back to Pending; process the change to re-initiate them.'
+          : 'Change request approved and event details updated.');
     } catch (error) {
       setChangeRequestReviewError(`Unable to save the change request decision. (${error.message})`);
     } finally {
       setReviewingChangeRequestId(null);
     }
+  }
+
+  async function processChangeRequest(request) {
+    if (processingChangeRequestId !== null) return;
+    setProcessingChangeRequestId(request.id);
+    setChangeRequestReviewError('');
+    try {
+      const response = await fetch(`${API}/event-change-requests/${request.id}/process`, { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) {
+        setChangeRequestReviewError(result.detail || 'Could not process the change request.');
+        return;
+      }
+      const { processing_status, processed_at, processing_summary } = result.change_request;
+      const updatedRequest = { ...request, processing_status, processed_at, processing_summary };
+      setCoordinatorChangeRequests((current) => current.map((item) => item.id === request.id ? updatedRequest : item));
+      setSelectedChangeRequest(updatedRequest);
+      setMessage(`Change request processed. ${processing_summary || ''}`.trim());
+    } catch (error) {
+      setChangeRequestReviewError(`Unable to process the change request. (${error.message})`);
+    } finally {
+      setProcessingChangeRequestId(null);
+    }
+  }
+
+  function toggleHistory(eventId) {
+    setHistoryEventId((current) => current === eventId ? null : eventId);
   }
 
   async function assign(eventId) {
@@ -326,11 +416,11 @@ export default function CoordinatorAssignment({ user }) {
       {message && <p className="message">{message}</p>}
       {activeTab !== 'change-requests' && <>
         <h2>Event status</h2>
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{!isCoordinator && <th>Action</th>}</tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
       </>}
       {isCoordinator && activeTab === 'change-requests' && <>
         <h2>Submitted change requests</h2>
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Organiser</th><th>Status</th><th>Submitted</th><th>Action</th></tr></thead><tbody><ChangeRequestRows requests={coordinatorChangeRequests} onSelect={(request) => { setSelectedChangeRequest(request); setChangeRequestReviewError(''); }} selectedRequest={selectedChangeRequest} onReview={reviewChangeRequest} reviewingChangeRequestId={reviewingChangeRequestId} reviewError={changeRequestReviewError} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Organiser</th><th>Status</th><th>Impact</th><th>Processing</th><th>Submitted</th><th>Action</th></tr></thead><tbody><ChangeRequestRows requests={coordinatorChangeRequests} onSelect={(request) => { setSelectedChangeRequest(request); setChangeRequestReviewError(''); }} selectedRequest={selectedChangeRequest} onReview={reviewChangeRequest} reviewingChangeRequestId={reviewingChangeRequestId} reviewError={changeRequestReviewError} onProcess={processChangeRequest} processingChangeRequestId={processingChangeRequestId} /></tbody></table></div>
       </>}
       {isOrganiser && changeRequestEvent && <form ref={changeRequestFormRef} className="request-form" onSubmit={submitChangeRequest}>
         <div className="form-heading"><div><h2>Request changes: {changeRequestEvent.event_title}</h2><p>Proposed edits are sent to the assigned coordinator. Your event stays unchanged unless they approve.</p></div></div>
@@ -346,6 +436,7 @@ export default function CoordinatorAssignment({ user }) {
           <label className="wide">Description and planning requirements<textarea name="description" value={changeProposal.description} onChange={updateProposal} required rows="5" /></label>
           <label className="wide">Summary for the event coordinator<textarea aria-label="Change summary for the event coordinator" value={changeRequestText} onChange={(event) => setChangeRequestText(event.target.value)} maxLength={5000} required rows="3" /></label>
         </div>
+        <ChangeSignificance event={changeRequestEvent} proposal={changeProposal} />
         <div className="form-actions"><button className="primary" type="submit" disabled={!changeRequestText.trim() || isSubmittingChangeRequest}>{isSubmittingChangeRequest ? 'Sending request...' : 'Send for coordinator approval'}</button><button className="secondary" type="button" onClick={cancelChangeRequest} disabled={isSubmittingChangeRequest}>Cancel</button></div>
       </form>}
     </section>
