@@ -11,7 +11,6 @@ import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
 import VenueCatalogue from "./VenueCatalogue";
-
 import AttendeeWorkspace from "./AttendeeWorkspace";
 import Notifications from "./Notifications";
 
