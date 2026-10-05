@@ -1,0 +1,37 @@
+flowchart TB
+    web["Web Application<br/>[External Container: React]"]
+    identity["Supabase Auth<br/>[External System]"]
+    data[("Application Database<br/>[External Container: Supabase PostgreSQL]<br/>Tables, transactional RPCs and triggers")]
+
+    subgraph backend["Backend API — FastAPI container boundary"]
+        entry["Application and middleware<br/>[Component: main.py]<br/>Router registration, CORS,<br/>actor context and error responses"]
+        auth["Authentication and authorization<br/>[Component: auth.py]<br/>Verified identity, MFA level,<br/>profile role and path-identity guards"]
+        events["Event requests and coordination<br/>[Component: event_organiser.py,<br/>coordinator_assignment.py]<br/>Drafts, submissions, assignments,<br/>workloads and event statuses"]
+        venues["Venue catalogue and bookings<br/>[Component: venue_catalogue.py,<br/>venue_request.py, venue_approval.py]<br/>Catalogue, booking requests and decisions"]
+        equipment["Equipment arrangements<br/>[Component: equipment_request.py,<br/>equipment_update.py,<br/>equipment_availability.py]<br/>Requests, staff updates and availability"]
+        registration["Attendee registration<br/>[Component: attendee_registration.py]<br/>Confirmed event browsing, own registrations<br/>and transactional registration RPC"]
+        notifications["Notification inbox<br/>[Component: notifications.py]<br/>Own notifications, mark as read,<br/>linked-record authorization"]
+        clients["Database access helpers<br/>[Component: database.py and module db factories]<br/>supabase-py service-role clients;<br/>verified actor header for notification exclusion"]
+
+        entry -->|Protected-route dependencies| auth
+        auth -->|Guards event routes| events
+        auth -->|Guards venue routes| venues
+        auth -->|Guards equipment routes| equipment
+        auth -->|Requires Attendee role| registration
+        auth -->|Requires authenticated user| notifications
+        auth -->|Reads trusted profile| clients
+        events -->|Reads and writes event records| clients
+        venues -->|Reads and writes catalogue and bookings| clients
+        equipment -->|Reads, updates and submits equipment requests| clients
+        registration -->|Reads event details; calls register_for_event| clients
+        notifications -->|Reads own inbox; updates read status; checks linked records| clients
+    end
+
+    web -->|HTTP JSON + bearer JWT| entry
+    auth -->|Validates token using auth.get_user| identity
+    clients -->|HTTPS via PostgREST; table queries and RPCs| data
+
+    classDef component fill:#438dd5,color:#fff,stroke:#1168bd
+    classDef external fill:#666,color:#fff,stroke:#444
+    class entry,auth,events,venues,equipment,registration,notifications,clients component
+    class web,identity,data external

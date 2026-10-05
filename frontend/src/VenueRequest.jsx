@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import VenueCalendar from "./components/VenueCalendar";
-
+import { authenticatedFetch as fetch } from './api';
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {

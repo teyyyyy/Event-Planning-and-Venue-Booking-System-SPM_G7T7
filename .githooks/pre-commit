@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Enable once per clone:  git config core.hooksPath .githooks
+# Skips when no code or tests are staged.
+git diff --cached --name-only | grep -qE '^(backend/|frontend/src/|test/)' || exit 0
+exec "$(git rev-parse --show-toplevel)/scripts/test-all.sh"

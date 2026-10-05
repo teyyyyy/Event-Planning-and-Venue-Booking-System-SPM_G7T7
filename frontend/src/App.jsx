@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
+import MfaChallenge from "./MfaChallenge";
+import SecurityButton from "./SecuritySettings";
 import CoordinatorAssignment from "./coordinator_assignment";
 import EventOrganiser from "./event_organiser";
 import EquipmentRequest from "./EquipmentRequest";
@@ -9,6 +11,10 @@ import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
 import VenueStaffCalendar from "./VenueStaffCalendar";
+import VenueCatalogue from "./VenueCatalogue";
+import EquipmentReservation from "./EquipmentReservation";
+import AttendeeWorkspace from "./AttendeeWorkspace";
+import Notifications from "./Notifications";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -17,12 +23,15 @@ function AuthedApp() {
   const isTechnicalSupport = normalizedRole === "technical support staff";
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
+  const isAttendee = normalizedRole === "attendee";
 
+  if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator)
     return <CoordinatorWorkspace user={user} logout={logout} />;
-  if (isOrganiser) return <OrganiserWorkspace user={user} logout={logout} />;
+  if (isOrganiser)
+    return <OrganiserWorkspace user={user} logout={logout} />;
   if (isVenueStaff)
     return <VenueStaffWorkspace logout={logout} email={user.email} />;
 
@@ -41,7 +50,8 @@ function AuthedApp() {
 
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
-  const [activeSection, setActiveSection] = useState("venue-approval");
+
+  const [activeSection, setActiveSection] = useState("catalogue");
 
   return (
     <div className="coordinator-workspace">
@@ -49,46 +59,47 @@ function VenueStaffWorkspace({ logout, email }) {
         <div>
           <div className="logo">G</div>
           <div className="side-label">VENUE STAFF</div>
-
-          <nav className="coordinator-side-nav">
+        <nav className="coordinator-side-nav" aria-label="Venue Staff navigation">
             <button
               type="button"
-              className={
-                activeSection === "venue-approval"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
-              onClick={() => setActiveSection("venue-approval")}
+              className={`coordinator-nav-button ${activeSection === "catalogue" ? "active" : ""}`}
+              onClick={() => setActiveSection("catalogue")}
             >
-              Venue Approval
+              Venue Catalogue
+            </button>
+            
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "approvals" ? "active" : ""}`}
+              onClick={() => setActiveSection("approvals")}
+            >
+              Booking Approvals
             </button>
 
             <button
               type="button"
-              className={
-                activeSection === "venue-calendar"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
+              className={`coordinator-nav-button ${activeSection === "venue-calendar" ? "active" : ""}`}
               onClick={() => setActiveSection("venue-calendar")}
             >
               Venue Availability Calendar
             </button>
           </nav>
         </div>
-
-        <button
-          type="button"
-          className="coordinator-logout"
-          onClick={logout}
-          title={email}
-        >
-          Log out
-        </button>
+        
+        <div className="coordinator-side-footer">
+          <SecurityButton />
+          <button className="coordinator-logout" onClick={logout} title={email}>
+            Log out
+          </button>
+        </div>
       </aside>
 
       <div className="coordinator-main">
-        {activeSection === "venue-approval" && (
+        {activeSection === "catalogue" && (
+          <VenueCatalogue canEdit />
+        )}
+        
+        {activeSection === "approvals" && (
           <div className="embedded-existing-page">
             <VenueApproval />
           </div>
@@ -107,6 +118,32 @@ function VenueStaffWorkspace({ logout, email }) {
 // Technical Support Staff workspace
 function TechnicalSupportWorkspace({ user, logout }) {
   const [activeSection, setActiveSection] = useState("equipment-update");
+  const [selectedEquipmentEventId, setSelectedEquipmentEventId] = useState(null);
+
+  function openSection(section) {
+    setSelectedEquipmentEventId(null);
+    setActiveSection(section);
+  }
+
+  function openReservation(eventId) {
+    setSelectedEquipmentEventId(eventId);
+    setActiveSection("equipment-reservation");
+  }
+
+  function openUpdate(eventId) {
+    setSelectedEquipmentEventId(eventId);
+    setActiveSection("equipment-update");
+  }
+
+  function backToAvailability() {
+    setSelectedEquipmentEventId(null);
+    setActiveSection("equipment-availability");
+  }
+
+  function backToReservationList() {
+    setSelectedEquipmentEventId(null);
+    setActiveSection("equipment-reservation");
+  }
 
   return (
     <div className="coordinator-workspace">
@@ -118,46 +155,77 @@ function TechnicalSupportWorkspace({ user, logout }) {
           <nav className="coordinator-side-nav">
             <button
               type="button"
-              className={
-                activeSection === "equipment-update"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
-              onClick={() => setActiveSection("equipment-update")}
+              className={`coordinator-nav-button ${activeSection === "catalogue" ? "active" : ""}`}
+              onClick={() => openSection("catalogue")}
+            >
+              Venue Catalogue
+            </button>
+
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "equipment-update" ? "active" : ""}`}
+              onClick={() => openSection("equipment-update")}
             >
               Equipment Update
             </button>
 
             <button
               type="button"
-              className={
-                activeSection === "equipment-availability"
-                  ? "coordinator-nav-button active"
-                  : "coordinator-nav-button"
-              }
-              onClick={() => setActiveSection("equipment-availability")}
+              className={`coordinator-nav-button ${activeSection === "equipment-availability" ? "active" : ""}`}
+              onClick={() => openSection("equipment-availability")}
             >
               Equipment Availability Check
+            </button>
+
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "equipment-reservation" ? "active" : ""}`}
+              onClick={() => openSection("equipment-reservation")}
+            >
+              Equipment Reservation
             </button>
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
+        {activeSection === "catalogue" && <VenueCatalogue />}
+
         {activeSection === "equipment-update" && (
-          <EquipmentUpdate user={user} />
+          <EquipmentUpdate
+            user={user}
+            eventId={selectedEquipmentEventId}
+          />
         )}
+
         {activeSection === "equipment-availability" && (
-          <EquipmentAvailability user={user} />
+          <EquipmentAvailability
+            user={user}
+            onReserve={openReservation}
+            onUpdate={openUpdate}
+          />
+        )}
+
+        {activeSection === "equipment-reservation" && (
+          <EquipmentReservation
+            user={user}
+            eventId={selectedEquipmentEventId}
+            onOpenEvent={openReservation}
+            onBack={
+              selectedEquipmentEventId
+                ? backToReservationList
+                : backToAvailability
+            }
+          />
         )}
       </div>
     </div>
@@ -237,14 +305,14 @@ function CoordinatorWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -278,51 +346,66 @@ function CoordinatorWorkspace({ user, logout }) {
 // Event Organiser workspace
 function OrganiserWorkspace({ user, logout }) {
   const [activeRole, setActiveRole] = useState("organiser");
-  const [editingEvent, setEditingEvent] = useState(null);
 
   return (
-    <>
-      <div className="role-tabs" role="tablist" aria-label="User role views">
-        <button
-          className={activeRole === "organiser" ? "active" : ""}
-          onClick={() => setActiveRole("organiser")}
-        >
-          Create event
-        </button>
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">EVENT ORGANISER</div>
 
-        <button
-          className={activeRole === "coordinator" ? "active" : ""}
-          onClick={() => setActiveRole("coordinator")}
-        >
-          Event status
-        </button>
+          <nav className="coordinator-side-nav" aria-label="Event Organiser navigation">
+            <button
+              type="button"
+              className={
+                activeRole === "organiser"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("organiser")}
+            >
+              Create event
+            </button>
 
-        <button className="logout-tab" onClick={logout} title={user.email}>
+            <button
+              type="button"
+              className={
+                activeRole === "coordinator"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("coordinator")}
+            >
+              Event status
+            </button>
+          </nav>
+        </div>
+
+        <div className="coordinator-side-footer"><SecurityButton /><button
+          type="button"
+          className="coordinator-logout"
+          onClick={logout}
+          title={user.email}
+        >
           Log out
-        </button>
-      </div>
+        </button></div>
+      </aside>
 
-      {activeRole === "organiser" ? (
-        <EventOrganiser
-          user={user}
-          editingEvent={editingEvent}
-          onEditComplete={() => setEditingEvent(null)}
-        />
-      ) : (
-        <CoordinatorAssignment
-          user={user}
-          onEditEvent={(event) => {
-            setEditingEvent(event);
-            setActiveRole("organiser");
-          }}
-        />
-      )}
-    </>
+      <div className="coordinator-main">
+        <div className="embedded-existing-page">
+          {activeRole === "organiser" ? (
+            <EventOrganiser user={user} />
+          ) : (
+            <CoordinatorAssignment user={user} />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, mfa } = useAuth();
 
   if (loading) {
     return (
@@ -332,5 +415,6 @@ export default function App() {
     );
   }
 
-  return user ? <AuthedApp /> : <Login />;
+  if (user) return <React.Fragment key={user.id}><AuthedApp /><Notifications /></React.Fragment>;
+  return mfa ? <MfaChallenge /> : <Login />;
 }
