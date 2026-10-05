@@ -381,7 +381,15 @@ export default function VenueRequest({ user }) {
       {pageError && <div className="page-error">{pageError}</div>}
 
       {activeTab === "calendar" && (
-        <VenueCalendar venues={venues} apiBaseUrl={API} />
+        <div className="request-form" style={{ marginTop: "24px" }}>
+          <div className="form-heading">
+            <div>
+              <h2>Venue Availability Calendar</h2>
+              <p>Select a venue to view confirmed and pending bookings.</p>
+            </div>
+          </div>
+          <VenueCalendar venues={venues} events={events} apiBaseUrl={API} />
+        </div>
       )}
 
       {activeTab === "request" && (

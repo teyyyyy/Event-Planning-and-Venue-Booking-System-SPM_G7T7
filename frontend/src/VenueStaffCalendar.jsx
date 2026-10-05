@@ -38,7 +38,9 @@ export default function VenueStaffCalendarView() {
             <h1>Venue Availability Calendar</h1>
           </div>
         </header>
-        <VenueCalendar venues={venues} apiBaseUrl={API} />
+        <div className="request-form">
+          <VenueCalendar venues={venues} apiBaseUrl={API} />
+        </div>
       </section>
     </main>
   );

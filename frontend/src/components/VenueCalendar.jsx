@@ -71,7 +71,7 @@ export default function VenueCalendar({ venues, apiBaseUrl }) {
   }, [calendarVenueId, currentWeekStart]); // Re-trigger if they change the venue or week
 
   return (
-    <div className="request-form">
+    <div>
       {/* Calendar Controls */}
       <div className="equipment-items-heading" style={{ marginTop: "18px" }}>
         {/* Left Side: Venue Dropdown */}
