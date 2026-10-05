@@ -149,4 +149,31 @@ describe('VenueApproval', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('region', { name: 'Venue booking request details' })).toBeNull();
     });
+  tc('FE-VENUE-017', 'VenueApproval (detail)', 'A booking was created by processing an approved event change request.',
+    'The detail names the change request; the event change history can be shown (loaded from /events/<id>/change-log) and hidden.',
+    { data: 'change_request_id = 11', steps: '1. Open the booking. 2. Click Show event change history. 3. Click Hide event change history.' },
+    async () => {
+      request.mockResolvedValueOnce([booking({ change_request_id: 11 })]).mockResolvedValueOnce([]);
+      render(<VenueApproval />);
+      const detail = await open();
+      expect(within(detail).getByText('New request for approved change request #11')).toBeInTheDocument();
+      fireEvent.click(within(detail).getByRole('button', { name: 'Show event change history' }));
+      expect(await within(detail).findByText('No changes have been recorded since this event was submitted.')).toBeInTheDocument();
+      expect(request).toHaveBeenLastCalledWith('/events/10/change-log');
+      fireEvent.click(within(detail).getByRole('button', { name: 'Hide event change history' }));
+      expect(within(detail).queryByText(/No changes have been recorded/)).toBeNull();
+    });
+
+  tc('FE-VENUE-018', 'VenueApproval (detail)', 'A booking was superseded by a replacement after an approved event change.',
+    'It shows a Superseded status, offers no decision actions and has no change-request link.',
+    { kind: 'State', steps: '1. Open a Superseded booking.' },
+    async () => {
+      request.mockResolvedValueOnce([booking({ status: 'Superseded' })]);
+      render(<VenueApproval />);
+      const detail = await open();
+      expect(within(detail).getByText('Superseded')).toHaveClass('pill', 'status-superseded');
+      expect(within(detail).queryByRole('button', { name: 'Approve' })).toBeNull();
+      expect(within(detail).queryByText(/approved change request/)).toBeNull();
+    });
+
 });

@@ -41,6 +41,17 @@ class EquipmentRequestInput(BaseModel):
 class EquipmentRequestEditInput(BaseModel):
     items: List[EquipmentRequestItemInput]
 
+def live_requests(headers: list) -> list:
+    """Drop requests replaced after an approved event change (significant_event_changes.sql)."""
+    return [header for header in headers if str(header.get('status') or '').strip().lower() != 'superseded']
+
+def require_live_request(header: dict):
+    if not live_requests([header]):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Equipment request #{header['request_id']} was replaced by a newer request after an approved event change."
+        )
+
 def get_coordinator_event(client: Client, coordinator_id: str, event_id: int):
     result = client.table(EVENT_TABLE).select('*').eq('id', event_id).eq('coordinator_id', coordinator_id).execute()
     rows = result.data or []
@@ -242,7 +253,7 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
     client = db()
 
     header_rows = client.table(REQUEST_TABLE).select(
-        'request_id,event_id,created_by'
+        'request_id,event_id,created_by,status'
     ).eq('request_id', request_id).eq(
         'created_by', coordinator_id
     ).execute().data or []
@@ -254,6 +265,7 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
         )
 
     header = header_rows[0]
+    require_live_request(header)
     event = get_coordinator_event(client, coordinator_id, header['event_id'])
     availability_rows = calculate_availability(client, event)
     validate_request_items(payload.items, availability_rows)
@@ -310,11 +322,11 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
 def get_equipment_requests(coordinator_id: str):
     client = db()
 
-    headers = client.table(REQUEST_TABLE).select(
+    headers = live_requests(client.table(REQUEST_TABLE).select(
         'request_id,event_id,status,created_by,updated_by,created_at,updated_at,latest_update_summary'
     ).eq('created_by', coordinator_id).order(
         'request_id', desc=True
-    ).execute().data or []
+    ).execute().data or [])
 
     if not headers:
         return []

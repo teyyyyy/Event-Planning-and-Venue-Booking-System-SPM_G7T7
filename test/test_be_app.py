@@ -128,3 +128,32 @@ def test_http_role_boundaries(monkeypatch):
     assert client.get("/api/events").status_code == 403
     assert client.get("/api/venue-booking-requests").status_code == 403
     assert client.get("/api/equipment-update/o1/requests/summary").status_code == 403
+
+
+@tc("BE-APP-016", "app routers", "The change history and change processing routes are registered.",
+    "GET /api/events/{event_id}/change-log and POST /api/event-change-requests/{request_id}/process exist.",
+    steps="1. Collect the route paths from main.app.openapi().")
+def test_event_change_routes_registered():
+    paths = main.app.openapi()["paths"]
+    assert "get" in paths["/api/events/{event_id}/change-log"]
+    assert "post" in paths["/api/event-change-requests/{request_id}/process"]
+
+
+@tc("BE-APP-017", "database_api_error", "The significant-change migration has not been applied.",
+    "HTTP 503 names significant_event_changes.sql; other missing objects keep their own migration; unknown errors stay generic.",
+    data="PGRST202 process_event_change_request; PGRST205 notifications; PGRST205 other_table",
+    steps="1. Call the APIError handler with each error.", kind="Regression")
+def test_missing_setup_names_migration():
+    import asyncio
+    import json
+    from postgrest.exceptions import APIError
+
+    def detail(code, message):
+        response = asyncio.run(main.database_api_error(None, APIError({"code": code, "message": message, "details": None, "hint": None})))
+        return response.status_code, json.loads(response.body)["detail"]
+
+    assert detail("PGRST202", "Could not find the function public.process_event_change_request(p_coordinator_id, p_request_id)") == (
+        503, "Database setup is incomplete. Run significant_event_changes.sql in the Supabase SQL Editor, then refresh.")
+    assert "sprint2_registration_notifications.sql" in detail("PGRST205", "Could not find the table public.notifications")[1]
+    assert detail("PGRST205", "Could not find the table public.other_table")[1] == "The database request could not be completed. Please try again."
+    assert detail("XX000", "event_change_log is broken")[1] == "The database request could not be completed. Please try again."

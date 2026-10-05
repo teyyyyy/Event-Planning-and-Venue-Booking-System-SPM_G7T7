@@ -84,6 +84,47 @@ status list. Requests are available for submitted and active events with an
 assigned coordinator; Draft, Completed, Cancelled, and Rejected events cannot
 receive change requests.
 
+## Significant event changes and change-request processing (10.2, 44.4)
+
+Rerun `backend/sql/event_change_requests.sql`, then run
+`backend/sql/significant_event_changes.sql` in the Supabase SQL Editor, and
+restart the backend. Both are transactional and rerunnable. Always run
+`significant_event_changes.sql` after `event_change_requests.sql`.
+
+- **Significant vs ordinary (10.2):** every saved change to a submitted event is
+  classified by a database trigger, whichever screen made it. Date, time,
+  capacity, venue, layout, facilities and accessibility changes are
+  *Significant*; name, type and description edits are *Ordinary*. Each change is
+  logged with its old and new values in `event_change_log`.
+- A significant change returns the event's live venue booking (date, time,
+  capacity or venue requirements) and equipment requests (date or time) to
+  **Pending**, and the existing notification triggers alert venue staff and
+  technical support. Cancelled, rejected and superseded requests are left alone.
+- Organisers see whether their proposed change is significant while filling in
+  **Request changes**. Coordinators see the impact on each change request
+  before approving it. The **History** button on the event tables, and **Show
+  event change history** on a venue booking, list the recorded changes for the
+  organiser, the assigned coordinator, and staff reviewing that event's
+  requests.
+- **Processing (44.4):** approving a significant change request sets it to
+  *Awaiting processing*. Ordinary ones are *Not required*. **Process change**
+  marks the affected live venue booking and equipment requests *Superseded* and
+  creates new Pending requests for the updated schedule. These are linked to
+  the event and the change request through `change_request_id`, and equipment
+  items are copied. Venue staff and technical support are notified of the new
+  requests, the organiser is told the request was processed, and the request
+  becomes *Processed* with a summary. A failure rolls the whole step back.
+- The full `UNIQUE(event_id)` constraint on `Venue Booking Requests` is replaced
+  by a one-live-booking-per-event index that ignores superseded rows, so a
+  replacement booking can be created. Superseded equipment requests are hidden
+  from the coordinator and technical-support screens and can no longer be edited.
+
+The database behaviour is verified against PostgreSQL in isolation:
+
+```bash
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/significant_event_changes_sql.mjs
+```
+
 ## Tests
 
 Unit tests: Vitest + React Testing Library (frontend) and pytest (backend). No database or

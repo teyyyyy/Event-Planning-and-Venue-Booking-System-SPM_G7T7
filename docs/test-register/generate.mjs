@@ -59,6 +59,9 @@ const SECTIONS = [
   { n: '6.11', title: 'Sprint 2 attendee registration and notifications', prefixes: ['FE-SP2', 'BE-SP2'],
     intro: 'Stories 38.1, 38.2 and 48.1. Covers attendee browsing and registration, private registration lists, cancelled events, notification ownership, linked-record permissions, read status, polling, refresh and error recovery. Backend tests use database doubles; database capacity, duplicate enforcement and notification triggers are verified separately by test/sprint2_sql.mjs.',
     fe: 'frontend/src/__tests__/Sprint2.test.jsx', be: 'test/test_sprint2.py' },
+  { n: '6.12', title: 'Significant event changes and change-request processing', prefixes: ['FE-EVCHG', 'BE-EVCHG'],
+    intro: 'Stories 10.2 and 44.4. Feature code: EVCHG. Saved changes to submitted events are classified as Significant (schedule, capacity or venue requirements) or Ordinary; significant changes are logged and return the live venue booking and equipment requests to Pending. Coordinators process approved significant change requests, which supersedes the affected requests and initiates new Pending ones linked to the event and change request. The UI around these flows is also covered by FE-COORD and FE-VENUE cases. The database trigger and processing function are verified separately by test/significant_event_changes_sql.mjs.',
+    fe: 'frontend/src/__tests__/EventChanges.test.jsx', be: 'test/test_be_event_changes.py' },
 ];
 
 // ---- load + validate -------------------------------------------------------------------

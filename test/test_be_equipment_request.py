@@ -376,3 +376,28 @@ def test_list_items_are_per_request(use_db):
               "Equipment Request Item": [{"request_id": 7, "equipment_id": "MIC", "requested_quantity": 1}, {"request_id": 8, "equipment_id": "PRJ", "requested_quantity": 1}]}
     use_db(world(**tables), er)
     assert {r["request_id"]: [i["equipment_id"] for i in r["items"]] for r in er.get_equipment_requests("c1")} == {7: ["MIC"], 8: ["PRJ"]}
+
+
+@tc("BE-EQREQ-051", "get_equipment_requests", "An approved event change replaced request 7 with request 8.",
+    "Only the live replacement is listed; the superseded request is history.", pre="Request 7 Superseded, request 8 Pending, both by c1.",
+    steps="1. Call get_equipment_requests(\"c1\").")
+def test_list_hides_superseded(use_db):
+    tables = {"Equipment Request": [
+        {"request_id": 7, "event_id": 1, "created_by": "c1", "status": "Superseded"},
+        {"request_id": 8, "event_id": 1, "created_by": "c1", "status": "Pending", "latest_update_summary": "Re-initiated for approved change request #11."},
+    ]}
+    use_db(world(**tables), er)
+    out = er.get_equipment_requests("c1")
+    assert [(r["request_id"], r["status"]) for r in out] == [(8, "Pending")]
+    assert out[0]["latest_update_summary"] == "Re-initiated for approved change request #11."
+
+
+@tc("BE-EQREQ-052", "edit_equipment_request", "The coordinator edits a request that was superseded after an approved event change.",
+    "HTTP 409 naming the request; its items are not changed.", pre="Request 7 Superseded.", data="MIC x1",
+    steps="1. Mark request 7 Superseded. 2. Call edit_equipment_request(\"c1\", 7, ...).", kind="State")
+def test_edit_superseded_rejected(use_db):
+    client = use_db(edit_world(), er)
+    client.tables["Equipment Request"][0]["status"] = "Superseded"
+    assert err(er.edit_equipment_request, "c1", 7, er.EquipmentRequestEditInput(items=[Item(equipment_id="MIC", requested_quantity=1)])) == (
+        409, "Equipment request #7 was replaced by a newer request after an approved event change.")
+    assert len(client.tables["Equipment Request Item"]) == 2

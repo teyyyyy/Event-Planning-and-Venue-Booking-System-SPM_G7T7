@@ -235,6 +235,8 @@ begin
   end if;
 
   if p_decision = 'Approved' then
+    -- Links the edit to this request for the significant-change trigger (significant_event_changes.sql).
+    perform set_config('app.event_change_request_id', p_request_id::text, true);
     update public."Event Details"
     set event_name = change_request.proposed_event_name,
         event_type = change_request.proposed_event_type,
@@ -245,6 +247,7 @@ begin
         start_time = change_request.proposed_start_time,
         end_time = change_request.proposed_end_time
     where id = change_request.event_id;
+    perform set_config('app.event_change_request_id', '', true);
   end if;
 
   update public.event_change_requests

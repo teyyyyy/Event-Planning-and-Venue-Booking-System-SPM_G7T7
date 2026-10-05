@@ -214,3 +214,17 @@ def test_catalogue_forbidden(use_db):
 def test_catalogue_no_event(use_db):
     use_db(world(), ea)
     assert err(ea.event_catalogue_availability, "t1", 99)[0] == 404
+
+
+@tc("BE-EQAVAIL-034", "availability_events / event_availability", "An approved event change replaced request 7 with request 8 (MIC x4).",
+    "The event is listed once for request 8, and the availability check uses request 8's items.",
+    pre="Request 7 Superseded with MIC x1; request 8 Pending with MIC x4.", steps="1. Call availability_events(\"t1\"). 2. Call event_availability(\"t1\", 1).")
+def test_superseded_request_ignored(use_db):
+    tables = {
+        "Equipment Request": [{**REQ, "status": "Superseded"}, {**REQ, "request_id": 8, "status": "Pending"}],
+        "Equipment Request Item": [ri("MIC", 1), {**ri("MIC", 4), "request_id": 8}],
+    }
+    use_db(world(**tables), ea)
+    assert [(row["request_id"], row["request_status"]) for row in ea.availability_events("t1")] == [(8, "Pending")]
+    out = ea.event_availability("t1", 1)
+    assert out["request_id"] == 8 and out["availability"][0]["requested_quantity"] == 4

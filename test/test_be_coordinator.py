@@ -639,3 +639,44 @@ def test_assigned_coordinator_event_guard(use_db):
     assert ca.require_assigned_coordinator_event(1, user) is user
     assert err(ca.require_assigned_coordinator_event, 1, {"id": "c2", "role": "Event Coordinator"})[0] == 403
     assert err(ca.require_assigned_coordinator_event, 99, user)[0] == 404
+
+
+@tc("BE-COORD-059", "event_change_requests", "A coordinator opens a pending request that moves the event's start time, and one that was processed.",
+    "The pending request previews a Significant change with the live venue booking and equipment request that approval reopens; the processed one returns its processing status and summary.",
+    pre="Event 1 has an Approved booking and an Updated equipment request. Request 11 Pending (new times); request 12 Processed.",
+    steps="1. Call event_change_requests as coordinator c1.")
+def test_event_change_requests_include_impact_and_processing(use_db):
+    client = world(
+        [event(id=1, coordinator_id="c1", start_time="10:00:00", end_time="12:00:00", event_date="2026-10-02", event_end_date="2026-10-03",
+               event_capacity=50, event_name="Morning Gala", event_type="Workshop", description="Updated plan")],
+        change_requests=[
+            change_request(created_at="2026-02-01T00:00:00Z"),
+            change_request(id=12, review_status="Approved", created_at="2026-01-01T00:00:00Z", change_type="Significant",
+                           significant_fields=["start_time"], affects_venue=True, affects_equipment=True,
+                           processing_status="Processed", processed_at="2026-01-02T00:00:00Z",
+                           processing_summary="Venue booking #5 replaced by #6."),
+        ],
+    )
+    client.tables["Venue Booking Requests"] = [{"request_id": 5, "event_id": 1, "venue_id": 7, "status": "Approved"}]
+    client.tables["Equipment Request"] = [{"request_id": 9, "event_id": 1, "status": "Updated"}]
+    use_db(client, ca)
+    pending, processed = ca.event_change_requests({"id": "c1", "role": "Event Coordinator"})
+    assert pending["processing_status"] is None
+    assert pending["impact"] == {
+        "change_type": "Significant", "significant_fields": ["start_time"], "affects_venue": True, "affects_equipment": True,
+        "venue_requests": [{"request_id": 5, "status": "Approved"}], "equipment_requests": [{"request_id": 9, "status": "Updated"}],
+    }
+    assert (processed["processing_status"], processed["processed_at"], processed["processing_summary"]) == (
+        "Processed", "2026-01-02T00:00:00Z", "Venue booking #5 replaced by #6.")
+    assert processed["impact"]["change_type"] == "Significant"
+
+
+@tc("BE-COORD-060", "organiser_events", "An organiser's change request was approved and awaits processing.",
+    "The latest change request returned with the event includes its processing status and significant-change classification.",
+    pre="Event 1 has an Approved request with processing_status Awaiting processing.", steps="1. Call organiser_events(\"o1\").")
+def test_organiser_events_include_processing_status(use_db):
+    use_db(world([event(coordinator_id="c1")], change_requests=[change_request(
+        review_status="Approved", created_at="2026-02-01T00:00:00Z", change_type="Significant", processing_status="Awaiting processing",
+    )]), ca)
+    latest = ca.organiser_events("o1")[0]["latest_change_request"]
+    assert (latest["review_status"], latest["change_type"], latest["processing_status"]) == ("Approved", "Significant", "Awaiting processing")
