@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { request } from "../api";
 
 function format12HourTime(time24) {
   if (!time24) return "";
@@ -9,7 +10,7 @@ function format12HourTime(time24) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
-export default function VenueCalendar({ venues, apiBaseUrl }) {
+export default function VenueCalendar({ venues }) {
   const [calendarVenueId, setCalendarVenueId] = useState("");
   const [calendarBookings, setCalendarBookings] = useState([]);
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
@@ -25,22 +26,19 @@ export default function VenueCalendar({ venues, apiBaseUrl }) {
     if (calendarVenueId) {
       const fetchCalendarData = async () => {
         try {
-          const res = await fetch(
-            `${apiBaseUrl}/venue-booking-requests/venues/${calendarVenueId}?include_pending=true`,
+          const data = await request(
+            `/venue-booking-requests/venues/${calendarVenueId}?include_pending=true`,
           );
-          if (res.ok) {
-            const data = await res.json();
-            setCalendarBookings(data);
-          }
+          setCalendarBookings(data);
         } catch (error) {
           console.error("Failed to load calendar bookings", error);
         }
       };
       fetchCalendarData();
     } else {
-      setCalendarBookings([]); // Clear if no venue is selected
+      setCalendarBookings([]);
     }
-  }, [calendarVenueId, apiBaseUrl]);
+  }, [calendarVenueId]);
 
   // Helper to generate the 7 days of the currently selected week
   const weekDays = useMemo(() => {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import VenueCalendar from "./components/VenueCalendar";
+import { request } from "./api";
 
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
@@ -10,11 +11,9 @@ export default function VenueStaffCalendarView() {
   useEffect(() => {
     async function fetchCalendarData() {
       try {
-        const venuesRes = await fetch(`${API}/venues`);
-
-        if (venuesRes.ok) {
-          setVenues(await venuesRes.json());
-        }
+        // request() directly returns the parsed JSON data
+        const venuesData = await request(`/venues`);
+        setVenues(venuesData);
       } catch (error) {
         console.error("Failed to fetch calendar data:", error);
       } finally {

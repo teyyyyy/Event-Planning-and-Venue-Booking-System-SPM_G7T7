@@ -75,6 +75,10 @@ def require_coordinator(user: dict[str, Any] = Depends(current_user)) -> dict[st
         raise HTTPException(403, "Event coordinator access required.")
     return user
 
+def require_coordinator_or_staff(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() not in (COORDINATOR_ROLE, VENUE_STAFF_ROLE):
+        raise HTTPException(403, "Event coordinator OR venue staff access required.")
+    return user
 
 def require_organiser(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if str(user.get("role", "")).strip().lower() != ORGANISER_ROLE:
