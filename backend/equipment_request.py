@@ -3,9 +3,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 from dotenv import load_dotenv
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from supabase import Client, create_client
+from supabase import Client
+from database import create_client
+from auth import require_coordinator, require_coordinator_path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / '.env')
@@ -20,7 +22,7 @@ RESERVATION_TABLE = 'Equipment Reservation'
 RESERVATION_ITEM_TABLE = 'Equipment Reservation Item'
 USER_TABLE = 'users'
 
-router = APIRouter(prefix='/api', tags=['Equipment Requests'])
+router = APIRouter(prefix='/api', tags=['Equipment Requests'], dependencies=[Depends(require_coordinator)])
 
 def db() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
@@ -38,6 +40,17 @@ class EquipmentRequestInput(BaseModel):
 
 class EquipmentRequestEditInput(BaseModel):
     items: List[EquipmentRequestItemInput]
+
+def live_requests(headers: list) -> list:
+    """Drop requests replaced after an approved event change (significant_event_changes.sql)."""
+    return [header for header in headers if str(header.get('status') or '').strip().lower() != 'superseded']
+
+def require_live_request(header: dict):
+    if not live_requests([header]):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Equipment request #{header['request_id']} was replaced by a newer request after an approved event change."
+        )
 
 def get_coordinator_event(client: Client, coordinator_id: str, event_id: int):
     result = client.table(EVENT_TABLE).select('*').eq('id', event_id).eq('coordinator_id', coordinator_id).execute()
@@ -161,7 +174,7 @@ def validate_request_items(request_items, availability_rows):
             )
 
 # Get events available for NEW equipment requests
-@router.get('/event-coordinators/{coordinator_id}/events')
+@router.get('/event-coordinators/{coordinator_id}/events', dependencies=[Depends(require_coordinator_path)])
 def coordinator_events(coordinator_id: str):
     client = db()
 
@@ -193,13 +206,13 @@ def equipment_catalogue():
     ).order('equipment_name').execute()
     return result.data or []
 
-@router.get('/event-coordinators/{coordinator_id}/events/{event_id}/equipment-availability')
+@router.get('/event-coordinators/{coordinator_id}/events/{event_id}/equipment-availability', dependencies=[Depends(require_coordinator_path)])
 def equipment_availability(coordinator_id: str, event_id: int):
     client = db()
     event = get_coordinator_event(client, coordinator_id, event_id)
     return calculate_availability(client, event)
 
-@router.post('/event-coordinators/{coordinator_id}/equipment-requests')
+@router.post('/event-coordinators/{coordinator_id}/equipment-requests', dependencies=[Depends(require_coordinator_path)])
 def create_equipment_request(coordinator_id: str, request: EquipmentRequestInput):
     client = db()
     event = get_coordinator_event(client, coordinator_id, request.event_id)
@@ -217,45 +230,30 @@ def create_equipment_request(coordinator_id: str, request: EquipmentRequestInput
     availability_rows = calculate_availability(client, event)
     validate_request_items(request.items, availability_rows)
 
-    header = client.table(REQUEST_TABLE).insert({
-        'event_id': request.event_id,
-        'status': 'Submitted',
-        'created_by': coordinator_id
-    }).execute().data
-
-    if not header:
-        raise HTTPException(status_code=500, detail='Equipment request could not be created.')
-
-    request_id = header[0]['request_id']
-    item_rows = []
-
-    for item in request.items:
-        item_rows.append({
-            'request_id': request_id,
-            'equipment_id': item.equipment_id.strip(),
-            'requested_quantity': item.requested_quantity,
-            'technical_requirements': item.technical_requirements.strip() if item.technical_requirements else ''
-        })
-
+    from postgrest.exceptions import APIError
+    items = [{"equipment_id": item.equipment_id.strip(),
+              "requested_quantity": item.requested_quantity,
+              "technical_requirements": (item.technical_requirements or "").strip()}
+             for item in request.items]
     try:
-        created_items = client.table(REQUEST_ITEM_TABLE).insert(item_rows).execute().data
-    except Exception as error:
-        client.table(REQUEST_TABLE).delete().eq('request_id', request_id).execute()
-        raise HTTPException(status_code=500, detail='Equipment request items could not be saved.') from error
+        saved = client.rpc("submit_equipment_request", {
+            "p_event_id": request.event_id, "p_coordinator_id": coordinator_id,
+            "p_items": items,
+        }).execute().data
+    except APIError as error:
+        if error.code == "23505":
+            raise HTTPException(409, "An equipment request has already been submitted for this event.") from error
+        raise HTTPException(500, "Equipment request could not be created.") from error
+    if not saved:
+        raise HTTPException(500, "Equipment request could not be created.")
+    return {"message": "Equipment request submitted successfully.", **saved}
 
-    return {
-        'message': 'Equipment request submitted successfully.',
-        'request_id': request_id,
-        'event_id': request.event_id,
-        'items': created_items
-    }
-
-@router.put('/event-coordinators/{coordinator_id}/equipment-requests/{request_id}')
+@router.put('/event-coordinators/{coordinator_id}/equipment-requests/{request_id}', dependencies=[Depends(require_coordinator_path)])
 def edit_equipment_request(coordinator_id: str, request_id: int, payload: EquipmentRequestEditInput):
     client = db()
 
     header_rows = client.table(REQUEST_TABLE).select(
-        'request_id,event_id,created_by'
+        'request_id,event_id,created_by,status'
     ).eq('request_id', request_id).eq(
         'created_by', coordinator_id
     ).execute().data or []
@@ -267,6 +265,7 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
         )
 
     header = header_rows[0]
+    require_live_request(header)
     event = get_coordinator_event(client, coordinator_id, header['event_id'])
     availability_rows = calculate_availability(client, event)
     validate_request_items(payload.items, availability_rows)
@@ -319,15 +318,15 @@ def edit_equipment_request(coordinator_id: str, request_id: int, payload: Equipm
         'event_id': header['event_id']
     }
 
-@router.get('/event-coordinators/{coordinator_id}/equipment-requests')
+@router.get('/event-coordinators/{coordinator_id}/equipment-requests', dependencies=[Depends(require_coordinator_path)])
 def get_equipment_requests(coordinator_id: str):
     client = db()
 
-    headers = client.table(REQUEST_TABLE).select(
+    headers = live_requests(client.table(REQUEST_TABLE).select(
         'request_id,event_id,status,created_by,updated_by,created_at,updated_at,latest_update_summary'
     ).eq('created_by', coordinator_id).order(
         'request_id', desc=True
-    ).execute().data or []
+    ).execute().data or [])
 
     if not headers:
         return []

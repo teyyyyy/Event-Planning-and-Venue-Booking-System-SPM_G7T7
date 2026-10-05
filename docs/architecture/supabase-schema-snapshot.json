@@ -1,0 +1,578 @@
+{
+  "Venue Booking Requests": {
+    "required": [
+      "request_id",
+      "created_at",
+      "venue_id",
+      "start_datetime",
+      "end_datetime",
+      "accessibility_required",
+      "status",
+      "event_id",
+      "coordinator_id"
+    ],
+    "properties": {
+      "request_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "venue_id": {
+        "description": "Note:\nThis is a Foreign Key to `Venues.venue_id`.<fk table='Venues' column='venue_id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "start_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "end_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "accessibility_required": {
+        "format": "bigint",
+        "type": "integer"
+      },
+      "layout_required": {
+        "format": "text",
+        "type": "string"
+      },
+      "facilities_required": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "status": {
+        "format": "text",
+        "type": "string"
+      },
+      "event_id": {
+        "description": "Note:\nThis is a Foreign Key to `Event Details.id`.<fk table='Event Details' column='id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "coordinator_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "venue_staff_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "rejection_reason": {
+        "format": "text",
+        "type": "string"
+      },
+      "alternative_venue": {
+        "format": "text",
+        "type": "string"
+      },
+      "decided_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "users": {
+    "required": [
+      "id",
+      "name",
+      "role"
+    ],
+    "properties": {
+      "id": {
+        "default": "gen_random_uuid()",
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "role": {
+        "format": "text",
+        "type": "string"
+      },
+      "email": {
+        "format": "text",
+        "type": "string"
+      },
+      "active_event_count": {
+        "format": "bigint",
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "Venues": {
+    "required": [
+      "venue_id",
+      "created_at",
+      "name",
+      "layouts",
+      "facilities",
+      "capacity",
+      "status",
+      "location",
+      "accessibility_details"
+    ],
+    "properties": {
+      "venue_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "name": {
+        "format": "text",
+        "type": "string"
+      },
+      "layouts": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "facilities": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "capacity": {
+        "format": "bigint",
+        "type": "integer"
+      },
+      "status": {
+        "format": "text",
+        "type": "string"
+      },
+      "accessible": {
+        "format": "bigint",
+        "type": "integer"
+      },
+      "location": {
+        "format": "text",
+        "type": "string"
+      },
+      "operating_hours": {
+        "format": "jsonb"
+      },
+      "accessibility_details": {
+        "default": "",
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "notifications": {
+    "required": [
+      "id",
+      "recipient_id",
+      "description",
+      "record_type",
+      "record_id",
+      "created_at",
+      "is_read"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "recipient_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "description": {
+        "format": "text",
+        "type": "string"
+      },
+      "record_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "record_id": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "is_read": {
+        "default": false,
+        "format": "boolean",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "Equipment Reservation Item": {
+    "required": [
+      "reservation_item_id",
+      "reservation_id",
+      "equipment_id",
+      "reserved_quantity",
+      "start_datetime",
+      "end_datetime",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "reservation_item_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "reservation_id": {
+        "description": "Note:\nThis is a Foreign Key to `Equipment Reservation.reservation_id`.<fk table='Equipment Reservation' column='reservation_id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "equipment_id": {
+        "description": "Note:\nThis is a Foreign Key to `Equipment.equipment_id`.<fk table='Equipment' column='equipment_id'/>",
+        "format": "text",
+        "type": "string"
+      },
+      "reserved_quantity": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "start_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "end_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "Equipment Request": {
+    "required": [
+      "request_id",
+      "event_id"
+    ],
+    "properties": {
+      "request_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "event_id": {
+        "description": "Note:\nThis is a Foreign Key to `Event Details.id`.<fk table='Event Details' column='id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "status": {
+        "default": "Draft",
+        "format": "text",
+        "type": "string"
+      },
+      "created_by": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_by": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "latest_update_summary": {
+        "format": "text",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "Equipment": {
+    "required": [
+      "equipment_id",
+      "equipment_name"
+    ],
+    "properties": {
+      "equipment_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "text",
+        "type": "string"
+      },
+      "equipment_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "total_quantity": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "under_maintenance_count": {
+        "format": "integer",
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "Equipment Reservation": {
+    "required": [
+      "reservation_id",
+      "event_id",
+      "request_id",
+      "status",
+      "reserved_by",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "reservation_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "event_id": {
+        "description": "Note:\nThis is a Foreign Key to `Event Details.id`.<fk table='Event Details' column='id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "request_id": {
+        "description": "Note:\nThis is a Foreign Key to `Equipment Request.request_id`.<fk table='Equipment Request' column='request_id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "status": {
+        "default": "Reserved",
+        "format": "text",
+        "type": "string"
+      },
+      "reserved_by": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "Equipment Request Item": {
+    "required": [
+      "request_id",
+      "equipment_id",
+      "requested_quantity",
+      "created_at",
+      "updated_at"
+    ],
+    "properties": {
+      "request_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>\nThis is a Foreign Key to `Equipment Request.request_id`.<fk table='Equipment Request' column='request_id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "equipment_id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>\nThis is a Foreign Key to `Equipment.equipment_id`.<fk table='Equipment' column='equipment_id'/>",
+        "format": "text",
+        "type": "string"
+      },
+      "requested_quantity": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "technical_requirements": {
+        "format": "text",
+        "type": "string"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "updated_by": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "event_registrations": {
+    "required": [
+      "id",
+      "event_id",
+      "attendee_id",
+      "registered_at"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "event_id": {
+        "description": "Note:\nThis is a Foreign Key to `Event Details.id`.<fk table='Event Details' column='id'/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "attendee_id": {
+        "description": "Note:\nThis is a Foreign Key to `users.id`.<fk table='users' column='id'/>",
+        "format": "uuid",
+        "type": "string"
+      },
+      "registered_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "Event Details": {
+    "required": [
+      "id",
+      "created_at"
+    ],
+    "properties": {
+      "id": {
+        "description": "Note:\nThis is a Primary Key.<pk/>",
+        "format": "bigint",
+        "type": "integer"
+      },
+      "created_at": {
+        "default": "now()",
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "event_type": {
+        "format": "text",
+        "type": "string"
+      },
+      "event_date": {
+        "format": "date",
+        "type": "string"
+      },
+      "event_capacity": {
+        "format": "bigint",
+        "type": "integer"
+      },
+      "organiser_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "event_name": {
+        "format": "text",
+        "type": "string"
+      },
+      "description": {
+        "format": "text",
+        "type": "string"
+      },
+      "start_time": {
+        "format": "time without time zone",
+        "type": "string"
+      },
+      "end_time": {
+        "format": "time without time zone",
+        "type": "string"
+      },
+      "status": {
+        "format": "text",
+        "type": "string"
+      },
+      "updated_at": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "coordinator_id": {
+        "format": "uuid",
+        "type": "string"
+      },
+      "coordinator_comments": {
+        "format": "text",
+        "type": "string"
+      },
+      "event_end_date": {
+        "format": "date",
+        "type": "string"
+      },
+      "layout_required": {
+        "format": "text",
+        "type": "string"
+      },
+      "facilities_required": {
+        "format": "text[]",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "accessibility_required": {
+        "format": "bigint",
+        "type": "integer"
+      },
+      "start_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      },
+      "end_datetime": {
+        "format": "timestamp with time zone",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  }
+}

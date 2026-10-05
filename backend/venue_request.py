@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from pydantic import BaseModel
 from datetime import datetime
-from supabase import create_client, Client
+from supabase import Client
+from database import create_client
+from auth import require_coordinator, require_coordinator_path
 import os
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
@@ -36,7 +38,7 @@ def get_supabase() -> Client:
 
 # --- Endpoints ---
 
-@router.get("/api/venues")
+@router.get("/api/venues", dependencies=[Depends(require_coordinator)])
 def get_all_venues():
     """Fetches the complete venue catalogue."""
     supabase = get_supabase()
@@ -44,9 +46,17 @@ def get_all_venues():
     return response.data
 
 @router.post("/api/venue-bookings")
-def create_venue_booking(booking: VenueBookingCreate):
+def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coordinator)):
     """Submits a new venue booking request."""
     supabase = get_supabase()
+    if str(booking.coordinator_id) != str(user["id"]):
+        raise HTTPException(status_code=403, detail="You can only request venues for your own events.")
+    event = (
+        supabase.table(EVENTS_TABLE).select("id,coordinator_id").eq("id", booking.event_id)
+        .maybe_single().execute().data
+    )
+    if not event or str(event.get("coordinator_id")) != str(user["id"]):
+        raise HTTPException(status_code=403, detail="You can only request venues for events assigned to you.")
     
     new_request = {
         "event_id": booking.event_id,
@@ -65,7 +75,7 @@ def create_venue_booking(booking: VenueBookingCreate):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/api/venue-booking-requests/venues/{venue_id}")
+@router.get("/api/venue-booking-requests/venues/{venue_id}", dependencies=[Depends(require_coordinator)])
 def list_requests_by_venue(venue_id: int):
     client = get_supabase()
     bookings = (
@@ -73,7 +83,7 @@ def list_requests_by_venue(venue_id: int):
     )
     return bookings
 
-@router.get("/api/venue-booking-requests/coordinators/{coordinator_id}")
+@router.get("/api/venue-booking-requests/coordinators/{coordinator_id}", dependencies=[Depends(require_coordinator_path)])
 def list_requests_by_coordinator(coordinator_id: str):
     client = get_supabase()
     bookings = (

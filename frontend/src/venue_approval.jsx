@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { request } from './api';
+import EventChangeHistory from './EventChangeHistory';
 
 // The API returns SGT (+08:00) timestamps, so slicing the string keeps them in SGT.
 const formatDateTime = (value) => (value ? `${value.replace('T', ' ').slice(0, 16)} SGT` : '—');
@@ -12,6 +13,7 @@ function RequestDetail({ booking, busy, onApprove, onReject, onClose }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
   const [alternativeVenue, setAlternativeVenue] = useState('');
+  const [showHistory, setShowHistory] = useState(false);
   const pending = booking.status === 'Pending';
 
   return <section className="detail-panel" aria-label="Venue booking request details">
@@ -21,6 +23,7 @@ function RequestDetail({ booking, busy, onApprove, onReject, onClose }) {
     </div>
     <dl className="detail-grid">
       <Detail label="Status"><span className={`pill status-${booking.status.toLowerCase()}`}>{booking.status}</span></Detail>
+      {booking.change_request_id && <Detail label="Event change">New request for approved change request #{booking.change_request_id}</Detail>}
       <Detail label="Venue">{booking.venue_name}</Detail>
       <Detail label="Start">{formatDateTime(booking.start_datetime)}</Detail>
       <Detail label="End">{formatDateTime(booking.end_datetime)}</Detail>
@@ -36,6 +39,8 @@ function RequestDetail({ booking, busy, onApprove, onReject, onClose }) {
         <Detail label="Alternative venue">{booking.alternative_venue}</Detail>
       </>}
     </dl>
+    <button className="assign" type="button" aria-expanded={showHistory} onClick={() => setShowHistory(!showHistory)}>{showHistory ? 'Hide event change history' : 'Show event change history'}</button>
+    {showHistory && <EventChangeHistory eventId={booking.event_id} />}
     {pending && !rejecting && <div className="decision-actions">
       <button className="btn-approve" disabled={busy} onClick={onApprove}>Approve</button>
       <button className="btn-reject" disabled={busy} onClick={() => setRejecting(true)}>Reject…</button>
@@ -62,10 +67,11 @@ export default function VenueApproval() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
-  async function load() {
+  // keepMessage: leave the caller's message on screen after the reload.
+  async function load(keepMessage = false) {
     try {
       setBookings(await request('/venue-booking-requests'));
-      setMessage('');
+      if (!keepMessage) setMessage('');
     } catch (error) {
       setMessage(`Unable to load venue booking requests. (${error.message})`);
     } finally {
@@ -83,7 +89,7 @@ export default function VenueApproval() {
       setMessage(`Request for ${updated.event_name || `event #${updated.event_id}`} ${updated.status.toLowerCase()}.`);
     } catch (error) {
       setMessage(error.message);
-      await load(); // status may have changed underneath us
+      await load(true); // status may have changed underneath us
     } finally {
       setBusy(false);
     }
