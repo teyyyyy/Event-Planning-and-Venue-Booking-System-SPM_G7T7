@@ -67,6 +67,19 @@ export default function VenueRequest({ user }) {
   const [filterFacilities, setFilterFacilities] = useState([]);
   const [filterAccessible, setFilterAccessible] = useState(false);
 
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  const handleViewDetails = (submission) => {
+    setSelectedSubmission(submission);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setSelectedSubmission(null);
+    setIsModalOpen(false);
+  };
+
   // Derive selected event and venue directly from state
 
   const selectedEvent = events.find(
@@ -196,13 +209,7 @@ export default function VenueRequest({ user }) {
   }, [user?.id]);
 
   function formIsValid() {
-    return (
-      eventId &&
-      selectedVenueId &&
-      startDatetime &&
-      endDatetime &&
-      new Date(startDatetime) < new Date(endDatetime)
-    );
+    return eventId && selectedVenueId;
   }
 
   async function submitRequest(e) {
@@ -210,14 +217,14 @@ export default function VenueRequest({ user }) {
     if (!formIsValid()) {
       setNotice({
         type: "error",
-        text: "Please ensure all fields are filled and the start time is before the end time.",
+        text: "Please ensure an event and venue are selected.",
       });
       return;
     }
 
     setSubmitting(true);
     try {
-      // 1. Fetch approved bookings for this venue to check availability (No Auth Header needed)
+      // 1. Fetch approved bookings for this venue to check availability
       const checkResponse = await fetch(
         `${API}/venue-booking-requests/venues/${selectedVenueId}`,
       );
@@ -227,24 +234,36 @@ export default function VenueRequest({ user }) {
       }
 
       const existingBookings = await checkResponse.json();
-      const reqStart = new Date(startDatetime);
-      const reqEnd = new Date(endDatetime);
 
-      // 2. Check for time overlaps
+      // 2. Extract and format the requested dates directly from the selected event
+      const reqStartStr = selectedEvent.start_datetime
+        .substring(0, 16)
+        .replace(" ", "T");
+      const reqEndStr = selectedEvent.end_datetime
+        .substring(0, 16)
+        .replace(" ", "T");
+      const reqStart = new Date(reqStartStr).getTime();
+      const reqEnd = new Date(reqEndStr).getTime();
+
+      // 3. Check for time overlaps against existing bookings
       const hasOverlap = existingBookings.some((booking) => {
-        // 1. Take "2026-10-10 13:05:00+00"
-        // 2. Grab just the first 16 characters: "2026-10-10 13:05"
-        // 3. Replace the space with a "T": "2026-10-10T13:05"
-        const cleanExStartStr = booking.start_datetime
-          .substring(0, 16)
-          .replace(" ", "T");
-        const cleanExEndStr = booking.end_datetime
-          .substring(0, 16)
-          .replace(" ", "T");
+        // Depending on your API, the dates might be top-level or nested in Event Details
+        const bStartStr = booking.start_datetime
+          ? booking.start_datetime.substring(0, 16).replace(" ", "T")
+          : booking["Event Details"]?.start_datetime
+              .substring(0, 16)
+              .replace(" ", "T");
 
-        // Now both the requested and existing dates are in the exact same local format
-        const exStart = new Date(cleanExStartStr).getTime();
-        const exEnd = new Date(cleanExEndStr).getTime();
+        const bEndStr = booking.end_datetime
+          ? booking.end_datetime.substring(0, 16).replace(" ", "T")
+          : booking["Event Details"]?.end_datetime
+              .substring(0, 16)
+              .replace(" ", "T");
+
+        if (!bStartStr || !bEndStr) return false;
+
+        const exStart = new Date(bStartStr).getTime();
+        const exEnd = new Date(bEndStr).getTime();
 
         return reqStart < exEnd && reqEnd > exStart;
       });
@@ -252,19 +271,17 @@ export default function VenueRequest({ user }) {
       if (hasOverlap) {
         setNotice({
           type: "error",
-          text: "This venue is already booked for the selected time period. Please choose a different time or venue.",
+          text: "This venue is already booked for the selected time period. Please choose a different venue.",
         });
         setSubmitting(false);
-        return; 
+        return;
       }
 
-      // 3. If no overlaps, proceed with submitting the booking
+      // 4. If no overlaps, proceed with submitting the simplified payload (no dates)
       const payload = {
         event_id: Number(eventId),
         venue_id: selectedVenueId,
-        coordinator_id: user.id, // Make sure user.id is available here
-        start_datetime: startDatetime,
-        end_datetime: endDatetime,
+        coordinator_id: user.id,
       };
 
       const response = await fetch(`${API}/venue-bookings`, {
@@ -288,12 +305,10 @@ export default function VenueRequest({ user }) {
 
       setEventId("");
       setSelectedVenueId(null);
-      setStartDatetime("");
-      setEndDatetime("");
+      loadInitialData(); // Refresh submissions tab
     } catch (error) {
       let errorMessage = error.message;
 
-      // Intercept the PostgreSQL unique constraint violation error
       if (
         errorMessage &&
         (errorMessage.includes("23505") ||
@@ -463,7 +478,10 @@ export default function VenueRequest({ user }) {
               <div className="equipment-items-heading">
                 <div>
                   <h3>Venue Booking Details</h3>
-                  <p>Specify the start and end times for this venue request.</p>
+                  <p>
+                    Review the venue and event timing before submitting your
+                    request.
+                  </p>
                 </div>
               </div>
 
@@ -472,34 +490,42 @@ export default function VenueRequest({ user }) {
                 onClose={() => setSelectedVenueId(null)}
               />
 
-              <div className="equipment-item-card">
-                <div className="form-grid">
-                  <label>
-                    Start Date & Time
-                    <input
-                      type="datetime-local"
-                      value={startDatetime}
-                      onChange={(e) => setStartDatetime(e.target.value)}
-                      required
-                    />
-                  </label>
-                  <label>
-                    End Date & Time
-                    <input
-                      type="datetime-local"
-                      value={endDatetime}
-                      onChange={(e) => setEndDatetime(e.target.value)}
-                      required
-                    />
-                  </label>
+              {/* Read-Only Event Timing Display */}
+              <div
+                className="equipment-item-card"
+                style={{ marginTop: "16px" }}
+              >
+                <h4 style={{ margin: "0 0 12px 0", color: "#1c2940" }}>
+                  Event Timing Summary
+                </h4>
+                <div
+                  style={{
+                    padding: "16px",
+                    backgroundColor: "#f8fbff",
+                    border: "1px solid #dce6f3",
+                    borderRadius: "8px",
+                    fontSize: "14px",
+                    color: "#1c2940",
+                  }}
+                >
+                  <p style={{ margin: "0 0 8px 0" }}>
+                    <strong>Date:</strong> {selectedEvent.event_date}
+                  </p>
+                  <p style={{ margin: "0" }}>
+                    <strong>Time:</strong>{" "}
+                    {selectedEvent.start_datetime
+                      ? format12HourTime(
+                          selectedEvent.start_datetime.slice(11, 16),
+                        )
+                      : ""}
+                    {" - "}
+                    {selectedEvent.end_datetime
+                      ? format12HourTime(
+                          selectedEvent.end_datetime.slice(11, 16),
+                        )
+                      : ""}
+                  </p>
                 </div>
-                {startDatetime &&
-                  endDatetime &&
-                  new Date(startDatetime) >= new Date(endDatetime) && (
-                    <p className="field-error" style={{ marginTop: "8px" }}>
-                      Start time must be before end time.
-                    </p>
-                  )}
               </div>
             </div>
           )}
@@ -775,7 +801,7 @@ export default function VenueRequest({ user }) {
               <table className="request-table" style={{ width: "100%" }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: "left" }}>ID</th>
+                    <th style={{ textAlign: "left" }}>Event ID</th>
                     <th style={{ textAlign: "left" }}>Event Name</th>
                     <th style={{ textAlign: "left" }}>Venue</th>
                     <th style={{ textAlign: "left" }}>Start</th>
@@ -795,33 +821,46 @@ export default function VenueRequest({ user }) {
                       )?.name || req.venue_id;
 
                     return (
-                      <tr key={req.request_id || req.id}>
+                      <tr
+                        key={req.request_id || req.id}
+                        onClick={() => handleViewDetails(req)}
+                        style={{ cursor: "pointer" }}
+                        className="hoverable-row"
+                      >
                         <td>{req.request_id || req.id}</td>
                         <td>
                           <strong>{eventName}</strong>
                         </td>
                         <td>{venueName}</td>
                         <td>
-                          {req.start_datetime
-                            ? req.start_datetime.slice(0, 10)
+                          {req["Event Details"]?.start_datetime
+                            ? req["Event Details"].start_datetime.slice(0, 10)
                             : ""}{" "}
                           <br />
                           <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req.start_datetime
+                            {req["Event Details"]?.start_datetime
                               ? format12HourTime(
-                                  req.start_datetime.slice(11, 16),
+                                  req["Event Details"].start_datetime.slice(
+                                    11,
+                                    16,
+                                  ),
                                 )
                               : ""}
                           </small>
                         </td>
                         <td>
-                          {req.end_datetime
-                            ? req.end_datetime.slice(0, 10)
+                          {req["Event Details"]?.end_datetime
+                            ? req["Event Details"].end_datetime.slice(0, 10)
                             : ""}{" "}
                           <br />
                           <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req.end_datetime
-                              ? format12HourTime(req.end_datetime.slice(11, 16))
+                            {req["Event Details"]?.end_datetime
+                              ? format12HourTime(
+                                  req["Event Details"].end_datetime.slice(
+                                    11,
+                                    16,
+                                  ),
+                                )
                               : ""}
                           </small>
                         </td>
@@ -886,6 +925,61 @@ export default function VenueRequest({ user }) {
               >
                 Close
               </button>
+            </div>
+          </div>
+        </>
+      )}
+      {/* Modal Popup */}
+      {isModalOpen && selectedSubmission && (
+        <>
+          <div
+            className="notice-backdrop"
+            onClick={closeModal}
+            style={{ zIndex: 999 }}
+          />
+          <div
+            className="notice"
+            role="alertdialog"
+            aria-modal="true"
+            style={{ zIndex: 1000, maxWidth: "500px" }}
+          >
+            <div>
+              <h2 style={{ marginTop: 0 }}>Booking Request Details</h2>
+              <div style={{ marginTop: "16px", lineHeight: "1.6" }}>
+                <p>
+                  <strong>Status:</strong> {selectedSubmission.status}
+                </p>
+
+                {selectedSubmission.status === "Rejected" &&
+                  selectedSubmission.rejection_reason && (
+                    <p>
+                      <strong>Rejection Reason:</strong>{" "}
+                      {selectedSubmission.rejection_reason}
+                    </p>
+                  )}
+                {selectedSubmission.decided_at && (
+                  <p>
+                    <strong>Decided At:</strong>{" "}
+                    {new Date(selectedSubmission.decided_at).toLocaleString()}
+                  </p>
+                )}
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  marginTop: "24px",
+                }}
+              >
+                <button
+                  className="secondary"
+                  type="button"
+                  onClick={closeModal}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </>
