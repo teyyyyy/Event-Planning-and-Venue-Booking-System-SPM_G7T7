@@ -1,7 +1,8 @@
 from datetime import datetime
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from equipment_request import (
     db,
+    live_requests,
     EVENT_TABLE,
     EQUIPMENT_TABLE,
     REQUEST_TABLE,
@@ -9,9 +10,10 @@ from equipment_request import (
     RESERVATION_TABLE,
     RESERVATION_ITEM_TABLE,
 )
+from auth import require_technical_support_path
 
 USER_TABLE = "users"
-router = APIRouter(prefix="/api/equipment-availability", tags=["Equipment Availability"])
+router = APIRouter(prefix="/api/equipment-availability", tags=["Equipment Availability"], dependencies=[Depends(require_technical_support_path)])
 
 
 def require_technical_support(client, staff_id: str):
@@ -186,7 +188,7 @@ def availability_events(staff_id: str):
     client = db()
     require_technical_support(client, staff_id)
 
-    request_headers = (
+    request_headers = live_requests(
         client.table(REQUEST_TABLE)
         .select("request_id,event_id,status")
         .order("request_id", desc=True)
@@ -269,7 +271,7 @@ def event_availability(staff_id: str, event_id: int):
     require_technical_support(client, staff_id)
     event = get_event(client, event_id)
 
-    request_headers = (
+    request_headers = live_requests(
         client.table(REQUEST_TABLE)
         .select("request_id,event_id,status")
         .eq("event_id", event_id)

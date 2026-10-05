@@ -124,6 +124,30 @@ def test_venue_staff_rejects_other_role():
     assert status_of(auth.require_venue_staff, {"id": "1", "role": "event coordinator"}) == (403, "Venue staff access required.")
 
 
+@tc("BE-AUTH-017", "require_organiser", "Caller is an Event Organiser.", "The user is returned; other roles are rejected.",
+    steps="1. Check organiser and attendee profiles.", kind="Security")
+def test_organiser_role_guard():
+    user = {"id": "o1", "role": " Event Organiser "}
+    assert auth.require_organiser(user) is user
+    assert status_of(auth.require_organiser, {"id": "a1", "role": "Attendee"})[0] == 403
+
+
+@tc("BE-AUTH-018", "require_technical_support", "Caller is Technical Support Staff.", "The user is returned; other roles are rejected.",
+    steps="1. Check technical-support and coordinator profiles.", kind="Security")
+def test_technical_support_role_guard():
+    user = {"id": "t1", "role": "Technical Support Staff"}
+    assert auth.require_technical_support(user) is user
+    assert status_of(auth.require_technical_support, {"id": "c1", "role": "Event Coordinator"})[0] == 403
+
+
+@tc("BE-AUTH-025", "require_attendee", "Caller is an Attendee.", "The user is returned; staff roles are rejected.",
+    steps="1. Check attendee and venue-staff profiles.", kind="Security")
+def test_attendee_role_guard():
+    user = {"id": "a1", "role": " Attendee "}
+    assert auth.require_attendee(user) is user
+    assert status_of(auth.require_attendee, {"id": "v1", "role": "Venue Staff"})[0] == 403
+
+
 @tc("BE-AUTH-014", "require_self", "Path organiser_id equals the caller's id (caller id is a non-string, e.g. UUID).",
     "The user is returned; ids are compared as strings.", data="user.id = 42 (int); organiser_id = \"42\"",
     steps="1. Call require_self(\"42\", {\"id\": 42}).", kind="Edge")
@@ -144,3 +168,62 @@ def test_require_self_mismatch():
     steps="1. Read auth.COORDINATOR_ROLE and auth.VENUE_STAFF_ROLE.", kind="Config")
 def test_role_constants():
     assert (auth.COORDINATOR_ROLE, auth.VENUE_STAFF_ROLE) == ("event coordinator", "venue staff")
+
+
+def jwt(aal):
+    import base64, json
+    part = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    return f"{part({'alg': 'HS256'})}.{part({'aal': aal} if aal else {})}.sig"
+
+
+@tc("BE-AUTH-019", "current_user (MFA)", "MFA is required and the token is password-only (aal1).",
+    "HTTP 403 \"Multi-factor authentication required.\"; the profile is never loaded.",
+    pre="auth.MFA_REQUIRED is True; token carries aal = aal1.", steps="1. Call current_user with an aal1 token.", kind="Security")
+def test_mfa_rejects_aal1(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert status_of(auth.current_user, f"Bearer {jwt('aal1')}") == (403, "Multi-factor authentication required.")
+
+
+@tc("BE-AUTH-020", "current_user (MFA)", "MFA is required and the token has completed a second factor (aal2).",
+    "The caller's profile is returned.", pre="auth.MFA_REQUIRED is True; token carries aal = aal2.",
+    steps="1. Call current_user with an aal2 token.", kind="Security")
+def test_mfa_accepts_aal2(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert auth.current_user(f"Bearer {jwt('aal2')}") == PROFILE
+
+
+@tc("BE-AUTH-021", "current_user (MFA)", "MFA is required and the token payload is malformed or has no aal claim.",
+    "HTTP 403 \"Multi-factor authentication required.\"", pre="auth.MFA_REQUIRED is True.",
+    data="tokens: \"opaque\", payload without aal", steps="1. Call current_user with each token.", kind="Negative")
+def test_mfa_rejects_unreadable_token(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", True)
+    use_db(client(), auth)
+    assert status_of(auth.current_user, "Bearer opaque")[0] == 403
+    assert status_of(auth.current_user, f"Bearer {jwt(None)}")[0] == 403
+
+
+@tc("BE-AUTH-022", "current_user (MFA)", "MFA is switched off (REQUIRE_MFA=false) and the token is aal1.",
+    "The caller's profile is returned.", pre="auth.MFA_REQUIRED is False.",
+    steps="1. Call current_user with an aal1 token.", kind="Edge")
+def test_mfa_can_be_disabled(use_db, monkeypatch):
+    monkeypatch.setattr(auth, "MFA_REQUIRED", False)
+    use_db(client(), auth)
+    assert auth.current_user(f"Bearer {jwt('aal1')}") == PROFILE
+
+
+@tc("BE-AUTH-023", "db", "A guard needs the database client.", "auth.db() returns the shared client built by coordinator_assignment.db().",
+    pre="coordinator_assignment.db is stubbed.", steps="1. Stub coordinator_assignment.db. 2. Call auth.db().", kind="Config")
+def test_db_delegates(monkeypatch):
+    import coordinator_assignment
+    monkeypatch.setattr(coordinator_assignment, "db", lambda: "shared-client")
+    assert auth.db() == "shared-client"
+
+
+@tc("BE-AUTH-024", "require_technical_support_path", "Technical support staff open their own workspace, then another staff member's.", "Own id passes; a different id is HTTP 403.",
+    data="path id t1 vs t2, caller t1", steps="1. Call the guard with the caller's own id. 2. Call it with another id.", kind="Security")
+def test_technical_support_path_identity():
+    user = {"id": "t1", "role": "Technical Support Staff"}
+    assert auth.require_technical_support_path("t1", user) is user
+    assert status_of(auth.require_technical_support_path, "t2", user)[0] == 403

@@ -75,6 +75,7 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
         "coordinator_email": coordinator.get("email"),
         "rejection_reason": booking.get("rejection_reason"),
         "alternative_venue": booking.get("alternative_venue"),
+        "change_request_id": booking.get("change_request_id"),
     }
 
 

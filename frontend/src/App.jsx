@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
+import MfaChallenge from "./MfaChallenge";
+import SecurityButton from "./SecuritySettings";
 import CoordinatorAssignment from "./coordinator_assignment";
 import EventOrganiser from "./event_organiser";
 import EquipmentRequest from "./EquipmentRequest";
@@ -11,6 +13,9 @@ import VenueRequest from "./VenueRequest";
 import VenueCatalogue from "./VenueCatalogue";
 import EquipmentReservation from "./EquipmentReservation";
 
+import AttendeeWorkspace from "./AttendeeWorkspace";
+import Notifications from "./Notifications";
+
 function AuthedApp() {
   const { user, logout } = useAuth();
   const normalizedRole = user.role.trim().toLowerCase();
@@ -18,7 +23,9 @@ function AuthedApp() {
   const isTechnicalSupport = normalizedRole === "technical support staff";
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
+  const isAttendee = normalizedRole === "attendee";
 
+  if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
   if (isCoordinator)
@@ -68,9 +75,7 @@ function VenueStaffWorkspace({ logout, email }) {
             </button>
           </nav>
         </div>
-        <button className="coordinator-logout" onClick={logout} title={email}>
-          Log out
-        </button>
+        <div className="coordinator-side-footer"><SecurityButton /><button className="coordinator-logout" onClick={logout} title={email}>Log out</button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -158,14 +163,14 @@ function TechnicalSupportWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -276,14 +281,14 @@ function CoordinatorWorkspace({ user, logout }) {
           </nav>
         </div>
 
-        <button
+        <div className="coordinator-side-footer"><SecurityButton /><button
           type="button"
           className="coordinator-logout"
           onClick={logout}
           title={user.email}
         >
           Log out
-        </button>
+        </button></div>
       </aside>
 
       <div className="coordinator-main">
@@ -317,51 +322,66 @@ function CoordinatorWorkspace({ user, logout }) {
 // Event Organiser workspace
 function OrganiserWorkspace({ user, logout }) {
   const [activeRole, setActiveRole] = useState("organiser");
-  const [editingEvent, setEditingEvent] = useState(null);
 
   return (
-    <>
-      <div className="role-tabs" role="tablist" aria-label="User role views">
-        <button
-          className={activeRole === "organiser" ? "active" : ""}
-          onClick={() => setActiveRole("organiser")}
-        >
-          Create event
-        </button>
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">EVENT ORGANISER</div>
 
-        <button
-          className={activeRole === "coordinator" ? "active" : ""}
-          onClick={() => setActiveRole("coordinator")}
-        >
-          Event status
-        </button>
+          <nav className="coordinator-side-nav" aria-label="Event Organiser navigation">
+            <button
+              type="button"
+              className={
+                activeRole === "organiser"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("organiser")}
+            >
+              Create event
+            </button>
 
-        <button className="logout-tab" onClick={logout} title={user.email}>
+            <button
+              type="button"
+              className={
+                activeRole === "coordinator"
+                  ? "coordinator-nav-button active"
+                  : "coordinator-nav-button"
+              }
+              onClick={() => setActiveRole("coordinator")}
+            >
+              Event status
+            </button>
+          </nav>
+        </div>
+
+        <div className="coordinator-side-footer"><SecurityButton /><button
+          type="button"
+          className="coordinator-logout"
+          onClick={logout}
+          title={user.email}
+        >
           Log out
-        </button>
-      </div>
+        </button></div>
+      </aside>
 
-      {activeRole === "organiser" ? (
-        <EventOrganiser
-          user={user}
-          editingEvent={editingEvent}
-          onEditComplete={() => setEditingEvent(null)}
-        />
-      ) : (
-        <CoordinatorAssignment
-          user={user}
-          onEditEvent={(event) => {
-            setEditingEvent(event);
-            setActiveRole("organiser");
-          }}
-        />
-      )}
-    </>
+      <div className="coordinator-main">
+        <div className="embedded-existing-page">
+          {activeRole === "organiser" ? (
+            <EventOrganiser user={user} />
+          ) : (
+            <CoordinatorAssignment user={user} />
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
+  const { user, loading, mfa } = useAuth();
 
   if (loading) {
     return (
@@ -371,5 +391,6 @@ export default function App() {
     );
   }
 
-  return user ? <AuthedApp /> : <Login />;
+  if (user) return <React.Fragment key={user.id}><AuthedApp /><Notifications /></React.Fragment>;
+  return mfa ? <MfaChallenge /> : <Login />;
 }

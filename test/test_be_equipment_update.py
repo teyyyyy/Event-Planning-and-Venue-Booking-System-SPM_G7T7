@@ -261,3 +261,44 @@ def test_update_all_or_nothing(use_db):
     ])
     assert err(eu.update_event_equipment_requests, "t1", 1, body)[0] == 400
     assert not client.writes("Equipment Request Item", "update")
+
+
+TWO_REQUESTS = {"Equipment Request": [dict(REQ), {**REQ, "request_id": 8}],
+                "Equipment Request Item": [{"request_id": 7, "equipment_id": "MIC", "requested_quantity": 2},
+                                           {"request_id": 8, "equipment_id": "PRJ", "requested_quantity": 1}]}
+
+
+@tc("BE-EQUPD-035", "equipment_request_summary", "Two requests for the same event each have their own items.", "Each summary line describes only that request's items.", pre="Request 7 has MIC x2, request 8 has PRJ x1.",
+    steps="1. Call equipment_request_summary(\"t1\"). 2. Read each description.", kind="Edge")
+def test_summary_items_are_per_request(use_db):
+    use_db(w(**TWO_REQUESTS), eu)
+    out = eu.equipment_request_summary("t1")
+    assert {r["request_id"]: r["equipment_description"] for r in out} == {7: "Microphone × 2", 8: "Projector × 1"}
+
+
+@tc("BE-EQUPD-036", "event_equipment_requests", "Two requests for the same event each have their own items.", "Each request lists only its own items.", pre="Request 7 has MIC x2, request 8 has PRJ x1.",
+    steps="1. Call event_equipment_requests(\"t1\", 1). 2. Compare items per request.", kind="Edge")
+def test_event_requests_items_are_per_request(use_db):
+    use_db(w(**TWO_REQUESTS), eu)
+    out = eu.event_equipment_requests("t1", 1)
+    requests = out["requests"] if isinstance(out, dict) else out
+    assert {r["request_id"]: [i["equipment_id"] for i in r["items"]] for r in requests} == {7: ["MIC"], 8: ["PRJ"]}
+
+
+@tc("BE-EQUPD-037", "equipment_request_summary / event_equipment_requests", "An approved event change replaced request 7 with request 8.",
+    "Technical support only sees the live replacement in the summary and the event's request list.",
+    pre="Request 7 Superseded; request 8 Pending for the same event.", steps="1. Call equipment_request_summary(\"t1\"). 2. Call event_equipment_requests(\"t1\", 1).")
+def test_superseded_requests_hidden(use_db):
+    use_db(w(**{"Equipment Request": [{**REQ, "status": "Superseded"}, {**REQ, "request_id": 8, "status": "Pending"}]}), eu)
+    assert [(row["request_id"], row["status"]) for row in eu.equipment_request_summary("t1")] == [(8, "Pending")]
+    assert [row["request_id"] for row in eu.event_equipment_requests("t1", 1)["requests"]] == [8]
+
+
+@tc("BE-EQUPD-038", "update_event_equipment_requests", "Technical support saves changes to a superseded request.",
+    "HTTP 409; the superseded request's items are unchanged.", pre="Request 7 Superseded.", data="MIC x3",
+    steps="1. Mark request 7 Superseded. 2. Save an update for it.", kind="State")
+def test_update_superseded_rejected(use_db):
+    client = use_db(w(**{"Equipment Request": [{**REQ, "status": "Superseded"}]}), eu)
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 3), item("PRJ", 1))) == (
+        409, "Equipment request #7 was replaced by a newer request after an approved event change.")
+    assert stored(client)["MIC"]["requested_quantity"] == 2

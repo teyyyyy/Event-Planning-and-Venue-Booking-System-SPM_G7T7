@@ -6,8 +6,9 @@ import { tc } from '../test/tc';
 const auth = vi.hoisted(() => ({ value: {} }));
 vi.mock('../AuthContext', () => ({ useAuth: () => auth.value }));
 vi.mock('../Login', () => ({ default: () => <div>LOGIN SCREEN</div> }));
+vi.mock('../MfaChallenge', () => ({ default: () => <div>MFA SCREEN</div> }));
 vi.mock('../coordinator_assignment', () => ({
-  default: ({ onEditEvent }) => <div>COORDINATOR PAGE<button onClick={() => onEditEvent({ id: 5 })}>trigger edit</button></div>,
+  default: ({ onEditEvent, user }) => <div>{user?.role?.trim().toLowerCase() === 'event organiser' ? 'EVENT STATUS PAGE' : 'COORDINATOR PAGE'}{onEditEvent && <button onClick={() => onEditEvent({ id: 5 })}>trigger edit</button>}</div>,
 }));
 vi.mock('../event_organiser', () => ({
   default: ({ editingEvent, onEditComplete }) => <div>ORGANISER PAGE {editingEvent ? `editing ${editingEvent.id}` : 'new'}<button onClick={onEditComplete}>finish edit</button></div>,
@@ -18,6 +19,9 @@ vi.mock('../EquipmentAvailability', () => ({ default: () => <div>EQUIPMENT AVAIL
 vi.mock('../venue_approval', () => ({ default: () => <div>VENUE APPROVAL PAGE</div> }));
 vi.mock('../VenueRequest', () => ({ default: () => <div>VENUE REQUEST PAGE</div> }));
 vi.mock('../VenueCatalogue', () => ({ default: ({ canEdit }) => <div>VENUE CATALOGUE PAGE {canEdit ? 'editable' : 'read-only'}</div> }));
+
+vi.mock('../Notifications', () => ({ default: () => <div>NOTIFICATIONS</div> }));
+vi.mock('../AttendeeWorkspace', () => ({ default: ({ logout }) => <div>ATTENDEE WORKSPACE<button onClick={logout}>Log out</button></div> }));
 
 import App from '../App';
 
@@ -106,14 +110,16 @@ describe('App', () => {
       expect(screen.getByText('ORGANISER PAGE new')).toBeInTheDocument();
     });
 
-  tc('FE-APP-010', 'AuthedApp (organiser)', 'Organiser opens the "Event status" tab and edits an event.', 'Status view shows; choosing edit switches back to the form pre-filled with that event.',
-    { steps: '1. Render as organiser. 2. Click "Event status". 3. Trigger onEditEvent.' },
+  tc('FE-APP-010', 'AuthedApp (organiser)', 'Organiser opens the "Event status" tab.',
+    'The Event Status view is shown without switching back to the Create event form.',
+    { steps: '1. Render as organiser. 2. Click "Event status".' },
     () => {
       as('event organiser');
       render(<App />);
       fireEvent.click(screen.getByRole('button', { name: 'Event status' }));
-      fireEvent.click(screen.getByText('trigger edit'));
-      expect(screen.getByText('ORGANISER PAGE editing 5')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Event status' })).toHaveClass('active');
+      expect(screen.getByText('EVENT STATUS PAGE')).toBeInTheDocument();
+      expect(screen.queryByText('ORGANISER PAGE editing 5')).not.toBeInTheDocument();
     });
 
   tc('FE-APP-011', 'AuthedApp (venue staff)', 'A Venue Staff user is signed in.', 'The venue-staff sidebar shows with the editable Venue Catalogue open by default and a Log out button.',
@@ -187,5 +193,24 @@ describe('App', () => {
       render(<App />);
       fireEvent.click(screen.getByRole('button', { name: 'Venue Catalogue' }));
       expect(screen.getByText('VENUE CATALOGUE PAGE read-only')).toBeInTheDocument();
+    });
+
+  tc('FE-APP-019', 'AuthedApp (attendee)', 'An Attendee signs in.', 'The attendee workspace opens without staff controls.',
+    { data: 'role = "Attendee"', steps: '1. Render App as attendee.' },
+    () => {
+      as('Attendee');
+      render(<App />);
+      expect(screen.getByText('ATTENDEE WORKSPACE')).toBeInTheDocument();
+      expect(screen.queryByText('EVENT COORDINATOR')).toBeNull();
+      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+    });
+
+  tc('FE-APP-020', 'App (MFA)', 'A password-only session is waiting for its second factor.', 'The two-factor screen shows instead of login or any workspace.',
+    { kind: 'Security', pre: 'user is null and mfa step is "verify".', steps: '1. Render App with mfa set.' },
+    () => {
+      auth.value = { user: null, loading: false, mfa: { step: 'verify', factorId: 'f1' }, logout };
+      render(<App />);
+      expect(screen.getByText('MFA SCREEN')).toBeInTheDocument();
+      expect(screen.queryByText('LOGIN SCREEN')).toBeNull();
     });
 });

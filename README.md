@@ -70,6 +70,61 @@ uvicorn main:app --reload --port 8000
 The backend exposes the event-organiser and coordinator-assignment routers; it
 reads `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` from the repo-root `.env`.
 
+## Event change requests
+
+Before using the organiser's **Request changes** action, run
+`backend/sql/event_change_requests.sql` in the Supabase SQL Editor after
+`backend/sql/sprint2_registration_notifications.sql`. The migration stores each
+proposed event version and organiser summary in `event_change_requests`, then
+notifies the assigned coordinator in the same database transaction. Event
+details remain unchanged when a request is submitted. Coordinators can approve
+requests to apply the proposed details or reject them with a required reason.
+Organisers can see the latest decision and rejection reason in their event
+status list. Requests are available for submitted and active events with an
+assigned coordinator; Draft, Completed, Cancelled, and Rejected events cannot
+receive change requests.
+
+## Significant event changes and change-request processing (10.2, 44.4)
+
+Rerun `backend/sql/event_change_requests.sql`, then run
+`backend/sql/significant_event_changes.sql` in the Supabase SQL Editor, and
+restart the backend. Both are transactional and rerunnable. Always run
+`significant_event_changes.sql` after `event_change_requests.sql`.
+
+- **Significant vs ordinary (10.2):** every saved change to a submitted event is
+  classified by a database trigger, whichever screen made it. Date, time,
+  capacity, venue, layout, facilities and accessibility changes are
+  *Significant*; name, type and description edits are *Ordinary*. Each change is
+  logged with its old and new values in `event_change_log`.
+- A significant change returns the event's live venue booking (date, time,
+  capacity or venue requirements) and equipment requests (date or time) to
+  **Pending**, and the existing notification triggers alert venue staff and
+  technical support. Cancelled, rejected and superseded requests are left alone.
+- Organisers see whether their proposed change is significant while filling in
+  **Request changes**. Coordinators see the impact on each change request
+  before approving it. The **History** button on the event tables, and **Show
+  event change history** on a venue booking, list the recorded changes for the
+  organiser, the assigned coordinator, and staff reviewing that event's
+  requests.
+- **Processing (44.4):** approving a significant change request sets it to
+  *Awaiting processing*. Ordinary ones are *Not required*. **Process change**
+  marks the affected live venue booking and equipment requests *Superseded* and
+  creates new Pending requests for the updated schedule. These are linked to
+  the event and the change request through `change_request_id`, and equipment
+  items are copied. Venue staff and technical support are notified of the new
+  requests, the organiser is told the request was processed, and the request
+  becomes *Processed* with a summary. A failure rolls the whole step back.
+- The full `UNIQUE(event_id)` constraint on `Venue Booking Requests` is replaced
+  by a one-live-booking-per-event index that ignores superseded rows, so a
+  replacement booking can be created. Superseded equipment requests are hidden
+  from the coordinator and technical-support screens and can no longer be edited.
+
+The database behaviour is verified against PostgreSQL in isolation:
+
+```bash
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/significant_event_changes_sql.mjs
+```
+
 ## Tests
 
 Unit tests: Vitest + React Testing Library (frontend) and pytest (backend). No database or
@@ -90,6 +145,21 @@ Every test carries its case ID, steps and expected result, and the Word register
 ```bash
 cd docs/test-register && npm install && ./build.sh
 ```
+
+### Automatic checks for new code
+
+`scripts/test-all.sh` runs both suites with coverage gates. It fails if a test fails, if a test
+has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (backend must stay at
+100% of lines; frontend thresholds are in `frontend/vitest.config.js`). It runs automatically:
+
+- **On every push / pull request** — `.github/workflows/tests.yml` also builds the Word register and
+  uploads it as the `unit-test-cases` artifact.
+- **On every commit that touches code or tests** — enable once per clone:
+  `git config core.hooksPath .githooks`
+- **In Claude Code** — `.claude/settings.json` re-runs it after any edit to a backend or frontend source file.
+
+When you add a function, add a test with the next free case ID in the matching `test/test_be_*.py`
+or `frontend/src/__tests__/*.test.jsx`, then run `scripts/test-all.sh --register` to refresh the register.
 
 ## Authentication
 
@@ -120,3 +190,65 @@ Supabase directly. The backend serves app data (event requests, coordinator
 assignment) via the Supabase service-role key. `frontend/src/api.js` is a helper
 that forwards the signed-in user's Supabase JWT as a `Bearer` token for when those
 routes need to verify the caller.
+
+## Sprint 2 — attendee registration and notifications (38.1, 38.2, 48.1)
+
+Apply `backend/sql/sprint2_registration_notifications.sql` in the Supabase SQL
+Editor **before restarting the backend and frontend with these changes**. The
+migration is transactional and rerunnable. It adds registrations, notifications,
+restricted RPCs, and notification triggers to the existing event and booking
+tables. It does not backfill alerts for historical changes. No live database
+migration is performed by the automated tests.
+
+- **Attendee:** Browse events → Register, or My registered events. Refresh events
+  loads current details. Cancelled events remain in the registration list.
+- **All signed-in users:** Notifications in the top-right corner. The inbox
+  refreshes every 30 seconds and supports manual refresh and Mark as read.
+  View record opens the associated event or booking details; the link works
+  after a page reload and rechecks current permissions.
+- Registration requires the Attendee role, a Confirmed event, and a future
+  start time in Asia/Singapore. NULL capacity means unlimited; zero means full.
+  A transaction locks the event row to serialize registrations and checks
+  capacity and duplicate registration before inserting the attendee and timestamp.
+- Event submission alerts its assigned coordinator, or the coordinator queue
+  when unassigned. Assignment alerts the new assignee. Approval/rejection alerts
+  the organiser. Venue/equipment requests alert the assigned reviewer or relevant
+  staff queue; decisions alert the requester.
+- Confirmed event date/time or approved venue changes alert registered attendees
+  and responsible staff. Cancellation also alerts the organiser. Responsible
+  staff are the event coordinator, venue reviewers, and the technical-support
+  queue when an active equipment request exists. Equipment currently uses a
+  shared staff queue; its existing workflow does not have individual assignments.
+- Alerts are generated in the same database transaction as the triggering change.
+  Equipment request creation now saves its header and items in one RPC so an
+  item-save failure also rolls back the alert. Unchanged saves produce no alerts;
+  recipient IDs are deduplicated per write. The authenticated backend forwards
+  the verified actor ID so that person is excluded.
+- Existing event/booking screens retain their current edit and decision workflows.
+  The triggers also support future equipment Approved/Rejected transitions; this
+  change does not add a separate equipment approval screen.
+- Browser database access to the new tables and RPCs is revoked. The backend
+  checks identity, role, notification ownership, and access to linked records.
+  Attendee withdrawal, waitlists, email, and push notifications remain out of scope.
+
+Verification:
+
+```bash
+backend/.venv/bin/python -m pytest
+cd frontend
+npm test
+npm run build
+```
+
+An isolated PostgreSQL integration suite also validates the migration, registration
+invariants, recipient matrix, rollback, and database permissions:
+
+```bash
+npm install --prefix /tmp/sprint2-sql-test @electric-sql/pglite
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/sprint2_sql.mjs
+```
+
+After applying the migration, verify with Attendee, Event Organiser, Event
+Coordinator, Venue Staff, and Technical Support Staff accounts. Register for a
+future Confirmed event; try a duplicate and a full event; change its venue/time
+or cancel it; check recipient inboxes, record links, and read status after refresh.

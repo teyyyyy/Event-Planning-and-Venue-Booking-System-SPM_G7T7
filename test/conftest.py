@@ -7,11 +7,21 @@ from pathlib import Path
 
 import pytest
 
+os.environ.setdefault("REQUIRE_MFA", "false")  # auth tests switch it on explicitly
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 _RESULTS = []
+
+
+def pytest_collection_modifyitems(items):
+    """New test_*.py tests must carry @tc(...) so they appear in the Word register.
+    The older *_test.py acceptance files predate the register and are exempt."""
+    missing = [i.nodeid for i in items if Path(str(i.fspath)).name.startswith("test_") and not hasattr(getattr(i, "function", None), "tc_meta")]
+    if missing:
+        raise pytest.UsageError("Tests missing @tc(...) documentation:\n  " + "\n  ".join(missing))
 
 
 @pytest.hookimpl(hookwrapper=True)
