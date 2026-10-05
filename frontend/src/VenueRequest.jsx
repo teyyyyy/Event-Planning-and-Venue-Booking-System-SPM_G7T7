@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
+import VenueCalendar from "./components/VenueCalendar";
 import { authenticatedFetch as fetch } from './api';
-
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {
@@ -349,6 +349,15 @@ export default function VenueRequest({ user }) {
       <div className="equipment-sub-tabs">
         <button
           type="button"
+          className={activeTab === "calendar" ? "active" : ""}
+          onClick={() => {
+            setActiveTab("calendar");
+          }}
+        >
+          Venue Calendar
+        </button>
+        <button
+          type="button"
           className={activeTab === "request" ? "active" : ""}
           onClick={() => {
             setSelectedVenueId(null);
@@ -370,6 +379,18 @@ export default function VenueRequest({ user }) {
       </div>
 
       {pageError && <div className="page-error">{pageError}</div>}
+
+      {activeTab === "calendar" && (
+        <div className="request-form" style={{ marginTop: "24px" }}>
+          <div className="form-heading">
+            <div>
+              <h2>Venue Availability Calendar</h2>
+              <p>Select a venue to view confirmed and pending bookings.</p>
+            </div>
+          </div>
+          <VenueCalendar venues={venues} events={events} apiBaseUrl={API} />
+        </div>
+      )}
 
       {activeTab === "request" && (
         <form className="request-form" onSubmit={submitRequest}>

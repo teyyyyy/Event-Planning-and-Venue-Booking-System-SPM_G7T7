@@ -10,9 +10,9 @@ import EquipmentUpdate from "./EquipmentUpdate";
 import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
 import VenueRequest from "./VenueRequest";
+import VenueStaffCalendar from "./VenueStaffCalendar";
 import VenueCatalogue from "./VenueCatalogue";
 import EquipmentReservation from "./EquipmentReservation";
-
 import AttendeeWorkspace from "./AttendeeWorkspace";
 import Notifications from "./Notifications";
 
@@ -50,6 +50,7 @@ function AuthedApp() {
 
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
+
   const [activeSection, setActiveSection] = useState("catalogue");
 
   return (
@@ -58,7 +59,7 @@ function VenueStaffWorkspace({ logout, email }) {
         <div>
           <div className="logo">G</div>
           <div className="side-label">VENUE STAFF</div>
-          <nav className="coordinator-side-nav" aria-label="Venue Staff navigation">
+        <nav className="coordinator-side-nav" aria-label="Venue Staff navigation">
             <button
               type="button"
               className={`coordinator-nav-button ${activeSection === "catalogue" ? "active" : ""}`}
@@ -66,6 +67,7 @@ function VenueStaffWorkspace({ logout, email }) {
             >
               Venue Catalogue
             </button>
+            
             <button
               type="button"
               className={`coordinator-nav-button ${activeSection === "approvals" ? "active" : ""}`}
@@ -73,17 +75,39 @@ function VenueStaffWorkspace({ logout, email }) {
             >
               Booking Approvals
             </button>
+
+            <button
+              type="button"
+              className={`coordinator-nav-button ${activeSection === "venue-calendar" ? "active" : ""}`}
+              onClick={() => setActiveSection("venue-calendar")}
+            >
+              Venue Availability Calendar
+            </button>
           </nav>
         </div>
-        <div className="coordinator-side-footer"><SecurityButton /><button className="coordinator-logout" onClick={logout} title={email}>Log out</button></div>
+        
+        <div className="coordinator-side-footer">
+          <SecurityButton />
+          <button className="coordinator-logout" onClick={logout} title={email}>
+            Log out
+          </button>
+        </div>
       </aside>
 
       <div className="coordinator-main">
-        {activeSection === "catalogue" ? (
+        {activeSection === "catalogue" && (
           <VenueCatalogue canEdit />
-        ) : (
+        )}
+        
+        {activeSection === "approvals" && (
           <div className="embedded-existing-page">
             <VenueApproval />
+          </div>
+        )}
+
+        {activeSection === "venue-calendar" && (
+          <div className="embedded-existing-page">
+            <VenueStaffCalendar />
           </div>
         )}
       </div>

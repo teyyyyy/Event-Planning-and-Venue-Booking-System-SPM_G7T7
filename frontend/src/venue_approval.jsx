@@ -98,7 +98,6 @@ export default function VenueApproval() {
   const selected = bookings.find((item) => item.request_id === selectedId);
 
   return <main className="shell">
-    <aside><div className="logo">G</div><div className="side-label">VENUE APPROVAL</div></aside>
     <section className="content">
       <header><div><p className="kicker">Gather / Venue desk</p><h1>Venue booking requests</h1></div></header>
       {message && <p className="message" role="status">{message}</p>}

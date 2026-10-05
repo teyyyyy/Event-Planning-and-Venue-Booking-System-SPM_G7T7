@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from supabase import Client
 from database import create_client
-from auth import require_coordinator, require_coordinator_path
+from auth import require_coordinator_or_staff, require_coordinator_path
 import os
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL')
@@ -38,7 +38,7 @@ def get_supabase() -> Client:
 
 # --- Endpoints ---
 
-@router.get("/api/venues", dependencies=[Depends(require_coordinator)])
+@router.get("/api/venues", dependencies=[Depends(require_coordinator_or_staff)])
 def get_all_venues():
     """Fetches the complete venue catalogue."""
     supabase = get_supabase()
@@ -46,7 +46,7 @@ def get_all_venues():
     return response.data
 
 @router.post("/api/venue-bookings")
-def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coordinator)):
+def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coordinator_or_staff)):
     """Submits a new venue booking request."""
     supabase = get_supabase()
     if str(booking.coordinator_id) != str(user["id"]):
@@ -75,13 +75,22 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/api/venue-booking-requests/venues/{venue_id}", dependencies=[Depends(require_coordinator)])
-def list_requests_by_venue(venue_id: int):
+@router.get("/api/venue-booking-requests/venues/{venue_id}", dependencies=[Depends(require_coordinator_or_staff)])
+def list_requests_by_venue(venue_id: int, include_pending: bool = False):
     client = get_supabase()
-    bookings = (
-        client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(start_datetime, end_datetime)').eq("venue_id", venue_id).eq("status", 'Approved').execute().data or []
-    )
-    return bookings
+    try:
+        query = client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(*)').eq("venue_id", venue_id)
+        
+        if include_pending:
+            query = query.in_("status", ["Approved", "Pending"])
+        else:
+            query = query.eq("status", "Approved")
+        
+        response = query.execute()
+        return response.data
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/venue-booking-requests/coordinators/{coordinator_id}", dependencies=[Depends(require_coordinator_path)])
 def list_requests_by_coordinator(coordinator_id: str):

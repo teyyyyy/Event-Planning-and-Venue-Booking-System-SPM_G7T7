@@ -1,0 +1,46 @@
+import React, { useState, useEffect } from "react";
+import VenueCalendar from "./components/VenueCalendar";
+import { request } from "./api";
+
+const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
+
+export default function VenueStaffCalendarView() {
+  const [venues, setVenues] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function fetchCalendarData() {
+      try {
+        // request() directly returns the parsed JSON data
+        const venuesData = await request(`/venues`);
+        setVenues(venuesData);
+      } catch (error) {
+        console.error("Failed to fetch calendar data:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchCalendarData();
+  }, []);
+
+  if (loading) {
+    return <div className="empty">Loading calendar data...</div>;
+  }
+
+  return (
+    <main className="shell">
+      <section className="content">
+        <header>
+          <div>
+            <p className="kicker">Gather / Venue desk</p>
+            <h1>Venue Availability Calendar</h1>
+          </div>
+        </header>
+        <div className="request-form">
+          <VenueCalendar venues={venues} apiBaseUrl={API} />
+        </div>
+      </section>
+    </main>
+  );
+}

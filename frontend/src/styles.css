@@ -245,3 +245,36 @@
 .change-reopened{margin:8px 0 0;color:#8a6225;font-size:12px}
 .pill.status-pending,.request-status-pending{background:#fff4dc;color:#8a6225}
 .pill.status-superseded,.request-status-superseded{background:#eef0f3;color:#7b8494}
+
+/* Calendar View Specifics */
+.calendar-table {
+  min-width: 0 !important;
+  table-layout: fixed !important;
+}
+
+/* Reset all inherited column widths */
+.calendar-table th, 
+.calendar-table td {
+  border-left: 1px solid #edf0f5;
+  border-right: 1px solid #edf0f5;
+  word-wrap: break-word;
+  white-space: normal;
+  min-width: 0 !important;
+  max-width: none !important;
+  width: auto !important; /* Overrides the 320px Thursday rule */
+}
+
+/* Lock the Time column strictly to 60px */
+.calendar-table th:first-child, 
+.calendar-table td:first-child {
+  width: 60px !important;
+  min-width: 60px !important;
+}
+
+.calendar-table td {
+  padding: 4px !important;
+}
+
+.calendar-table tr:hover td {
+  background-color: #fafcff;
+}
