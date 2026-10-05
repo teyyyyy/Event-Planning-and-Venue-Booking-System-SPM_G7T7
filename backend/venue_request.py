@@ -66,12 +66,21 @@ def create_venue_booking(booking: VenueBookingCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/venue-booking-requests/venues/{venue_id}")
-def list_requests_by_venue(venue_id: int):
+def list_requests_by_venue(venue_id: int, include_pending: bool = False):
     client = get_supabase()
-    bookings = (
-        client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(start_datetime, end_datetime)').eq("venue_id", venue_id).eq("status", 'Approved').execute().data or []
-    )
-    return bookings
+    try:
+        query = client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(*)').eq("venue_id", venue_id)
+        
+        if include_pending:
+            query = query.in_("status", ["Approved", "Pending"])
+        else:
+            query = query.eq("status", "Approved")
+        
+        response = query.execute()
+        return response.data
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/venue-booking-requests/coordinators/{coordinator_id}")
 def list_requests_by_coordinator(coordinator_id: str):

@@ -176,3 +176,36 @@
 .availability-catalogue-table th:not(:first-child),.availability-catalogue-table td:not(:first-child){text-align:center;}
 .availability-event-table th:last-child,.availability-event-table td:last-child{text-align:right;white-space:nowrap;}
 @media(max-width:900px){.availability-overview{align-items:flex-start;flex-direction:column;}.availability-event-table,.availability-detail-table,.availability-catalogue-table{min-width:850px;}}
+
+/* Calendar View Specifics */
+.calendar-table {
+  min-width: 0 !important;
+  table-layout: fixed !important;
+}
+
+/* Reset all inherited column widths */
+.calendar-table th, 
+.calendar-table td {
+  border-left: 1px solid #edf0f5;
+  border-right: 1px solid #edf0f5;
+  word-wrap: break-word;
+  white-space: normal;
+  min-width: 0 !important;
+  max-width: none !important;
+  width: auto !important; /* Overrides the 320px Thursday rule */
+}
+
+/* Lock the Time column strictly to 60px */
+.calendar-table th:first-child, 
+.calendar-table td:first-child {
+  width: 60px !important;
+  min-width: 60px !important;
+}
+
+.calendar-table td {
+  padding: 4px !important;
+}
+
+.calendar-table tr:hover td {
+  background-color: #fafcff;
+}
