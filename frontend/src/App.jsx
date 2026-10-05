@@ -7,7 +7,7 @@ import EquipmentRequest from "./EquipmentRequest";
 import EquipmentUpdate from "./EquipmentUpdate";
 import EquipmentAvailability from "./EquipmentAvailability";
 import VenueApproval from "./venue_approval";
-import VenueRequest from "./venueRequest";
+import VenueRequest from "./VenueRequest";
 
 function AuthedApp() {
   const { user, logout } = useAuth();

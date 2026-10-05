@@ -71,6 +71,8 @@
 .remove-equipment{margin-top:12px;padding:0;border:0;border-bottom:1px solid #f19c83;background:transparent;color:#b76f5a;font:12px 'DM Sans',sans-serif;cursor:pointer;}
 
 /* --- Equipment Request View --- */
+.request-table tr.hoverable-row {transition: background-color 0.2s ease;}
+.request-table tr.hoverable-row:hover td {background-color: #fafcff; }
 .request-table-wrapper{width:100%;overflow-x:auto;overflow-y:hidden;margin-top:18px;border:1px solid #dfe5ee;border-radius:8px;background:#fff;-webkit-overflow-scrolling:touch;}
 .request-table{width:100%;min-width:1400px;table-layout:auto;border-collapse:collapse;text-align:left;}
 .request-table th{color:#8390a3;background:#f8faff;font-size:11px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;vertical-align:middle;}

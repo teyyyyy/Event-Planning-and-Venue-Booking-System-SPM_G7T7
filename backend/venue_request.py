@@ -27,8 +27,7 @@ class VenueBookingCreate(BaseModel):
     event_id: int
     venue_id: int
     coordinator_id: str
-    start_datetime: datetime
-    end_datetime: datetime
+
 
 # --- Helper Function ---
 
@@ -53,8 +52,6 @@ def create_venue_booking(booking: VenueBookingCreate):
         "event_id": booking.event_id,
         "venue_id": booking.venue_id,
         "coordinator_id": booking.coordinator_id,
-        "start_datetime": booking.start_datetime.isoformat(),
-        "end_datetime": booking.end_datetime.isoformat(),
         "status": "Pending" 
     }
     
@@ -72,7 +69,7 @@ def create_venue_booking(booking: VenueBookingCreate):
 def list_requests_by_venue(venue_id: int):
     client = get_supabase()
     bookings = (
-        client.table(BOOKING_TABLE).select("*").eq("venue_id", venue_id).eq("status", 'Approved').execute().data or []
+        client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(start_datetime, end_datetime)').eq("venue_id", venue_id).eq("status", 'Approved').execute().data or []
     )
     return bookings
 
@@ -80,6 +77,10 @@ def list_requests_by_venue(venue_id: int):
 def list_requests_by_coordinator(coordinator_id: str):
     client = get_supabase()
     bookings = (
-        client.table(BOOKING_TABLE).select("*").eq("coordinator_id", coordinator_id).execute().data or []
+        client.table(BOOKING_TABLE)
+        .select(f'*, "{EVENTS_TABLE}"(layout_required, facilities_required, accessibility_required, start_datetime, end_datetime)')
+        .eq("coordinator_id", coordinator_id)
+        .execute()
+        .data or []
     )
     return bookings
