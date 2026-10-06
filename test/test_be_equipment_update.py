@@ -302,3 +302,16 @@ def test_update_superseded_rejected(use_db):
     assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 3), item("PRJ", 1))) == (
         409, "Equipment request #7 was replaced by a newer request after an approved event change.")
     assert stored(client)["MIC"]["requested_quantity"] == 2
+
+
+@tc("BE-EQUPD-039", "update_event_equipment_requests / mark_reservation_for_recheck", "Technical support changes a request that already has reservations.",
+    "Reserved and Modified reservations of that request become Needs Recheck; Cancelled ones are left alone. Quantities on the reservation are not changed.",
+    pre="Request 7 has reservations 1 (Reserved), 2 (Modified) and 3 (Cancelled).", data="MIC 2 -> 4", steps="1. Call update_event_equipment_requests(\"t1\", 1, payload).", kind="State")
+def test_update_marks_reservations_for_recheck(use_db):
+    client = use_db(w(**{"Equipment Reservation": [
+        {"reservation_id": 1, "request_id": 7, "event_id": 1, "status": "Reserved"},
+        {"reservation_id": 2, "request_id": 7, "event_id": 1, "status": "Modified"},
+        {"reservation_id": 3, "request_id": 7, "event_id": 1, "status": "Cancelled"},
+    ]}), eu)
+    eu.update_event_equipment_requests("t1", 1, payload(item("MIC", 4, "wireless"), item("PRJ", 1)))
+    assert [r["status"] for r in client.tables["Equipment Reservation"]] == ["Needs Recheck", "Needs Recheck", "Cancelled"]

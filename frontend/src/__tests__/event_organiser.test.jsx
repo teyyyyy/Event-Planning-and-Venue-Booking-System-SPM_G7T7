@@ -7,6 +7,8 @@ import { json, mockFetch, callsTo } from '../test/helpers';
 import EventOrganiser from '../event_organiser';
 
 const row = (o = {}) => ({ id: 1, event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 50, description: 'd', start_time: '09:00:00', end_time: '17:00:00', status: 'Draft', ...o });
+// The form only accepts dates from today on, so edits that click the real submit button need a date that never expires.
+const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
 const field = (name) => document.querySelector(`[name=${name}]`);
 const form = () => document.querySelector('form.request-form');
 
@@ -176,7 +178,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-019', 'EventOrganiser (edit)', 'Organiser submits an edited Draft request.', 'PUT /requests/<id> saves the edited values, then POST /requests/<id>/submit submits the Draft.', { data: 'event_name = "Gala 2"', steps: '1. Click "Edit". 2. Change the name. 3. Click "Submit request".' },
     async () => {
       window.scrollTo = vi.fn();
-      const f = backend([row({ status: 'Draft', event_date: '2026-10-05', event_end_date: '2026-10-05' })], () => json({ id: 1 }));
+      const f = backend([row({ status: 'Draft', event_date: FUTURE, event_end_date: FUTURE })], () => json({ id: 1 }));
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.change(field('event_name'), { target: { value: 'Gala 2' } });
@@ -201,7 +203,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-031', 'EventOrganiser (edit)', 'Organiser saves changes to an existing Draft.', 'PUT /requests/<id> updates the Draft and a "Draft saved" dialog appears.', { steps: '1. Click "Edit". 2. Change the name. 3. Click "Save draft".' },
     async () => {
       window.scrollTo = vi.fn();
-      const f = backend([row({ status: 'Draft', event_date: '2026-10-05', event_end_date: '2026-10-05' })], () => json({ id: 1 }));
+      const f = backend([row({ status: 'Draft', event_date: FUTURE, event_end_date: FUTURE })], () => json({ id: 1 }));
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       fireEvent.change(field('event_name'), { target: { value: 'Gala 2' } });

@@ -6,7 +6,7 @@ PKS = {
     "Event Details": "id", "users": "id", "Equipment": "equipment_id",
     "Equipment Request": "request_id", "Venue Booking Requests": "request_id",
     "event_change_requests": "id", "notifications": "id",
-    "Equipment Reservation": "reservation_id",
+    "Equipment Reservation": "reservation_id", "Equipment Reservation Item": "reservation_item_id",
 }
 
 
@@ -25,6 +25,7 @@ class Query:
     def update(self, payload): self.op, self.payload = "update", payload; return self
     def delete(self): self.op = "delete"; return self
     def eq(self, key, value): self.filters.append(lambda r: r.get(key) == value); return self
+    def neq(self, key, value): self.filters.append(lambda r: r.get(key) != value); return self
     def in_(self, key, values): self.filters.append(lambda r: r.get(key) in values); return self
     def lt(self, key, value): self.filters.append(lambda r: r.get(key) is not None and r[key] < value); return self
     def gt(self, key, value): self.filters.append(lambda r: r.get(key) is not None and r[key] > value); return self

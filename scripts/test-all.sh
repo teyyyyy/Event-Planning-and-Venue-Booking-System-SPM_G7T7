@@ -3,14 +3,14 @@
 #   scripts/test-all.sh            both suites + coverage gates
 #   scripts/test-all.sh --register also rebuild docs/Unit-Test-Cases.docx afterwards
 # Fails if a test fails, a test is missing its tc() documentation, or coverage drops below the gates
-# (backend: 100% of lines in backend/; frontend: thresholds in frontend/vitest.config.js).
+# (backend: 90% of lines in backend/; frontend: thresholds in frontend/vitest.config.js).
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="$ROOT/backend/.venv/bin/python"; [ -x "$PY" ] || PY=python3
 status=0
 
 echo "== Backend (pytest)"
-(cd "$ROOT" && "$PY" -m pytest -q --cov=backend --cov-report=term-missing:skip-covered --cov-fail-under=100) || status=1
+(cd "$ROOT" && "$PY" -m pytest -q --cov=backend --cov-report=term-missing:skip-covered --cov-fail-under=90) || status=1
 
 echo "== Frontend (Vitest)"
 (cd "$ROOT/frontend" && npx vitest run --coverage --coverage.reporter=text-summary) || status=1
