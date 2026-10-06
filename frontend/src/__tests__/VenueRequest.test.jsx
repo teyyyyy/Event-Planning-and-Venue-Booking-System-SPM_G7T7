@@ -364,4 +364,21 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-030', 'VenueRequest', 'Loading the coordinator\'s submissions fails without a detail.', 'A page error "Unable to load submitted requests." is shown.', { kind: 'Negative', steps: '1. Return 500 for the submissions list.' },
     async () => { backend({ submitted: () => json({}, 500) }); await ready(); expect(screen.getByText('Unable to load submitted requests.')).toBeInTheDocument(); });
+
+  tc('FE-VREQ-031', 'VenueRequest (event details)', 'The coordinator selects an event that has no start or end time, picks a venue and submits.', 'The Event Details table renders with "—" as the timing; submitting shows an error that the event has no times, and neither the availability check nor the POST is sent.',
+    { kind: 'Edge', data: 'start_datetime = null, end_datetime = null', steps: '1. Select "Offsite". 2. Click "Select Venue" for Hall A. 3. Click "Submit Request".' },
+    async () => {
+      const f = backend({ events: [{ ...WORKSHOP, id: 3, event_name: 'Offsite', start_datetime: null, end_datetime: null }] });
+      await ready();
+      pickEvent(3);
+      const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
+      expect(within(row).getByText('Offsite')).toBeInTheDocument();
+      expect(within(row).getAllByRole('cell')[2]).toHaveTextContent(/^—$/);
+      await chooseVenue();
+      await waitFor(() => expect(submitBtn()).toBeEnabled());
+      fireEvent.click(submitBtn());
+      expect(await screen.findByText(/This event has no start or end time/)).toBeInTheDocument();
+      expect(callsTo(f, '/venue-booking-requests/venues/')).toHaveLength(0);
+      expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+    });
 });
