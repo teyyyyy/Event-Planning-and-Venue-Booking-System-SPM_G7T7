@@ -162,6 +162,7 @@ has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (ba
 
 When you add a function, add a test with the next free case ID in the matching `test/test_be_*.py`
 or `frontend/src/__tests__/*.test.jsx`, then run `scripts/test-all.sh --register` to refresh the register.
+**[docs/TESTING.md](docs/TESTING.md)** is the step-by-step guide, with templates for both suites.
 
 ### Keeping CI green
 

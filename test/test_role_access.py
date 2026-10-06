@@ -46,6 +46,7 @@ ROLE_PATHS = {
         "/api/equipment",
         "/api/venues",
         "/api/venue-booking-requests/venues/1",
+        "/api/venue-booking-requests/coordinators/{user_id}",
         "/api/venue-catalogue",
     ),
     "Venue Staff": (
@@ -255,7 +256,7 @@ def test_event_organiser_access(monkeypatch):
     assert_role_access(client, "Event Organiser", user_id)
 
 
-@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, change history, change-request processing, equipment, venue-planning and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, change history, change-request processing, equipment, venue-planning (including the coordinator's own venue booking submissions) and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
 def test_event_coordinator_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Event Coordinator")
     assert_role_access(client, "Event Coordinator", user_id)
@@ -310,3 +311,17 @@ def test_other_roles_cannot_use_reservation_routes(monkeypatch):
             assert (response.status_code, response.json()["detail"]) == (403, "Technical support access required."), f"{role} {method} {path_template}"
         assert not [name for name, _, _ in fake.log if name.startswith("Equipment Reservation")]
         assert fake.tables["Equipment Reservation"][0]["status"] == "Reserved"
+
+
+@tc("BE-ROLE-008", "Role access matrix", "coordinator-1 requests coordinator-2's venue booking submissions.",
+    "HTTP 403 \"You can only access your own coordinator requests.\"; the Venue Booking Requests table is not read.",
+    pre="coordinator-1 and coordinator-2 are Event Coordinators; coordinator-2 has a Pending venue booking request.",
+    data="path coordinator_id = coordinator-2",
+    steps="1. Authenticate as coordinator-1. 2. GET /api/venue-booking-requests/coordinators/coordinator-2.", kind="Security")
+def test_coordinator_cannot_list_another_coordinators_venue_requests(monkeypatch):
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    fake = vr.get_supabase()
+    fake.tables["Venue Booking Requests"].append({"request_id": 2, "venue_id": 1, "event_id": 1, "coordinator_id": "coordinator-2", "status": "Pending"})
+    response = client.get("/api/venue-booking-requests/coordinators/coordinator-2")
+    assert (response.status_code, response.json()["detail"]) == (403, "You can only access your own coordinator requests.")
+    assert not [name for name, _, _ in fake.log if name == "Venue Booking Requests"]
