@@ -10,6 +10,7 @@ from postgrest.exceptions import APIError
 import coordinator_assignment as ca
 import equipment_availability as ea
 import equipment_request as er
+import equipment_reservation as rs
 import equipment_update as eu
 import event_changes as ec
 import event_organiser as eo
@@ -57,16 +58,19 @@ ROLE_PATHS = {
     "Technical Support Staff": (
         "/api/equipment-update/{user_id}/requests/summary",
         "/api/equipment-availability/{user_id}/events",
+        "/api/equipment-reservation/{user_id}/reservations",
+        "/api/equipment-reservation/{user_id}/events/1",
         "/api/venue-catalogue",
         "/api/events/1/change-log",
     ),
     "Attendee": ("/api/attendee/events", "/api/attendee/registrations"),
 }
 
-ROLE_ACTIONS = {
-    "Attendee": ("POST", "/api/attendee/events/1/register", None, {201}),
-    "Event Organiser": (
-        "POST", "/api/event-organisers/{user_id}/requests",
+# (owner, method, path, body, statuses the owner may get); every other role must get 403.
+ROLE_ACTIONS = (
+    ("Attendee", "POST", "/api/attendee/events/1/register", None, {201}),
+    (
+        "Event Organiser", "POST", "/api/event-organisers/{user_id}/requests",
         {
             "event_name": "Role access test",
             "event_type": "Workshop",
@@ -78,16 +82,22 @@ ROLE_ACTIONS = {
         },
         {200},
     ),
-    "Event Coordinator": (
-        "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200},
-    ),
-    "Venue Staff": (
-        "POST", "/api/venue-booking-requests/1/approve", None, {200},
-    ),
-    "Technical Support Staff": (
-        "PUT", "/api/equipment-update/{user_id}/events/1/requests", {"requests": []}, {400},
-    ),
-}
+    ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
+    ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
+    ("Technical Support Staff", "PUT", "/api/equipment-update/{user_id}/events/1/requests", {"requests": []}, {400}),
+    # Reach the handler without writing: request 2 is not event 1's request, reservation 999 does not exist.
+    ("Technical Support Staff", "POST", "/api/equipment-reservation/{user_id}", {"event_id": 1, "request_id": 2}, {400}),
+    ("Technical Support Staff", "PUT", "/api/equipment-reservation/{user_id}/999", {"items": [{"equipment_id": "MIC", "reserved_quantity": 1}]}, {404}),
+    ("Technical Support Staff", "DELETE", "/api/equipment-reservation/{user_id}/999", None, {404}),
+)
+
+RESERVATION_ROUTES = (
+    ("GET", "/api/equipment-reservation/{staff_id}/reservations", None),
+    ("GET", "/api/equipment-reservation/{staff_id}/events/1", None),
+    ("POST", "/api/equipment-reservation/{staff_id}", {"event_id": 1, "request_id": 1}),
+    ("PUT", "/api/equipment-reservation/{staff_id}/1", {"items": [{"equipment_id": "MIC", "reserved_quantity": 1}]}),
+    ("DELETE", "/api/equipment-reservation/{staff_id}/1", None),
+)
 
 ALL_ROLE_PATHS = tuple(dict.fromkeys(path for paths in ROLE_PATHS.values() for path in paths))
 
@@ -119,6 +129,8 @@ def client_for_role(monkeypatch, role):
         }],
         "Venues": [{"venue_id": 1, "name": "Hall A"}],
         "Equipment Request": [{"request_id": 1, "event_id": 1, "status": "Submitted", "created_by": USER_IDS["Event Coordinator"]}],
+        "Equipment Request Item": [{"request_id": 1, "equipment_id": "MIC", "requested_quantity": 1, "technical_requirements": ""}],
+        "Equipment": [{"equipment_id": "MIC", "equipment_name": "Microphone", "total_quantity": 5, "under_maintenance_count": 0}],
         "event_change_log": [{"id": 1, "event_id": 1, "change_type": "Significant", "changed_by": USER_IDS["Event Coordinator"]}],
         "event_change_requests": [{
             "id": 1, "event_id": 1, "organiser_id": USER_IDS["Event Organiser"],
@@ -132,7 +144,7 @@ def client_for_role(monkeypatch, role):
         }],
     })
     for module, attribute in (
-        (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"),
+        (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"), (rs, "db"),
         (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"),
     ):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
@@ -190,7 +202,7 @@ def assert_role_access(client, role, user_id):
     assert client.get(f"/api/event-organisers/{user_id}-other/submitted-requests").status_code == 403
     assert client.get(f"/api/event-coordinators/{user_id}-other/events").status_code == 403
 
-    for owner, (method, path_template, body, allowed_statuses) in ROLE_ACTIONS.items():
+    for owner, method, path_template, body, allowed_statuses in ROLE_ACTIONS:
         path = path_template.format(user_id=user_id)
         response = client.request(method, path, json=body)
         if role == owner:
@@ -269,7 +281,7 @@ def test_venue_staff_access(monkeypatch):
     assert_role_access(client, "Venue Staff", user_id)
 
 
-@tc("BE-ROLE-004", "Role access matrix", "A Technical Support Staff member requests permitted and restricted route families.", "Equipment update, availability, venue catalogue reads, change history for events with equipment requests and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Technical Support Staff. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-004", "Role access matrix", "A Technical Support Staff member requests permitted and restricted route families.", "Equipment update, availability, equipment reservation (list, view, create, update, cancel), venue catalogue reads, change history for events with equipment requests and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Technical Support Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_technical_support_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Technical Support Staff")
     assert_role_access(client, "Technical Support Staff", user_id)
@@ -281,3 +293,20 @@ def test_attendee_access(monkeypatch):
     profile = {"id": user_id, "role": "Attendee"}
     assert require_attendee(profile) is profile
     assert_role_access(client, "Attendee", user_id)
+
+
+@tc("BE-ROLE-007", "Role access matrix", "Each non-Technical Support role calls every equipment reservation route with a Technical Support staff member's id in the path.",
+    "HTTP 403 \"Technical support access required.\" for list, view, create, update and cancel; no reservation table is read or written.",
+    pre="technical-staff-1 is Technical Support Staff; reservation 1 for event 1 is Reserved.", data="path staff_id = technical-staff-1",
+    steps="1. Authenticate as each of the other four roles. 2. Call each reservation route for technical-staff-1.", kind="Security")
+def test_other_roles_cannot_use_reservation_routes(monkeypatch):
+    staff_id = USER_IDS["Technical Support Staff"]
+    for role in USER_IDS.keys() - {"Technical Support Staff"}:
+        client, _ = client_for_role(monkeypatch, role)
+        fake = rs.db()
+        fake.tables["Equipment Reservation"] = [{"reservation_id": 1, "event_id": 1, "request_id": 1, "status": "Reserved"}]
+        for method, path_template, body in RESERVATION_ROUTES:
+            response = client.request(method, path_template.format(staff_id=staff_id), json=body)
+            assert (response.status_code, response.json()["detail"]) == (403, "Technical support access required."), f"{role} {method} {path_template}"
+        assert not [name for name, _, _ in fake.log if name.startswith("Equipment Reservation")]
+        assert fake.tables["Equipment Reservation"][0]["status"] == "Reserved"

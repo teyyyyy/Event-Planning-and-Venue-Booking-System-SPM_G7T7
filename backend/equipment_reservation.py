@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client
 
 import os
+from auth import require_technical_support_path
 from database import create_client
 
 def db() -> Client:
@@ -14,7 +15,8 @@ def db() -> Client:
 
 router = APIRouter(
     prefix="/api/equipment-reservation",
-    tags=["Equipment Reservation"]
+    tags=["Equipment Reservation"],
+    dependencies=[Depends(require_technical_support_path)]
 )
 
 USER_TABLE = "users"
