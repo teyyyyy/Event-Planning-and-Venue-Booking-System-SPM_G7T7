@@ -121,7 +121,7 @@ describe('VenueApproval', () => {
       expect(JSON.parse(options.body)).toEqual({ reason: 'Double booked', alternative_venue: 'Hall B' });
     });
 
-  tc('FE-VENUE-014', 'VenueApproval (decide)', 'The decision fails (e.g. already decided by someone else).', 'The error message is displayed and stays on screen while the list is reloaded.', { kind: 'Negative', data: '409 "This request was just decided by someone else."', steps: '1. Reject the decision call. 2. Click "Approve".', kind: 'Regression' },
+  tc('FE-VENUE-014', 'VenueApproval (decide)', 'The decision fails (e.g. already decided by someone else).', 'The error message is displayed and stays on screen while the list is reloaded.', { data: '409 "This request was just decided by someone else."', steps: '1. Reject the decision call. 2. Click "Approve".', kind: 'Regression' },
     async () => {
       request.mockResolvedValueOnce([booking()]).mockRejectedValueOnce(new Error('This request was just decided by someone else.')).mockResolvedValueOnce([booking({ status: 'Approved' })]);
       render(<VenueApproval />);
