@@ -4,6 +4,9 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
 
+const getSession = vi.hoisted(() => vi.fn(async () => ({ data: { session: { access_token: 'tok-1' } } })));
+vi.mock('../utils/supabase', () => ({ supabase: { auth: { getSession } } }));
+
 import EquipmentReservation from '../EquipmentReservation';
 
 const USER = { id: 't1' };
@@ -335,5 +338,38 @@ describe('EquipmentReservation (existing reservation)', () => {
       await openEvent();
       fireEvent.click(confirmBtn());
       expect(await screen.findByText('Equipment reservation saved successfully.')).toBeInTheDocument();
+    });
+});
+
+describe('EquipmentReservation (authentication)', () => {
+  tc('FE-EQRES-019', 'EquipmentReservation (authentication)', 'Signed-in technical support lists reservations, updates and cancels one, then reserves an event.',
+    'Every request (list, event details, PUT, DELETE and POST) carries "Authorization: Bearer <access token>"; PUT and POST still send a JSON content type.',
+    { kind: 'Security', pre: 'A Supabase session with access_token tok-1 exists.',
+      steps: '1. Open the list. 2. Open the existing reservation, confirm changes, then cancel it. 3. Open the event as a new reservation and confirm.' },
+    async () => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+      const f = backend({ detail: [existing(), existing(), fresh(), existing()], write: () => json({}) });
+      const list = render(<EquipmentReservation user={USER} />);
+      await screen.findByText('Reservation #50');
+      list.unmount();
+
+      const onBack = vi.fn();
+      const manage = render(<EquipmentReservation user={USER} eventId={1} onBack={onBack} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Confirm Reservation Changes' }));
+      await waitFor(() => expect(callsTo(f, '/events/1')).toHaveLength(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel Reservation' }));
+      await waitFor(() => expect(onBack).toHaveBeenCalled());
+      manage.unmount();
+
+      render(<EquipmentReservation user={USER} eventId={1} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Confirm Reservation' }));
+      await waitFor(() => expect(callsTo(f, '/events/1')).toHaveLength(4));
+
+      expect(f.mock.calls.map(([url, o]) => `${o.method || 'GET'} ${url.replace(/^.*equipment-reservation/, '')}`)).toEqual([
+        'GET /t1/reservations', 'GET /t1/events/1', 'PUT /t1/50', 'GET /t1/events/1', 'DELETE /t1/50', 'GET /t1/events/1', 'POST /t1', 'GET /t1/events/1',
+      ]);
+      f.mock.calls.forEach(([, options]) => expect(options.headers.Authorization).toBe('Bearer tok-1'));
+      ['PUT', 'POST'].forEach((method) => expect(callsTo(f, '/t1', method)[0][1].headers['Content-Type']).toBe('application/json'));
+      confirm.mockRestore();
     });
 });

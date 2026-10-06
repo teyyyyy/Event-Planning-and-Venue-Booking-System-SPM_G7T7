@@ -1,9 +1,12 @@
 """Unit tests for backend/equipment_reservation.py (Technical Support reserves equipment for events)."""
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import equipment_reservation as rs
+import main
+from auth import current_user
 from eq_world import EVENT, err, world
 from tc import tc
 
@@ -398,3 +401,60 @@ def test_cancel_closed(use_db):
 def test_cancel_update_fails(use_db):
     use_db(booked(), rs).empty_updates = True
     assert err(rs.cancel_reservation, "t1", 50) == (500, "Equipment reservation could not be cancelled.")
+
+
+# ---- HTTP authorisation ----------------------------------------------------------------
+
+http = TestClient(main.app)
+# Ordered so that the final create runs after the existing reservation has been cancelled.
+ROUTES = (
+    ("GET", "/api/equipment-reservation/t1/reservations", None),
+    ("GET", "/api/equipment-reservation/t1/events/1", None),
+    ("PUT", "/api/equipment-reservation/t1/50", {"items": [{"equipment_id": "MIC", "reserved_quantity": 1}]}),
+    ("DELETE", "/api/equipment-reservation/t1/50", None),
+    ("POST", "/api/equipment-reservation/t1", {"event_id": 1, "request_id": 7}),
+)
+
+
+def call_routes(headers=None):
+    return [http.request(method, path, json=body, headers=headers) for method, path, body in ROUTES]
+
+
+def sign_in(monkeypatch, user):
+    monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: user)
+
+
+@tc("BE-EQRES-037", "Equipment reservation routes", "A caller without a bearer token targets Technical Support staff t1 on every route.",
+    "HTTP 401 for list, view, update, cancel and create; the database is never queried and reservation 50 stays Reserved.",
+    pre="Reservation 50 for event 1; t1 is Technical Support Staff.", data="no Authorization header; Authorization = \"Basic t1\"",
+    steps="1. Call each route for t1 without a token. 2. Repeat with a Basic-scheme header.", kind="Security")
+def test_http_requires_token(use_db):
+    client = use_db(booked(), rs)
+    for headers in (None, {"Authorization": "Basic t1"}):
+        assert [r.status_code for r in call_routes(headers)] == [401] * 5
+    assert client.log == [] and client.tables["Equipment Reservation"][0]["status"] == "Reserved"
+
+
+@tc("BE-EQRES-038", "Equipment reservation routes", "A signed-in Technical Support staff member puts another staff member's id in the path.",
+    "HTTP 403 \"You can only access your own technical support workspace.\" on every route; the database is never queried.",
+    pre="Signed in as t2 (Technical Support Staff); reservation 50 for event 1.", data="path staff_id = t1",
+    steps="1. Sign in as t2. 2. Call each route for t1.", kind="Security")
+def test_http_rejects_other_staff_id(monkeypatch, use_db):
+    client = use_db(booked(), rs)
+    sign_in(monkeypatch, {"id": "t2", "name": "Tia", "role": "Technical Support Staff", "email": "t2@x"})
+    assert {(r.status_code, r.json()["detail"]) for r in call_routes()} == {(403, "You can only access your own technical support workspace.")}
+    assert client.log == []
+
+
+@tc("BE-EQRES-039", "Equipment reservation routes", "A signed-in Technical Support staff member uses their own id in the path.",
+    "Every route runs: the list and event view load, the update and cancel succeed, and the new reservation is recorded as reserved by the signed-in user.",
+    pre="Signed in as t1; reservation 50 for event 1 holds MIC x2 and PRJ x1.", data="MIC x1",
+    steps="1. Sign in as t1. 2. List, view, update and cancel reservation 50. 3. Reserve event 1 again.", kind="Security")
+def test_http_own_staff_id(monkeypatch, use_db):
+    client = use_db(booked(), rs)
+    sign_in(monkeypatch, {"id": "t1", "name": "Tom", "role": "Technical Support Staff", "email": "t@x"})
+    listed, viewed, updated, cancelled, created = call_routes()
+    assert [r.status_code for r in (listed, viewed, updated, cancelled, created)] == [200] * 5
+    assert (listed.json()[0]["reservation_id"], viewed.json()["mode"]) == (50, "existing")
+    assert (updated.json()["status"], cancelled.json()["status"]) == ("Modified", "Cancelled")
+    assert created.json()["reserved_by"] == client.tables["Equipment Reservation"][-1]["reserved_by"] == "t1"
