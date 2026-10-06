@@ -65,8 +65,8 @@ For each function, component or route, cover the cases that apply. Each one beco
 | `Performance` | caching or call counts matter. |
 | `Config` | settings or environment values are missing or fixed. |
 
-CI also enforces **coverage**: backend 90% of lines, frontend 99% of lines and statements, 94% of functions,
-88% of branches. In practice, every `if`, every error path and every new component needs a test that reaches it.
+CI also enforces **coverage**: backend 90% of lines, frontend 98% of lines, 96% of statements, 94% of functions
+and 88% of branches. In practice, every `if`, every error path and every new component needs a test that reaches it.
 
 ## 3. Write the test
 
@@ -182,8 +182,9 @@ missing line numbers for each file.
   IDs, and a branch that passes alone can still fail against a newer `main`.
 - `docs/Unit-Test-Cases.docx` conflicts during a merge? Don't merge it by hand. Keep either version, run
   `scripts/test-all.sh --register` and commit the regenerated file.
-- The **Tests** check on the PR runs the same script. Its run page has the generated register under
-  *Artifacts → unit-test-cases*. **Never merge while Tests is red.**
+- The **CI** checks on the PR run the same lint, tests and gates (plus a secret scan and dependency audit).
+  The **Test register** job's run page has the generated register under *Artifacts → unit-test-cases*.
+  **Never merge while a check is red.**
 
 ## When it fails
 
@@ -191,6 +192,10 @@ missing line numbers for each file.
 | --- | --- | --- |
 | `Tests missing @tc(...) documentation` | A `test_*` function has no `@tc` decorator. | Add `@tc(...)`. |
 | `Tests missing tc() documentation` | A frontend test uses `it` / `test`. | Use `tc(...)`. |
+| `ruff` lists `F401`, `F841`, `E…` or similar | Lint found an unused import or variable, or a syntax-level problem. | Fix what it points to. `ruff check . --fix` handles the simple ones. |
+| ESLint reports `no-unused-vars` or `react-hooks/rules-of-hooks`, or `Exceeded max-warnings` | Lint error, or a new `exhaustive-deps` warning. | Fix it. Run `cd frontend && npm run lint`. |
+| `npm audit` / `pip-audit` reports a vulnerability | A dependency has a known high or critical advisory. | Update that package. |
+| `gitleaks` reports a leak | A key or token is in the git history. | Revoke the key at its provider, then remove it from the code. |
 | `Required test coverage of 90% not reached` | New backend code isn't tested. | Add tests for the lines listed as missing. |
 | `Coverage for … does not meet global threshold` | New frontend code isn't tested. | Add tests for the uncovered branches/functions. |
 | `duplicate id …` | Two tests share an ID, often after updating from `main`. | Renumber yours to the next free ID. |
@@ -201,7 +206,7 @@ missing line numbers for each file.
 
 ## How the register is built
 
-`scripts/test-all.sh --register` runs both suites with the coverage gates. Each test writes out its `tc`
+`scripts/test-all.sh --register` runs lint and both suites with the coverage gates. Each test writes out its `tc`
 documentation and result (`frontend/src/test/register-reporter.js`, `test/conftest.py`), and
 `docs/test-register/generate.mjs` lays them out as `docs/Unit-Test-Cases.docx`. The Pass / Fail column always
 reflects the latest run. The narrative sections (scope, defects, observations) are written in `generate.mjs`.

@@ -219,10 +219,10 @@ const intro = [
   code('cd .. && backend/.venv/bin/python -m pytest -v'),
   para('The backend tests use an in-memory stand-in for the Supabase client (test/fake_supabase.py), so no database or .env file is needed.'),
   h2('2.3 Regenerating this document'),
-  para('Each test carries its own case ID, scenario, pre-conditions, steps, data and expected result (the tc(...) wrapper in frontend/src/test/tc.js and the @tc(...) decorator in test/tc.py). One command runs both suites with their coverage gates and then regenerates this file from the results, so the register cannot drift from the tests:'),
+  para('Each test carries its own case ID, scenario, pre-conditions, steps, data and expected result (the tc(...) wrapper in frontend/src/test/tc.js and the @tc(...) decorator in test/tc.py). One command lints the code, runs both suites with their coverage gates and then regenerates this file from the results, so the register cannot drift from the tests:'),
   code('scripts/test-all.sh --register'),
   para('The first run needs the dependencies installed once: §2.1, §2.2 and npm install in docs/test-register. docs/test-register/build.sh regenerates the file without the coverage gates.'),
-  para('The GitHub Actions workflow (.github/workflows/tests.yml) runs the same command on every push to main and every pull request, and attaches the generated document to the run as the unit-test-cases artifact. A run fails if any test fails, if a test has no tc(...) / @tc(...) metadata, or if coverage drops below the gates (backend 90% of lines; frontend thresholds in frontend/vitest.config.js).'),
+  para('The GitHub Actions workflow (.github/workflows/ci.yml) runs on every push to main and every pull request. Its backend and frontend jobs run lint, the unit tests and the coverage gates (backend 90% of lines, set in .coveragerc; frontend thresholds in frontend/vitest.config.js); a security job scans for committed secrets and known-vulnerable dependencies; and a register job rebuilds this document and attaches it to the run as the unit-test-cases artifact. A run fails if lint finds a problem, if any test fails, if a test has no tc(...) / @tc(...) metadata, if a test case ID is duplicated, or if coverage drops below the gates.'),
   para('The Pass / Fail column comes from that run. The Created / Executed By names are taken from the TC_AUTHOR environment variable (default: Jeremytzm), and the dates from TC_DATE (default: the day of the run).'),
   para('docs/TESTING.md in the repository is the step-by-step guide for adding tests for a new feature.'),
 
