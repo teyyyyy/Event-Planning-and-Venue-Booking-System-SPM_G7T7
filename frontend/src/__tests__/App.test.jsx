@@ -14,8 +14,14 @@ vi.mock('../event_organiser', () => ({
   default: ({ editingEvent, onEditComplete }) => <div>ORGANISER PAGE {editingEvent ? `editing ${editingEvent.id}` : 'new'}<button onClick={onEditComplete}>finish edit</button></div>,
 }));
 vi.mock('../EquipmentRequest', () => ({ default: () => <div>EQUIPMENT REQUEST PAGE</div> }));
-vi.mock('../EquipmentUpdate', () => ({ default: () => <div>EQUIPMENT UPDATE PAGE</div> }));
-vi.mock('../EquipmentAvailability', () => ({ default: () => <div>EQUIPMENT AVAILABILITY PAGE</div> }));
+vi.mock('../EquipmentUpdate', () => ({ default: ({ eventId }) => <div><span>EQUIPMENT UPDATE PAGE</span>{eventId && <span>update event {eventId}</span>}</div> }));
+vi.mock('../EquipmentAvailability', () => ({
+  default: ({ onReserve, onUpdate }) => <div><span>EQUIPMENT AVAILABILITY PAGE</span><button onClick={() => onReserve(3)}>reserve 3</button><button onClick={() => onUpdate(4)}>update 4</button></div>,
+}));
+vi.mock('../EquipmentReservation', () => ({
+  default: ({ eventId, onOpenEvent, onBack }) => <div><span>{eventId ? `RESERVATION FOR EVENT ${eventId}` : 'RESERVATION LIST'}</span><button onClick={() => onOpenEvent(7)}>open 7</button><button onClick={onBack}>reservation back</button></div>,
+}));
+vi.mock('../VenueStaffCalendar', () => ({ default: () => <div>VENUE STAFF CALENDAR</div> }));
 vi.mock('../venue_approval', () => ({ default: () => <div>VENUE APPROVAL PAGE</div> }));
 vi.mock('../VenueRequest', () => ({ default: () => <div>VENUE REQUEST PAGE</div> }));
 vi.mock('../VenueCatalogue', () => ({ default: ({ canEdit }) => <div>VENUE CATALOGUE PAGE {canEdit ? 'editable' : 'read-only'}</div> }));
@@ -212,5 +218,47 @@ describe('App', () => {
       render(<App />);
       expect(screen.getByText('MFA SCREEN')).toBeInTheDocument();
       expect(screen.queryByText('LOGIN SCREEN')).toBeNull();
+    });
+
+  tc('FE-APP-021', 'AuthedApp (technical support)', 'Technical support opens "Equipment Reservation", opens a reservation, then goes back twice.',
+    'The reservation list opens; opening an event shows its reservation; Back returns to the list, and Back from the list goes to the availability check.',
+    { kind: 'State', steps: '1. Click "Equipment Reservation". 2. Open event 7. 3. Click Back. 4. Click Back again.' },
+    () => {
+      as('technical support staff');
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Equipment Reservation' }));
+      expect(screen.getByText('RESERVATION LIST')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'open 7' }));
+      expect(screen.getByText('RESERVATION FOR EVENT 7')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'reservation back' }));
+      expect(screen.getByText('RESERVATION LIST')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'reservation back' }));
+      expect(screen.getByText('EQUIPMENT AVAILABILITY PAGE')).toBeInTheDocument();
+    });
+
+  tc('FE-APP-022', 'AuthedApp (technical support)', 'From the availability check, technical support chooses Reserve for one event and Update for another.',
+    'Reserve opens the reservation page for that event; Update opens Equipment Update for that event; the sidebar clears the selected event.',
+    { kind: 'State', steps: '1. Open the availability check. 2. Click Reserve (event 3). 3. Return and click Update (event 4). 4. Click "Equipment Update" in the sidebar.' },
+    () => {
+      as('technical support staff');
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Equipment Availability Check' }));
+      fireEvent.click(screen.getByRole('button', { name: 'reserve 3' }));
+      expect(screen.getByText('RESERVATION FOR EVENT 3')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Equipment Availability Check' }));
+      fireEvent.click(screen.getByRole('button', { name: 'update 4' }));
+      expect(screen.getByText('update event 4')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Equipment Update' }));
+      expect(screen.queryByText('update event 4')).toBeNull();
+    });
+
+  tc('FE-APP-023', 'AuthedApp (venue staff)', 'Venue staff opens "Venue Availability Calendar".', 'The venue calendar replaces the catalogue.',
+    { steps: '1. Render as venue staff. 2. Click "Venue Availability Calendar".' },
+    () => {
+      as('venue staff');
+      render(<App />);
+      fireEvent.click(screen.getByRole('button', { name: 'Venue Availability Calendar' }));
+      expect(screen.getByText('VENUE STAFF CALENDAR')).toBeInTheDocument();
+      expect(screen.queryByText(/VENUE CATALOGUE PAGE/)).toBeNull();
     });
 });

@@ -11,7 +11,7 @@ const HALL_A = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 1
 const HALL_B = { venue_id: 2, name: 'Hall B', location: 'Jurong', capacity: 30, layouts: ['Classroom'], facilities: ['Wi-Fi'], accessible: 0 };
 const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', start_datetime: '2026-10-01T09:00:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
 const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', start_datetime: '2026-10-02T10:00:00+08:00', end_datetime: '2026-10-02T12:00:00+08:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
-const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, start_datetime: '2026-10-01T09:30:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00', status: 'Approved' };
+const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { start_datetime: '2026-10-01T09:30:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00' } };
 
 function backend(o = {}) {
   const d = { venues: [HALL_A, HALL_B], events: [GALA, WORKSHOP], submitted: [], booked: [], post: () => json({ request_id: 9 }), ...o };
@@ -28,7 +28,6 @@ function backend(o = {}) {
 const ready = async (props = { user: USER }) => { render(<VenueRequest {...props} />); await screen.findByText('Submit venue request'); };
 const eventSelect = () => document.querySelector('select');
 const pickEvent = (id) => fireEvent.change(eventSelect(), { target: { value: String(id) } });
-const inputs = () => document.querySelectorAll('input[type=datetime-local]');
 const submitBtn = () => screen.getByRole('button', { name: /Submit Request|Submitting…/ });
 const chooseVenue = async (name = 'Hall A') => fireEvent.click(within((await screen.findByText(name)).closest('tr')).getByRole('button', { name: 'Select Venue' }));
 
@@ -123,20 +122,22 @@ describe('VenueRequest', () => {
       expect(screen.queryByText('Hall B')).toBeNull();
     });
 
-  tc('FE-VREQ-010', 'VenueRequest (select venue)', 'The coordinator picks a venue for an event.', 'Venue details show with start/end inputs pre-filled from the event; "Select Different Venue" returns to the catalogue.', { steps: '1. Select "Gala". 2. Click "Select Venue" for Hall A. 3. Click "Select Different Venue".' },
+  tc('FE-VREQ-010', 'VenueRequest (select venue)', 'The coordinator picks a venue for an event.', 'Venue details show with a read-only timing summary taken from the event (no editable times); "Select Different Venue" returns to the catalogue.', { steps: '1. Select "Gala". 2. Click "Select Venue" for Hall A. 3. Click "Select Different Venue".' },
     async () => {
       backend();
       await ready();
       pickEvent(1);
       await chooseVenue();
       expect(await screen.findByText('Venue Booking Details')).toBeInTheDocument();
-      expect(inputs()[0]).toHaveValue('2026-10-01T09:00');
-      expect(inputs()[1]).toHaveValue('2026-10-01T17:00');
+      const summary = screen.getByText('Event Timing Summary').closest('.equipment-item-card');
+      expect(summary).toHaveTextContent('Date: 2026-10-01');
+      expect(summary).toHaveTextContent('Time: 9:00 AM - 5:00 PM');
+      expect(document.querySelector('input[type=datetime-local]')).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Select Different Venue' }));
       expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
     });
 
-  tc('FE-VREQ-011', 'VenueRequest (validation)', 'No event or venue is chosen yet, then both are.', '"Submit Request" is disabled until an event, a venue and a valid time range exist.', { kind: 'State', steps: '1. Inspect the button. 2. Choose an event and venue.' },
+  tc('FE-VREQ-011', 'VenueRequest (validation)', 'No event or venue is chosen yet, then both are.', '"Submit Request" is disabled until both an event and a venue are chosen.', { kind: 'State', steps: '1. Inspect the button. 2. Choose an event and venue.' },
     async () => {
       backend();
       await ready();
@@ -146,18 +147,18 @@ describe('VenueRequest', () => {
       await waitFor(() => expect(submitBtn()).toBeEnabled());
     });
 
-  tc('FE-VREQ-012', 'VenueRequest (validation)', 'The end time is set before the start time.', '"Start time must be before end time." shows and "Submit Request" is disabled.', { kind: 'Negative', data: 'end 2026-10-01T08:00', steps: '1. Choose event and venue. 2. Set the end time to 08:00.' },
+  tc('FE-VREQ-012', 'VenueRequest (validation)', 'The form is submitted (e.g. with Enter) before a venue is chosen.', 'An error dialog "Please ensure an event and venue are selected." shows and nothing is sent.', { kind: 'Negative', data: 'event chosen, no venue', steps: '1. Select "Gala". 2. Submit the form.' },
     async () => {
-      backend();
+      const f = backend();
       await ready();
       pickEvent(1);
-      await chooseVenue();
-      fireEvent.change(inputs()[1], { target: { value: '2026-10-01T08:00' } });
-      expect(screen.getByText('Start time must be before end time.')).toBeInTheDocument();
-      expect(submitBtn()).toBeDisabled();
+      fireEvent.submit(document.querySelector('form.request-form'));
+      expect(await screen.findByText('Please ensure an event and venue are selected.')).toBeInTheDocument();
+      expect(callsTo(f, '/venue-booking-requests/venues/')).toHaveLength(0);
+      expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
 
-  tc('FE-VREQ-013', 'VenueRequest (submit)', 'A valid request for a free venue is submitted.', 'The venue\'s approved bookings are checked, then POST /venue-bookings sends event, venue, coordinator and times; a success dialog names the request id and the form resets.',
+  tc('FE-VREQ-013', 'VenueRequest (submit)', 'A valid request for a free venue is submitted.', 'The venue\'s approved bookings are checked, then POST /venue-bookings sends event, venue and coordinator (times come from the event); a success dialog names the request id, the form resets and submissions are reloaded.',
     { pre: 'Hall A has no approved bookings.', data: 'event 1, venue 1, 09:00-17:00', steps: '1. Choose event and venue. 2. Click "Submit Request".' },
     async () => {
       const f = backend();
@@ -170,7 +171,9 @@ describe('VenueRequest', () => {
       expect(callsTo(f, '/venue-booking-requests/venues/1', 'GET')).toHaveLength(1);
       const [url, options] = callsTo(f, '/venue-bookings', 'POST')[0];
       expect(url).toMatch(/\/venue-bookings$/);
-      expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 1, coordinator_id: 'c1', start_datetime: '2026-10-01T09:00', end_datetime: '2026-10-01T17:00' });
+      expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 1, coordinator_id: 'c1' });
+      await waitFor(() => expect(callsTo(f, '/venue-booking-requests/coordinators/c1')).toHaveLength(2));
+      expect(await screen.findByText('Submit venue request')).toBeInTheDocument();
       expect(eventSelect()).toHaveValue('');
     });
 
@@ -243,7 +246,7 @@ describe('VenueRequest', () => {
       expect(await screen.findByRole('button', { name: 'Submitting…' })).toBeDisabled();
     });
 
-  tc('FE-VREQ-020', 'VenueRequest (submissions)', 'The coordinator opens "My Submissions".', 'Each request shows its id, event and venue names (mapped from ids), date, 12-hour time and status.', { pre: 'One Approved request for Gala at Hall A, 09:30-17:00.', steps: '1. Click "My Submissions".' },
+  tc('FE-VREQ-020', 'VenueRequest (submissions)', 'The coordinator opens "My Submissions".', 'Each request shows its event id, event and venue names (mapped from ids), the event\'s date and 12-hour times, and status.', { pre: 'One Approved request for Gala at Hall A; the event runs 09:30-17:00.', steps: '1. Click "My Submissions".' },
     async () => {
       backend({ submitted: [SUBMISSION] });
       await ready();
@@ -259,7 +262,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-021', 'VenueRequest (submissions)', 'A request refers to an event and venue that are not in the loaded lists, and has no status.', 'The raw ids are shown as names and the status defaults to "Pending".', { kind: 'Edge', data: 'event_id 999, venue_id 998, no status', steps: '1. Open "My Submissions" with such a request.' },
     async () => {
-      backend({ submitted: [{ request_id: 6, event_id: 999, venue_id: 998, start_datetime: null, end_datetime: null }] });
+      backend({ submitted: [{ request_id: 6, event_id: 999, venue_id: 998, 'Event Details': null }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
       const row = (await screen.findByText('999')).closest('tr');
@@ -269,7 +272,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-022', 'VenueRequest (submissions)', 'Requests start just after midnight and just after noon.', 'Times render as "12:30 AM" and "12:05 PM".', { kind: 'Edge', data: '00:30 and 12:05', steps: '1. Open "My Submissions" with such times.' },
     async () => {
-      backend({ submitted: [{ ...SUBMISSION, start_datetime: '2026-10-01T00:30:00', end_datetime: '2026-10-01T12:05:00' }] });
+      backend({ submitted: [{ ...SUBMISSION, 'Event Details': { start_datetime: '2026-10-01T00:30:00', end_datetime: '2026-10-01T12:05:00' } }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
       const row = (await screen.findByText('Gala')).closest('tr');
@@ -304,4 +307,61 @@ describe('VenueRequest', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('alertdialog')).toBeNull();
     });
+
+  tc('FE-VREQ-026', 'VenueRequest (submit)', 'An existing booking only has its times on the linked event, and another booking has no times at all.',
+    'Nested "Event Details" times are used for the overlap check; a booking without times is ignored.', { kind: 'Edge', pre: 'Pending booking whose event runs 16:00-18:00; a booking with no times.', steps: '1. Choose Gala (09:00-17:00) and Hall A. 2. Submit.' },
+    async () => {
+      const f = backend({ booked: [{ 'Event Details': null }, { 'Event Details': { start_datetime: '2026-10-01 16:00:00+00', end_datetime: '2026-10-01 18:00:00+00' } }] });
+      await ready();
+      pickEvent(1);
+      await chooseVenue();
+      await waitFor(() => expect(submitBtn()).toBeEnabled());
+      fireEvent.click(submitBtn());
+      expect(await screen.findByText(/already booked for the selected time period/)).toBeInTheDocument();
+      expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+    });
+
+  tc('FE-VREQ-027', 'VenueRequest (submissions)', 'The coordinator clicks a rejected submission.', 'A "Booking Request Details" dialog shows the status, rejection reason and decision time; "Close" dismisses it.',
+    { pre: 'Request 5 Rejected with reason "Double booked".', steps: '1. Open "My Submissions". 2. Click the row. 3. Click "Close".' },
+    async () => {
+      backend({ submitted: [{ ...SUBMISSION, status: 'Rejected', rejection_reason: 'Double booked', decided_at: '2026-09-20T10:00:00Z' }] });
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+      fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+      const dialog = screen.getByRole('alertdialog');
+      expect(within(dialog).getByText('Booking Request Details')).toBeInTheDocument();
+      expect(dialog).toHaveTextContent('Status: Rejected');
+      expect(dialog).toHaveTextContent('Rejection Reason: Double booked');
+      expect(dialog).toHaveTextContent(`Decided At: ${new Date('2026-09-20T10:00:00Z').toLocaleString()}`);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+  tc('FE-VREQ-028', 'VenueRequest (submissions)', 'The coordinator clicks a pending submission, then clicks outside the dialog.', 'Only the status is shown (no reason or decision time); clicking the backdrop closes the dialog.',
+    { kind: 'Edge', pre: 'Request 5 Pending, undecided.', steps: '1. Open "My Submissions". 2. Click the row. 3. Click the backdrop.' },
+    async () => {
+      backend({ submitted: [{ ...SUBMISSION, status: 'Pending', rejection_reason: 'stale' }] });
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+      fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+      const dialog = screen.getByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Status: Pending');
+      expect(dialog).not.toHaveTextContent('Rejection Reason');
+      expect(dialog).not.toHaveTextContent('Decided At');
+      fireEvent.click(document.querySelector('.notice-backdrop'));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+  tc('FE-VREQ-029', 'VenueRequest (tabs)', 'The coordinator opens the "Venue Calendar" tab.', 'The availability calendar is shown with the loaded venues to choose from.', { steps: '1. Click "Venue Calendar".' },
+    async () => {
+      backend();
+      await ready();
+      fireEvent.click(screen.getByRole('button', { name: 'Venue Calendar' }));
+      expect(screen.getByRole('heading', { name: 'Venue Availability Calendar' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Hall B' })).toBeInTheDocument();
+      expect(screen.getByText('Please select a venue to view its schedule.')).toBeInTheDocument();
+    });
+
+  tc('FE-VREQ-030', 'VenueRequest', 'Loading the coordinator\'s submissions fails without a detail.', 'A page error "Unable to load submitted requests." is shown.', { kind: 'Negative', steps: '1. Return 500 for the submissions list.' },
+    async () => { backend({ submitted: () => json({}, 500) }); await ready(); expect(screen.getByText('Unable to load submitted requests.')).toBeInTheDocument(); });
 });

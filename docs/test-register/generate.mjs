@@ -65,6 +65,9 @@ const SECTIONS = [
   { n: '6.13', title: 'Equipment reservation (Technical Support)', prefixes: ['FE-EQRES', 'BE-EQRES'],
     intro: 'Feature code: EQRES. Technical support reserves the requested equipment for an event\'s time window, adjusts or cancels the reservation, and rechecks it when the request changes. Reserved, Modified and Needs Recheck reservations count against availability; Cancelled ones do not.',
     fe: 'frontend/src/__tests__/EquipmentReservation.test.jsx', be: 'test/test_be_equipment_reservation.py' },
+  { n: '6.14', title: 'Venue availability calendar (Event Coordinator, Venue Staff)', prefixes: ['FE-VCAL'],
+    intro: 'Feature code: VCAL. A weekly, hour-by-hour calendar of a venue\'s Approved and Pending bookings, shown on the coordinator\'s Venue Request page and in the Venue Staff workspace. Pending bookings are shaded; bookings that run past midnight are split per day. The backend route it reads is covered by BE-VREQ cases.',
+    fe: 'frontend/src/__tests__/VenueCalendar.test.jsx', be: 'none (uses the venue request routes)' },
 ];
 
 // ---- load + validate -------------------------------------------------------------------
@@ -229,7 +232,7 @@ const intro = [
   h1('4. Test ID naming convention'),
   para('IDs have the form LAYER-FEATURE-NNN:'),
   bullet([['LAYER', { bold: true }], ' — FE for frontend (Vitest), BE for backend (pytest).']),
-  bullet([['FEATURE', { bold: true }], ' — short uppercase code for the area: SUPA (Supabase client), AUTH (login state / backend token checks), LOGIN (sign-in form), API (authenticated fetch helper), APP (app shell and routing), ORG (event organiser), COORD (coordinator assignment), VENUE (venue approval), VREQ (venue request), VCAT (venue catalogue), EQREQ (equipment request), EQUPD (equipment update), EQAVAIL (equipment availability), EQRES (equipment reservation).']),
+  bullet([['FEATURE', { bold: true }], ' — short uppercase code for the area: SUPA (Supabase client), AUTH (login state / backend token checks), LOGIN (sign-in form), API (authenticated fetch helper), APP (app shell and routing), ORG (event organiser), COORD (coordinator assignment), VENUE (venue approval), VREQ (venue request), VCAT (venue catalogue), EQREQ (equipment request), EQUPD (equipment update), EQAVAIL (equipment availability), EQRES (equipment reservation), VCAL (venue availability calendar).']),
   bullet([['NNN', { bold: true }], ' — zero-padded number, sequential within one LAYER-FEATURE pair, in creation order.']),
   para('Example: FE-VENUE-013 is the thirteenth frontend test written for venue approval. When a test is removed its ID is retired, not recycled — keep the row and mark it Deprecated.'),
 
