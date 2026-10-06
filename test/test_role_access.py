@@ -50,6 +50,8 @@ ROLE_PATHS = {
     "Venue Staff": (
         "/api/venue-booking-requests",
         "/api/venue-catalogue",
+        "/api/venues",
+        "/api/venue-booking-requests/venues/1",
         "/api/events/1/change-log",
     ),
     "Technical Support Staff": (
@@ -261,7 +263,7 @@ def test_coordinator_cannot_review_unassigned_change_request(monkeypatch):
     assert response.status_code == 403
 
 
-@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue reads, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue and venue list reads, bookings per venue, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_venue_staff_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Venue Staff")
     assert_role_access(client, "Venue Staff", user_id)

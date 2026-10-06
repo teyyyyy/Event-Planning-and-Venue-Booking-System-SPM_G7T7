@@ -150,7 +150,7 @@ cd docs/test-register && npm install && ./build.sh
 
 `scripts/test-all.sh` runs both suites with coverage gates. It fails if a test fails, if a test
 has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (backend must stay at
-100% of lines; frontend thresholds are in `frontend/vitest.config.js`). It runs automatically:
+90% of lines; frontend thresholds are in `frontend/vitest.config.js`). It runs automatically:
 
 - **On every push / pull request** — `.github/workflows/tests.yml` also builds the Word register and
   uploads it as the `unit-test-cases` artifact.

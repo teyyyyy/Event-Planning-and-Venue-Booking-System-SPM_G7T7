@@ -62,6 +62,9 @@ const SECTIONS = [
   { n: '6.12', title: 'Significant event changes and change-request processing', prefixes: ['FE-EVCHG', 'BE-EVCHG'],
     intro: 'Stories 10.2 and 44.4. Feature code: EVCHG. Saved changes to submitted events are classified as Significant (schedule, capacity or venue requirements) or Ordinary; significant changes are logged and return the live venue booking and equipment requests to Pending. Coordinators process approved significant change requests, which supersedes the affected requests and initiates new Pending ones linked to the event and change request. The UI around these flows is also covered by FE-COORD and FE-VENUE cases. The database trigger and processing function are verified separately by test/significant_event_changes_sql.mjs.',
     fe: 'frontend/src/__tests__/EventChanges.test.jsx', be: 'test/test_be_event_changes.py' },
+  { n: '6.13', title: 'Equipment reservation (Technical Support)', prefixes: ['FE-EQRES', 'BE-EQRES'],
+    intro: 'Feature code: EQRES. Technical support reserves the requested equipment for an event\'s time window, adjusts or cancels the reservation, and rechecks it when the request changes. Reserved, Modified and Needs Recheck reservations count against availability; Cancelled ones do not.',
+    fe: 'frontend/src/__tests__/EquipmentReservation.test.jsx', be: 'test/test_be_equipment_reservation.py' },
 ];
 
 // ---- load + validate -------------------------------------------------------------------
@@ -226,7 +229,7 @@ const intro = [
   h1('4. Test ID naming convention'),
   para('IDs have the form LAYER-FEATURE-NNN:'),
   bullet([['LAYER', { bold: true }], ' — FE for frontend (Vitest), BE for backend (pytest).']),
-  bullet([['FEATURE', { bold: true }], ' — short uppercase code for the area: SUPA (Supabase client), AUTH (login state / backend token checks), LOGIN (sign-in form), API (authenticated fetch helper), APP (app shell and routing), ORG (event organiser), COORD (coordinator assignment), VENUE (venue approval), VREQ (venue request), VCAT (venue catalogue), EQREQ (equipment request), EQUPD (equipment update), EQAVAIL (equipment availability).']),
+  bullet([['FEATURE', { bold: true }], ' — short uppercase code for the area: SUPA (Supabase client), AUTH (login state / backend token checks), LOGIN (sign-in form), API (authenticated fetch helper), APP (app shell and routing), ORG (event organiser), COORD (coordinator assignment), VENUE (venue approval), VREQ (venue request), VCAT (venue catalogue), EQREQ (equipment request), EQUPD (equipment update), EQAVAIL (equipment availability), EQRES (equipment reservation).']),
   bullet([['NNN', { bold: true }], ' — zero-padded number, sequential within one LAYER-FEATURE pair, in creation order.']),
   para('Example: FE-VENUE-013 is the thirteenth frontend test written for venue approval. When a test is removed its ID is retired, not recycled — keep the row and mark it Deprecated.'),
 

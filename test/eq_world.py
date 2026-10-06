@@ -27,7 +27,7 @@ def world(**tables):
     return FakeClient(data)
 
 
-def reservation(rid=1, eid="MIC", qty=3, start="2026-10-01T10:00:00", end="2026-10-01T12:00:00", status="Active", event_id=99):
+def reservation(rid=1, eid="MIC", qty=3, start="2026-10-01T10:00:00", end="2026-10-01T12:00:00", status="Reserved", event_id=99):
     return {"Equipment Reservation": [{"reservation_id": rid, "status": status, "event_id": event_id}],
             "Equipment Reservation Item": [{"reservation_id": rid, "equipment_id": eid, "reserved_quantity": qty,
                                             "start_datetime": start, "end_datetime": end}]}
