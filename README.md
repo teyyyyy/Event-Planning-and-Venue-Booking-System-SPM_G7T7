@@ -155,11 +155,27 @@ has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (ba
 - **On every push / pull request** — `.github/workflows/tests.yml` also builds the Word register and
   uploads it as the `unit-test-cases` artifact.
 - **On every commit that touches code or tests** — enable once per clone:
-  `git config core.hooksPath .githooks`
+  `git config core.hooksPath .githooks`. The hook runs that checkout's own tests, so install the
+  dependencies above in each clone or worktree first. `git commit --no-verify` skips it in an
+  emergency; CI still runs on the pull request.
 - **In Claude Code** — `.claude/settings.json` re-runs it after any edit to a backend or frontend source file.
 
 When you add a function, add a test with the next free case ID in the matching `test/test_be_*.py`
 or `frontend/src/__tests__/*.test.jsx`, then run `scripts/test-all.sh --register` to refresh the register.
+
+### Keeping CI green
+
+- **Change behaviour, change its tests in the same commit.** A new payload shape, status value,
+  error message or access rule breaks the existing tests that describe the old one.
+- **New code needs tests.** CI fails below the coverage gates: backend 90% of lines; frontend 99% of
+  lines and statements, 94% of functions and 88% of branches.
+- **Case IDs must be unique.** Someone else may have taken "the next free ID" since you started, and
+  a duplicate ID breaks the register. Check again after updating from `main`.
+- **Don't hard-code dates that depend on today.** Some forms reject past dates, so a fixed date
+  starts failing once it passes. Derive it from the current date (see `FUTURE` in `event_organiser.test.jsx`).
+- **Update from `main` and run `scripts/test-all.sh` before opening a pull request.** A branch that
+  passes on its own can still fail against a newer `main`.
+- **Never merge a pull request while its Tests check is red.** That is how `main` breaks for everyone.
 
 ## Authentication
 
