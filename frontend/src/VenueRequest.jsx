@@ -57,8 +57,6 @@ export default function VenueRequest({ user }) {
   // 2. Form State
   const [eventId, setEventId] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState(null);
-  const [startDatetime, setStartDatetime] = useState("");
-  const [endDatetime, setEndDatetime] = useState("");
 
   // --- Filter State & Logic ---
   const [showManualFilters, setShowManualFilters] = useState(false);
@@ -96,21 +94,12 @@ export default function VenueRequest({ user }) {
       setFilterLayout(selectedEvent.layout_required || "");
       setFilterAccessible(Number(selectedEvent.accessibility_required) === 1);
       setFilterFacilities(selectedEvent.facilities_required || []);
-
-      if (selectedEvent.start_datetime) {
-        setStartDatetime(selectedEvent.start_datetime.slice(0, 16));
-      }
-      if (selectedEvent.end_datetime) {
-        setEndDatetime(selectedEvent.end_datetime.slice(0, 16));
-      }
     } else {
       // Clear everything if no event is selected
       setFilterCapacity("");
       setFilterLayout("");
       setFilterAccessible(false);
       setFilterFacilities([]);
-      setStartDatetime("");
-      setEndDatetime("");
     }
   }, [selectedEvent]);
 

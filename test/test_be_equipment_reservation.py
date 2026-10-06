@@ -34,7 +34,7 @@ def w(headers=(), lines=(), items=REQUEST_ITEMS):
     """Event 1 with request 7 (MIC x2, PRJ x1) plus the given reservation headers and item lines."""
     return world(**{
         "Equipment Request": [dict(REQUEST)], "Equipment Request Item": [dict(i) for i in items],
-        "Equipment Reservation": [dict(h) for h in headers], "Equipment Reservation Item": [dict(l) for l in lines],
+        "Equipment Reservation": [dict(h) for h in headers], "Equipment Reservation Item": [dict(item) for item in lines],
     })
 
 

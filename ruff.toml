@@ -1,0 +1,14 @@
+# Backend and test lint (run by CI and scripts/test-all.sh): pycodestyle errors and pyflakes, listed
+# explicitly so a newer ruff does not silently add rules.
+line-length = 100
+target-version = "py312"
+extend-exclude = ["backend/.venv", "frontend", "docs"]
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
+# The backend and the test doubles use short one-line forms such as `if not rows: return None`.
+ignore = ["E701", "E702"]
+
+[lint.per-file-ignores]
+# backend/main.py loads the environment before importing the routers that read it.
+"backend/main.py" = ["E402"]

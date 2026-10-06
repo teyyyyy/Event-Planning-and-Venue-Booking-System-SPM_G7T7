@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, vi } from 'vitest';
+import { describe, expect } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
