@@ -222,6 +222,15 @@ export default function VenueRequest({ user }) {
       return;
     }
 
+    // The overlap check below needs the event's times, so don't submit without them
+    if (!selectedEvent.start_datetime || !selectedEvent.end_datetime) {
+      setNotice({
+        type: "error",
+        text: "This event has no start or end time, so venue availability can't be checked. The event's timing must be set before a venue can be requested.",
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       // 1. Fetch approved bookings for this venue to check availability
@@ -460,12 +469,19 @@ export default function VenueRequest({ user }) {
                       </td>
                       <td>{selectedEvent.event_date}</td>
                       <td>
-                        {format12HourTime(
-                          selectedEvent.start_datetime.slice(11, 16),
-                        )}{" "}
-                        -{" "}
-                        {format12HourTime(
-                          selectedEvent.end_datetime.slice(11, 16),
+                        {selectedEvent.start_datetime &&
+                        selectedEvent.end_datetime ? (
+                          <>
+                            {format12HourTime(
+                              selectedEvent.start_datetime.slice(11, 16),
+                            )}{" "}
+                            -{" "}
+                            {format12HourTime(
+                              selectedEvent.end_datetime.slice(11, 16),
+                            )}
+                          </>
+                        ) : (
+                          "—"
                         )}
                       </td>
                       <td>
