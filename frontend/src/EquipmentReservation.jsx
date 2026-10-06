@@ -312,7 +312,7 @@ function ReservationDetails({ user, eventId, onBack }) {
     );
   }
 
-  function useRequestedQuantity(index) {
+  function applyRequestedQuantity(index) {
     if (!existing) return;
 
     setItems((current) =>
@@ -804,7 +804,7 @@ function ReservationDetails({ user, eventId, onBack }) {
                             className="secondary reservation-use-requested"
                             disabled={saving}
                             onClick={() =>
-                              useRequestedQuantity(index)
+                              applyRequestedQuantity(index)
                             }
                           >
                             Use Requested
