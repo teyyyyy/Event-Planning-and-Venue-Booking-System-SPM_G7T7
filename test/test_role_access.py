@@ -83,6 +83,8 @@ ROLE_ACTIONS = (
         },
         {200},
     ),
+    ("Event Coordinator", "POST", "/api/events/1/clarification-requests",
+     {"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."}, {200}),
     ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
     ("Technical Support Staff", "PUT", "/api/equipment-update/{user_id}/events/1/requests", {"requests": []}, {400}),
@@ -113,6 +115,7 @@ def client_for_role(monkeypatch, role):
     event_row = {
         "id": 1, "event_name": "Gala", "organiser_id": USER_IDS["Event Organiser"],
         "coordinator_id": USER_IDS["Event Coordinator"], "status": "Under review",
+        "coordinator_comments_count": 0, "amendments_count": 0,
         "event_date": (date.today() + timedelta(days=10)).isoformat(),
         "event_end_date": (date.today() + timedelta(days=10)).isoformat(),
         "start_time": "09:00", "end_time": "17:00", "event_capacity": 10,
@@ -170,6 +173,17 @@ def client_for_role(monkeypatch, role):
         elif name == "process_event_change_request":
             data = {"change_request": {"id": params["p_request_id"], "processing_status": "Processed"},
                     "venue_requests": [], "equipment_requests": []}
+        elif name == "submit_coordinator_feedback":
+            event = next(row for row in fake.tables["Event Details"] if str(row["id"]) == str(params["p_event_id"]))
+            if event["coordinator_id"] != params["p_coordinator_id"]:
+                raise APIError({"message": "You can only manage events assigned to you.", "code": "42501", "details": None, "hint": None})
+            if params["p_coordinator_comments"]:
+                event["coordinator_comments"] = params["p_coordinator_comments"]
+                event["coordinator_comments_count"] = event.get("coordinator_comments_count", 0) + 1
+            if params["p_amendments"]:
+                event["amendments"] = params["p_amendments"]
+                event["amendments_count"] = event.get("amendments_count", 0) + 1
+            data = [dict(event)]
         else:
             data = {"event_id": 1, "attendee_id": user_id}
         return SimpleNamespace(execute=lambda: SimpleNamespace(data=data))
@@ -276,6 +290,58 @@ def test_coordinator_cannot_review_unassigned_change_request(monkeypatch):
     assert response.status_code == 403
 
 
+@tc("BE-ROLE-008", "Coordinator clarification requests", "The assigned coordinator requests clarification and amendments for an event.",
+    "Both messages are saved on the event and visible in the organiser's own event status list.",
+    steps="1. Authenticate as coordinator-1 and submit both messages. 2. Authenticate as organiser-1 and load their requests.", kind="Security")
+def test_organiser_can_view_coordinator_feedback(monkeypatch):
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    response = client.post(
+        "/api/events/1/clarification-requests",
+        json={"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["coordinator_comments_count"] == 1
+    assert response.json()["amendments_count"] == 1
+    second_response = client.post(
+        "/api/events/1/clarification-requests",
+        json={"coordinator_comments": "Please clarify the schedule.", "amendments": ""},
+    )
+    assert second_response.status_code == 200, second_response.text
+    assert second_response.json()["coordinator_comments_count"] == 2
+    assert second_response.json()["amendments_count"] == 1
+
+    monkeypatch.setitem(
+        main.app.dependency_overrides,
+        current_user,
+        lambda: {"id": USER_IDS["Event Organiser"], "name": "Organiser", "role": "Event Organiser"},
+    )
+    organiser_response = client.get(f"/api/event-organisers/{USER_IDS['Event Organiser']}/requests")
+    assert organiser_response.status_code == 200, organiser_response.text
+    event = next(item for item in organiser_response.json() if item["coordinator_comments"])
+    assert event["coordinator_comments"] == "Please clarify the schedule."
+    assert event["amendments"] == "Update the venue setup."
+    assert event["coordinator_comments_count"] == 2
+    assert event["amendments_count"] == 1
+    assert event["amendments"] == "Update the venue setup."
+
+
+@tc("BE-ROLE-009", "Coordinator clarification requests", "A different coordinator tries to request clarification for an event assigned to coordinator-1.",
+    "The request is denied and the event is not changed.",
+    steps="1. Authenticate as coordinator-2. 2. POST clarification and amendment fields for event 1.", kind="Security")
+def test_coordinator_cannot_request_feedback_for_unassigned_event(monkeypatch):
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    monkeypatch.setitem(
+        main.app.dependency_overrides,
+        current_user,
+        lambda: {"id": "coordinator-2", "name": "Other coordinator", "role": "Event Coordinator"},
+    )
+    response = client.post(
+        "/api/events/1/clarification-requests",
+        json={"coordinator_comments": "Clarify this.", "amendments": ""},
+    )
+    assert response.status_code == 403
+
+
 @tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue and venue list reads, bookings per venue, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_venue_staff_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Venue Staff")
@@ -313,7 +379,7 @@ def test_other_roles_cannot_use_reservation_routes(monkeypatch):
         assert fake.tables["Equipment Reservation"][0]["status"] == "Reserved"
 
 
-@tc("BE-ROLE-008", "Role access matrix", "coordinator-1 requests coordinator-2's venue booking submissions.",
+@tc("BE-ROLE-010", "Role access matrix", "coordinator-1 requests coordinator-2's venue booking submissions.",
     "HTTP 403 \"You can only access your own coordinator requests.\"; the Venue Booking Requests table is not read.",
     pre="coordinator-1 and coordinator-2 are Event Coordinators; coordinator-2 has a Pending venue booking request.",
     data="path coordinator_id = coordinator-2",

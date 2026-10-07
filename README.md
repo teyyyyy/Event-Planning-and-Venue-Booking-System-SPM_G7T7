@@ -84,6 +84,19 @@ status list. Requests are available for submitted and active events with an
 assigned coordinator; Draft, Completed, Cancelled, and Rejected events cannot
 receive change requests.
 
+## Coordinator clarification and amendment requests
+
+Before using **Request clarification/amendments** in Event Management, run
+`backend/sql/coordinator_clarification_requests.sql` in the Supabase SQL Editor,
+then restart the backend. The migration safely ensures the
+`coordinator_comments` and `amendments` fields exist on `Event Details`.
+Separate cumulative counters track clarification and amendment submissions and
+appear in red badges for the coordinator and organiser. Existing non-empty
+messages are counted once when the migration first initializes the counters.
+Coordinators can submit either or both messages for an event assigned to them
+while it is Under review. The organiser sees the latest messages in Event
+Status; these requests do not change the submitted event details.
+
 ## Significant event changes and change-request processing (10.2, 44.4)
 
 Rerun `backend/sql/event_change_requests.sql`, then run

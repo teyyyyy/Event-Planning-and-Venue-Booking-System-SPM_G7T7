@@ -52,6 +52,9 @@ app.include_router(event_changes_router)
 
 # Database objects created by migrations, mapped to the file that creates them.
 MIGRATION_OBJECTS = {
+    "coordinator_comments": "coordinator_clarification_requests.sql",
+    "amendments": "coordinator_clarification_requests.sql",
+    "submit_coordinator_feedback": "coordinator_clarification_requests.sql",
     "event_change_log": "significant_event_changes.sql",
     "process_event_change_request": "significant_event_changes.sql",
     "event_registrations": "sprint2_registration_notifications.sql",
@@ -63,7 +66,7 @@ MIGRATION_OBJECTS = {
 
 @app.exception_handler(APIError)
 async def database_api_error(request, error):
-    missing_object = error.code in {"PGRST205", "PGRST202", "42P01", "42883"}
+    missing_object = error.code in {"PGRST205", "PGRST204", "PGRST202", "42P01", "42703", "42883"}
     migration = next(
         (file for name, file in MIGRATION_OBJECTS.items() if missing_object and name in error.message), None
     )

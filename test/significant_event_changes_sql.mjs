@@ -41,6 +41,8 @@ for (const name of ['sprint2_registration_notifications.sql', 'event_change_requ
 }
 await db.exec(await sql('significant_event_changes.sql')); // rerunnable
 await db.exec(await sql('event_change_requests.sql')); // the review RPC keeps its link to the trigger
+await db.exec(await sql('coordinator_clarification_requests.sql'));
+await db.exec(await sql('coordinator_clarification_requests.sql')); // rerunnable
 
 const ids = Object.fromEntries(['a', 'c', 'd', 'o', 'v', 't'].map((key, i) => [key, `00000000-0000-0000-0000-${String(i + 1).padStart(12, '0')}`]));
 const roles = { a: 'Attendee', c: 'Event Coordinator', d: 'Event Coordinator', o: 'Event Organiser', v: 'Venue Staff', t: 'Technical Support Staff' };
@@ -62,6 +64,10 @@ const submitChange = (eventId, summary, proposal) => one(
   'select * from submit_event_change_request($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
   [eventId, ids.o, summary, proposal.event_name, proposal.event_type, proposal.event_date, proposal.event_end_date,
     proposal.event_capacity, proposal.description, proposal.start_time, proposal.end_time],
+);
+const submitCoordinatorFeedback = (eventId, coordinatorId, comments, amendments) => q(
+  'select * from submit_coordinator_feedback($1,$2,$3,$4)',
+  [eventId, coordinatorId, comments, amendments],
 );
 const review = (requestId, decision, comments = null) => one('select * from review_event_change_request($1,$2,$3,$4)', [requestId, ids.c, decision, comments]);
 const addEvent = (id, status, extra = '') => q(`insert into "Event Details"(id,event_name,event_type,description,event_date,event_end_date,
@@ -90,8 +96,26 @@ assert.ok(await one(`select 1 as ok from pg_indexes where indexname='Venue Booki
   'A partial one-live-booking-per-event index replaces it');
 assert.deepEqual(await one(`select has_table_privilege('authenticated','event_change_log','select') as read,
   has_function_privilege('authenticated','process_event_change_request(bigint,uuid)','execute') as process,
-  has_function_privilege('service_role','process_event_change_request(bigint,uuid)','execute') as service`),
-{ read: false, process: false, service: true });
+  has_function_privilege('service_role','process_event_change_request(bigint,uuid)','execute') as service,
+  has_function_privilege('authenticated','submit_coordinator_feedback(bigint,uuid,text,text)','execute') as feedback,
+  has_function_privilege('service_role','submit_coordinator_feedback(bigint,uuid,text,text)','execute') as feedback_service`),
+{ read: false, process: false, service: true, feedback: false, feedback_service: true });
+
+// ---- coordinator clarification and amendment requests ----------------------------------
+await addEvent(20, 'Under review');
+let feedback = await submitCoordinatorFeedback(20, ids.c, 'Clarify the schedule.', 'Correct the venue details.');
+assert.equal(feedback.rows[0].coordinator_comments_count, 1);
+assert.equal(feedback.rows[0].amendments_count, 1);
+feedback = await submitCoordinatorFeedback(20, ids.c, 'A second clarification.', null);
+assert.equal(feedback.rows[0].coordinator_comments_count, 2);
+assert.equal(feedback.rows[0].amendments_count, 1);
+assert.equal(feedback.rows[0].amendments, 'Correct the venue details.', 'Omitted field remains unchanged');
+feedback = await submitCoordinatorFeedback(20, ids.c, null, 'A second amendment.');
+assert.equal(feedback.rows[0].coordinator_comments_count, 2);
+assert.equal(feedback.rows[0].amendments_count, 2);
+assert.equal((await submitCoordinatorFeedback(20, ids.d, 'Not assigned.', null)).rows.length, 0,
+  'An unassigned coordinator cannot update the event');
+await blocked('select * from submit_coordinator_feedback($1,$2,$3,$4)', [20, ids.c, ' ', null], '22023');
 
 // ---- 10.2: drafts are not tracked ------------------------------------------------------
 await addEvent(1, 'Draft');

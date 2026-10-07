@@ -154,6 +154,28 @@
 .equipment-update-final-actions .primary{width:100%;}
 }
 
+.feedback-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;overflow:auto;padding:24px;background:#19254199}
+.feedback-dialog{width:min(900px,100%);max-height:calc(100vh - 48px);overflow:auto;padding:24px;border:1px solid #dfe5ee;border-radius:8px;background:#fff;box-shadow:0 18px 50px #19254133}
+.feedback-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:20px}
+.feedback-heading p{margin:0 0 6px;color:#8b98ab;font-size:11px;text-transform:uppercase;letter-spacing:.08em}
+.feedback-heading h2{margin:0 0 6px;font:500 28px 'Playfair Display',serif}
+.feedback-heading span{color:#68758a;font-size:13px}
+.feedback-close{width:32px;height:32px;border:0;border-radius:5px;background:#edf0f5;color:#1c2940;font:inherit;font-weight:600;cursor:pointer}
+.feedback-close:disabled{cursor:not-allowed;opacity:.6}
+.feedback-dialog h3{margin:18px 0 12px;font-size:14px}
+.feedback-details,.feedback-inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.feedback-details label,.feedback-inputs label{display:flex;flex-direction:column;gap:7px;color:#68758a;font-size:12px}
+.feedback-details .wide{grid-column:1/-1}
+.feedback-details input,.feedback-details textarea,.feedback-inputs textarea{width:100%;border:1px solid #ccd5e2;border-radius:5px;background:#f8faff;padding:10px 12px;color:#1c2940;font:inherit}
+.feedback-details input[readonly],.feedback-details textarea[readonly]{color:#536078}
+.feedback-inputs{margin:20px 0}
+.feedback-inputs textarea{background:#fff;resize:vertical}
+.feedback-dialog .form-actions{margin-top:16px}
+.organiser-feedback p{margin:0 0 8px;white-space:pre-wrap;line-height:1.5}
+.organiser-feedback p:last-child{margin-bottom:0}
+.feedback-count{display:inline-grid;place-items:center;min-width:20px;height:20px;margin:0 3px;border-radius:50%;background:#c93d3d;color:#fff;font-size:11px;font-weight:700;line-height:1}
+@media(max-width:700px){.feedback-backdrop{padding:12px}.feedback-dialog{max-height:calc(100vh - 24px);padding:18px}.feedback-details,.feedback-inputs{grid-template-columns:1fr}.feedback-details .wide{grid-column:auto}.feedback-heading h2{font-size:23px}}
+
 /* Equipment Availability */
 .availability-event-table,.availability-detail-table,.availability-catalogue-table{width:100%;border-collapse:collapse;}
 .availability-event-table th,.availability-event-table td,.availability-detail-table th,.availability-detail-table td,.availability-catalogue-table th,.availability-catalogue-table td{padding:18px 20px;text-align:left;border-bottom:1px solid #e4e9f1;vertical-align:middle;}
