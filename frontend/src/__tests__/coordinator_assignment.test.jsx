@@ -330,6 +330,73 @@ describe('CoordinatorAssignment', () => {
     return json({});
   });
 
+  tc('FE-COORD-032', 'CoordinatorAssignment (coordinator view)', 'A coordinator submits clarification and amendment requests for a submitted event.',
+    'A popup shows the submitted event details as read-only, accepts separate clarification and amendment messages, and submits both against the event ID.',
+    { pre: 'Gala is assigned to c1 and is under review.', steps: '1. Click Request clarification/amendments. 2. Enter both messages. 3. Submit.' },
+    async () => {
+      const f = coordinatorBackend((url) => url.endsWith('/clarification-requests')
+        ? json(ev({ assigned_coordinator_id: 'c1', coordinator_comments: 'Clarify the schedule.', amendments: 'Update the capacity.', coordinator_comments_count: 1, amendments_count: 1 }))
+        : null);
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request clarification/amendments' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Request clarification/amendments' });
+      expect(within(dialog).getByLabelText('0 clarification requests already sent')).toHaveTextContent('0');
+      expect(within(dialog).getByLabelText('0 amendment requests already sent')).toHaveTextContent('0');
+      expect(within(dialog).getByLabelText('Event name')).toHaveAttribute('readonly');
+      expect(within(dialog).getByLabelText('Event name')).toHaveValue('Gala');
+      expect(within(dialog).getByLabelText('Description and planning requirements')).toHaveAttribute('readonly');
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Clarification request' }), { target: { value: 'Clarify the schedule.' } });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Amendment request' }), { target: { value: 'Update the capacity.' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Send request to organiser' }));
+      await waitFor(() => expect(callsTo(f, '/clarification-requests', 'POST')).toHaveLength(1));
+      const call = callsTo(f, '/clarification-requests', 'POST')[0];
+      expect(call[0]).toContain('/events/1/clarification-requests');
+      expect(JSON.parse(call[1].body)).toEqual({ coordinator_comments: 'Clarify the schedule.', amendments: 'Update the capacity.' });
+      expect(await screen.findByText('Clarification/amendment request sent to the event organiser.')).toBeInTheDocument();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Request clarification/amendments' }));
+      const reopenedDialog = await screen.findByRole('dialog', { name: 'Request clarification/amendments' });
+      expect(screen.getByLabelText('1 clarification requests already sent')).toHaveTextContent('1');
+      expect(screen.getByLabelText('1 amendment requests already sent')).toHaveTextContent('1');
+      expect(reopenedDialog).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-033', 'CoordinatorAssignment (organiser status)', 'The organiser views coordinator clarification and amendment requests.',
+    'The Clarification/amendments from coordinator column opens a read-only popup showing the event details and coordinator messages.',
+    { pre: 'The event has coordinator_comments and amendments.', steps: '1. Render Event Status as the organiser. 2. Click View clarification/amendments.' },
+    async () => {
+      mockFetch(() => json([ev({ event_status: 'Under review', coordinator_comments: 'Please clarify the schedule.', amendments: 'Update the venue setup.', coordinator_comments_count: 3, amendments_count: 2 })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View clarification/amendments' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Coordinator request log' });
+      expect(within(dialog).getByLabelText('Event name')).toHaveValue('Gala');
+      expect(within(dialog).getByLabelText('Coordinator clarification requested')).toHaveValue('Please clarify the schedule.');
+      expect(within(dialog).getByLabelText('Coordinator amendments requested')).toHaveValue('Update the venue setup.');
+      expect(within(dialog).getByLabelText('Coordinator clarification requested')).toHaveAttribute('readonly');
+      expect(within(dialog).getByLabelText('Coordinator amendments requested')).toHaveAttribute('readonly');
+      expect(screen.queryByLabelText(/clarification requests sent/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/amendment requests sent/)).not.toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close logs' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+  tc('FE-COORD-034', 'CoordinatorAssignment (coordinator view)', 'The clarification request is rejected by the backend.',
+    'The error is shown in the popup and the coordinator can close it.',
+    { kind: 'Negative', steps: '1. Open the clarification popup. 2. Enter clarification. 3. Return 409. 4. Close the popup.' },
+    async () => {
+      coordinatorBackend((url) => url.endsWith('/clarification-requests')
+        ? json({ detail: 'Event is no longer under review.' }, 409)
+        : null);
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request clarification/amendments' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Request clarification/amendments' });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Clarification request' }), { target: { value: 'Clarify the schedule.' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Send request to organiser' }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Event is no longer under review.');
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
   tc('FE-COORD-013', 'CoordinatorAssignment (coordinator view)', 'A coordinator opens the page.', 'Only events assigned to them are listed, each with editable status and coordinator selects; the heading is "Event management".',
     { pre: 'Two events, one assigned to c1.', steps: '1. Render as coordinator c1.' },
     async () => {

@@ -27,6 +27,10 @@ class EventChangeRequestReview(BaseModel):
     decision: Literal["Approved", "Rejected"]
     review_comments: str | None = None
 
+class CoordinatorFeedbackRequest(BaseModel):
+    coordinator_comments: str = ""
+    amendments: str = ""
+
 EVENT_STATUSES = {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
 EVENT_TABLE = "Event Details"
 INACTIVE_STATUSES = {"draft", "complete", "completed", "cancelled", "rejected"}
@@ -47,7 +51,7 @@ def coordinator_records(client: Client) -> list[dict[str, Any]]:
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
     coordinator_id = assignment.get("coordinator_id") if assignment else None
     coordinator = users.get(str(coordinator_id)) if coordinator_id else None
-    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None, "has_pending_change_request": bool(request.get("has_pending_change_request")), "latest_change_request": request.get("latest_change_request")}
+    return {"id": request["id"], "event_title": request.get("event_name"), "event_name": request.get("event_name"), "event_type": request.get("event_type"), "event_capacity": request.get("event_capacity"), "description": request.get("description"), "start_time": request.get("start_time"), "end_time": request.get("end_time"), "event_date": request.get("event_date"), "event_end_date": request.get("event_end_date") or request.get("event_date"), "layout_required": request.get("layout_required"), "facilities_required": request.get("facilities_required"), "accessibility_required": request.get("accessibility_required"), "coordinator_comments": request.get("coordinator_comments"), "amendments": request.get("amendments"), "coordinator_comments_count": request.get("coordinator_comments_count") or 0, "amendments_count": request.get("amendments_count") or 0, "event_status": request.get("status"), "event_organiser_id": request.get("organiser_id"), "assigned_coordinator_id": assignment.get("coordinator_id") if assignment else None, "coordinator_name": coordinator["name"] if coordinator else None, "coordinator_email": coordinator.get("email") if coordinator else None, "has_pending_change_request": bool(request.get("has_pending_change_request")), "latest_change_request": request.get("latest_change_request")}
 
 def change_request_view(
     change_request: dict[str, Any],
@@ -237,6 +241,39 @@ def all_events(user: dict[str, Any] = Depends(require_coordinator)):
     client = db(); users = coordinator_records(client)
     events = client.table(EVENT_TABLE).select("*").eq("coordinator_id", user["id"]).order("event_date").execute().data or []
     return [view(item, item if item.get("coordinator_id") else None, {str(user["id"]): user for user in users}) for item in events]
+
+@router.post("/api/events/{event_id}/clarification-requests")
+def request_event_clarification(
+    event_id: str,
+    feedback: CoordinatorFeedbackRequest,
+    user: dict[str, Any] = Depends(require_assigned_coordinator_event),
+):
+    coordinator_comments = feedback.coordinator_comments.strip()
+    amendments = feedback.amendments.strip()
+    if not coordinator_comments and not amendments:
+        raise HTTPException(400, "Enter a clarification request, an amendment request, or both.")
+    if len(coordinator_comments) > 5000 or len(amendments) > 5000:
+        raise HTTPException(400, "Clarification and amendment requests must be 5,000 characters or fewer each.")
+
+    try:
+        result = db().rpc(
+            "submit_coordinator_feedback",
+            {
+                "p_event_id": event_id,
+                "p_coordinator_id": user["id"],
+                "p_coordinator_comments": coordinator_comments or None,
+                "p_amendments": amendments or None,
+            },
+        ).execute()
+    except APIError as error:
+        if error.code == "22023":
+            raise HTTPException(400, error.message) from error
+        raise
+    updated = result.data
+    if not updated:
+        raise HTTPException(409, "The event assignment or review status changed. Reload the event and try again.")
+    updated_event = updated[0] if isinstance(updated, list) else updated
+    return view(updated_event, updated_event, {str(user["id"]): user})
 
 @router.get("/api/event-change-requests")
 def event_change_requests(user: dict[str, Any] = Depends(require_coordinator)):
