@@ -171,8 +171,12 @@ def test_role_constants():
 
 
 def jwt(aal):
-    import base64, json
-    part = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    import base64
+    import json
+
+    def part(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+
     return f"{part({'alg': 'HS256'})}.{part({'aal': aal} if aal else {})}.sig"
 
 

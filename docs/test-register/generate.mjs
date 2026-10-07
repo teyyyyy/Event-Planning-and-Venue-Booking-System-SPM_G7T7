@@ -27,10 +27,10 @@ const FONT = 'Arial';
 
 const SECTIONS = [
   { n: '6.1', title: 'Authentication and session', prefixes: ['FE-SUPA', 'FE-AUTH', 'FE-LOGIN', 'FE-API', 'FE-MFA', 'FE-SEC', 'BE-AUTH'],
-    intro: 'Feature codes: SUPA, AUTH, LOGIN, API. Sign-in uses Supabase Auth (email + password). Unit tests replace the Supabase client and the network with test doubles — they verify our code calls the SDK and API correctly, not that Supabase authenticates anyone.',
+    intro: 'Feature codes: SUPA, AUTH, LOGIN, API, MFA, SEC. Sign-in uses Supabase Auth (email + password), followed by an authenticator-app code (MFA); the backend rejects sessions that have not completed MFA. Signed-in users manage their authenticator devices from the Security dialog. Unit tests replace the Supabase client and the network with test doubles — they verify our code calls the SDK and API correctly, not that Supabase authenticates anyone.',
     fe: 'frontend/src/__tests__/supabase.test.js, api.test.js, AuthContext.test.jsx, Login.test.jsx, MfaChallenge.test.jsx, SecuritySettings.test.jsx', be: 'test/test_be_auth.py' },
   { n: '6.2', title: 'Application shell and role routing', prefixes: ['FE-APP', 'BE-APP', 'BE-ROLE'],
-    intro: 'Feature code: APP. Covers which workspace and navigation each role sees (frontend/src/App.jsx) and the FastAPI application wiring — routers, CORS and request validation (backend/main.py).',
+    intro: 'Feature codes: APP, ROLE. Covers which workspace and navigation each role sees (frontend/src/App.jsx) and the FastAPI application wiring — routers, CORS and request validation (backend/main.py). The ROLE cases check every protected route against all five roles, including requests that put another user\'s id in the path.',
     fe: 'frontend/src/__tests__/App.test.jsx', be: 'test/test_be_app.py, test/test_role_access.py' },
   { n: '6.3', title: 'Event organiser — event requests', prefixes: ['FE-ORG', 'BE-ORG'],
     intro: 'Feature code: ORG. Creating, drafting, editing and submitting event requests, including schedule validation and multi-day events. Organisers can also save change requests against submitted/active events; the assigned coordinator is notified atomically. Database behavior is verified in test/sprint2_sql.mjs.',
@@ -57,7 +57,7 @@ const SECTIONS = [
     intro: 'Feature code: VCAT. Venue staff and technical support browse venue information; only venue staff may edit operating hours, facilities, accessibility and layouts, and all input is validated on the server.',
     fe: 'frontend/src/__tests__/VenueCatalogue.test.jsx', be: 'test/test_be_venue_catalogue.py' },
   { n: '6.11', title: 'Sprint 2 attendee registration and notifications', prefixes: ['FE-SP2', 'BE-SP2'],
-    intro: 'Stories 38.1, 38.2 and 48.1. Covers attendee browsing and registration, private registration lists, cancelled events, notification ownership, linked-record permissions, read status, polling, refresh and error recovery. Backend tests use database doubles; database capacity, duplicate enforcement and notification triggers are verified separately by test/sprint2_sql.mjs.',
+    intro: 'Stories 38.1, 38.2 and 48.1. Feature code: SP2. Covers attendee browsing and registration, private registration lists, cancelled events, notification ownership, linked-record permissions, read status, polling, refresh and error recovery. Backend tests use database doubles; database capacity, duplicate enforcement and notification triggers are verified separately by test/sprint2_sql.mjs.',
     fe: 'frontend/src/__tests__/Sprint2.test.jsx', be: 'test/test_sprint2.py' },
   { n: '6.12', title: 'Significant event changes and change-request processing', prefixes: ['FE-EVCHG', 'BE-EVCHG'],
     intro: 'Stories 10.2 and 44.4. Feature code: EVCHG. Saved changes to submitted events are classified as Significant (schedule, capacity or venue requirements) or Ordinary; significant changes are logged and return the live venue booking and equipment requests to Pending. Coordinators process approved significant change requests, which supersedes the affected requests and initiates new Pending ones linked to the event and change request. The UI around these flows is also covered by FE-COORD and FE-VENUE cases. The database trigger and processing function are verified separately by test/significant_event_changes_sql.mjs.',
@@ -70,6 +70,16 @@ const SECTIONS = [
     fe: 'frontend/src/__tests__/VenueCalendar.test.jsx', be: 'none (uses the venue request routes)' },
 ];
 
+// Listed in §4. A new feature code needs an entry here as well as a section above.
+const CODES = {
+  SUPA: 'Supabase client', AUTH: 'login state / backend token checks', LOGIN: 'sign-in form', API: 'authenticated fetch helper',
+  MFA: 'authenticator-app sign-in step', SEC: 'Security dialog for authenticator devices', APP: 'app shell and routing',
+  ROLE: 'role access matrix', ORG: 'event organiser', COORD: 'coordinator assignment', VENUE: 'venue approval', VREQ: 'venue request',
+  VCAT: 'venue catalogue', EQREQ: 'equipment request', EQUPD: 'equipment update', EQAVAIL: 'equipment availability',
+  EQRES: 'equipment reservation', VCAL: 'venue availability calendar', SP2: 'Sprint 2 attendee registration and notifications',
+  EVCHG: 'significant event changes and change-request processing',
+};
+
 // ---- load + validate -------------------------------------------------------------------
 const all = [...JSON.parse(readFileSync(feFile, 'utf8')), ...JSON.parse(readFileSync(beFile, 'utf8'))];
 const problems = [];
@@ -81,6 +91,7 @@ for (const t of all) {
   for (const key of ['unit', 'scenario', 'steps', 'expected']) if (!t[key]) problems.push(`${t.id}: missing ${key}`);
   if (!SECTIONS.some((s) => s.prefixes.some((p) => t.id.startsWith(`${p}-`)))) problems.push(`${t.id}: no section for this prefix`);
 }
+for (const p of SECTIONS.flatMap((s) => s.prefixes)) if (!CODES[p.split('-')[1]]) problems.push(`${p}: add its feature code to CODES`);
 if (problems.length) { console.error(problems.join('\n')); process.exit(1); }
 
 const byNumber = (a, b) => a.id.localeCompare(b.id);
@@ -172,7 +183,7 @@ cover.push(new Paragraph({ spacing: { after: 240 }, children: [run(`${PROJECT} �
 const total = counts(all);
 cover.push(table([2400, W - 2400], ['Item', 'Detail'], [
   ['Document owner', 'Engineering — Gather / SPM G7T7'],
-  ['Status', 'Living document — regenerated whenever unit tests are added or changed (see §2.3)'],
+  ['Status', 'Living document — rebuilt by CI on every push and pull request, and committed whenever unit tests are added or changed (see §2.3)'],
   ['Current test frameworks', 'Frontend: Vitest 3 + React Testing Library (jsdom).  Backend: pytest.'],
   ['Last verified run', `${RUN_DATE} — ${total.pass} of ${total.total} registered test cases passed, ${total.fail} failed (see §7)`],
 ]));
@@ -192,7 +203,7 @@ const intro = [
   bullet('reviewers and markers can see test coverage without reading the test code;'),
   bullet('the team shares one vocabulary for test IDs and outcomes;'),
   bullet('new tests are added in a consistent shape as the product grows.'),
-  para(`Scope: automated unit tests only — individual functions, hooks and components tested in isolation with their dependencies (Supabase, the network, child components) replaced by test doubles. ${fe.length} frontend and ${be.length} backend test cases are registered, covering every module in frontend/src and backend/. Integration tests, end-to-end (browser) tests and the seed script test/coordinator_assignment_test.py (which needs a live database) are out of scope. The older unittest-style files in test/ (event_validation_test.py, venue_approval_test.py, venue_catalogue_test.py) still run under pytest but are not registered here; their scenarios are covered by the BE-ORG, BE-VENUE and BE-VCAT cases.`),
+  para(`Scope: automated unit tests only — individual functions, hooks and components tested in isolation with their dependencies (Supabase, the network, child components) replaced by test doubles. ${fe.length} frontend and ${be.length} backend test cases are registered, covering every module in frontend/src and backend/. Integration tests, end-to-end (browser) tests, the PostgreSQL migration suites (test/sprint2_sql.mjs, test/significant_event_changes_sql.mjs) and the seed script test/coordinator_assignment_test.py (which needs a live database) are out of scope. The older unittest-style files in test/ (event_validation_test.py, venue_approval_test.py, venue_catalogue_test.py) still run under pytest but are not registered here; their scenarios are covered by the BE-ORG, BE-VENUE and BE-VCAT cases.`),
 
   h1('2. How to run the tests and read the results'),
   h2('2.1 Frontend (Vitest)'),
@@ -208,9 +219,12 @@ const intro = [
   code('cd .. && backend/.venv/bin/python -m pytest -v'),
   para('The backend tests use an in-memory stand-in for the Supabase client (test/fake_supabase.py), so no database or .env file is needed.'),
   h2('2.3 Regenerating this document'),
-  para('Each test carries its own case ID, scenario, pre-conditions, steps, data and expected result (the tc(...) wrapper in frontend/src/test/tc.js and the @tc(...) decorator in test/tc.py). Running the build script executes both suites and regenerates this file, so the register cannot drift from the tests:'),
-  code('cd docs/test-register && npm install && ./build.sh'),
-  para('The Pass / Fail column comes from that run. The Created / Executed By names default to the git user and can be overridden with the TC_AUTHOR environment variable.'),
+  para('Each test carries its own case ID, scenario, pre-conditions, steps, data and expected result (the tc(...) wrapper in frontend/src/test/tc.js and the @tc(...) decorator in test/tc.py). One command lints the code, runs both suites with their coverage gates and then regenerates this file from the results, so the register cannot drift from the tests:'),
+  code('scripts/test-all.sh --register'),
+  para('The first run needs the dependencies installed once: §2.1, §2.2 and npm install in docs/test-register. docs/test-register/build.sh regenerates the file without the coverage gates.'),
+  para('The GitHub Actions workflow (.github/workflows/ci.yml) runs on every push to main and every pull request. Its backend and frontend jobs run lint, the unit tests and the coverage gates (backend 90% of lines, set in .coveragerc; frontend thresholds in frontend/vitest.config.js); a security job scans for committed secrets and known-vulnerable dependencies; and a register job rebuilds this document and attaches it to the run as the unit-test-cases artifact. A run fails if lint finds a problem, if any test fails, if a test has no tc(...) / @tc(...) metadata, if a test case ID is duplicated, or if coverage drops below the gates.'),
+  para('The Pass / Fail column comes from that run. The Created / Executed By names are taken from the TC_AUTHOR environment variable (default: Jeremytzm), and the dates from TC_DATE (default: the day of the run).'),
+  para('docs/TESTING.md in the repository is the step-by-step guide for adding tests for a new feature.'),
 
   h1('3. How to read a test case entry'),
   para('Each test case is one row of the register in §6. The columns follow the team\'s test-case template: the blue columns are written when the test is designed, and the orange columns are filled in when it is executed.'),
@@ -232,7 +246,7 @@ const intro = [
   h1('4. Test ID naming convention'),
   para('IDs have the form LAYER-FEATURE-NNN:'),
   bullet([['LAYER', { bold: true }], ' — FE for frontend (Vitest), BE for backend (pytest).']),
-  bullet([['FEATURE', { bold: true }], ' — short uppercase code for the area: SUPA (Supabase client), AUTH (login state / backend token checks), LOGIN (sign-in form), API (authenticated fetch helper), APP (app shell and routing), ORG (event organiser), COORD (coordinator assignment), VENUE (venue approval), VREQ (venue request), VCAT (venue catalogue), EQREQ (equipment request), EQUPD (equipment update), EQAVAIL (equipment availability), EQRES (equipment reservation), VCAL (venue availability calendar).']),
+  bullet([['FEATURE', { bold: true }], ` — short uppercase code for the area: ${Object.entries(CODES).map(([code, area]) => `${code} (${area})`).join(', ')}.`]),
   bullet([['NNN', { bold: true }], ' — zero-padded number, sequential within one LAYER-FEATURE pair, in creation order.']),
   para('Example: FE-VENUE-013 is the thirteenth frontend test written for venue approval. When a test is removed its ID is retired, not recycled — keep the row and mark it Deprecated.'),
 
@@ -307,16 +321,17 @@ const closing = [
   para('These were found by the first run of the suite (5 failing tests) and fixed in the application code; the tests below now pass and guard against regression.'),
   bullet([['FE-COORD-006, FE-COORD-020 — "Assign coordinator" did nothing. ', { bold: true }], 'In coordinator_assignment.jsx the button was wired to reassign() instead of assign(), so no request was sent. It now calls assign() in the organiser view; the coordinator drop-down still calls reassign().']),
   bullet([['FE-VENUE-014, FE-COORD-009, FE-COORD-017 — messages erased by the reload that followed. ', { bold: true }], 'venue_approval.jsx (failed approve/reject) and coordinator_assignment.jsx (assign, submit, reassign) set a message and then awaited a reload whose success path cleared it, so the user never saw it. The loaders now take a keepMessage flag and these flows pass it.']),
+  para('These were recorded as observations without a failing test, and have since been fixed and covered:'),
+  bullet([['BE-ROLE-002, BE-ROLE-003, BE-ROLE-008, BE-VREQ-012, BE-VREQ-013 — venue request routes did not check the caller. ', { bold: true }], 'backend/venue_request.py now requires a coordinator or venue staff member on every route. A coordinator can only list their own submissions, and can only submit requests for themselves and for events assigned to them.']),
+  bullet([['FE-VREQ-013 — "My Submissions" was not refreshed after a request was submitted. ', { bold: true }], 'The list is now reloaded after a successful submission.']),
+  bullet([['FE-VREQ-031 — an event without start/end times blanked the Venue Request page. ', { bold: true }], 'The page now shows "—" for the timing and refuses to submit until the event has times.']),
   h2('8.2 Other observations (no failing test)'),
   bullet('frontend/src/coordinator_assignment.jsx: an event whose status is "Submitted" is displayed as "Under review" in the coordinator\'s status drop-down, because "Submitted" is not one of EVENT_STATUSES.'),
-  bullet('backend/venue_request.py: /api/venues, /api/venue-bookings and /api/venue-booking-requests/... do not use the current_user / role dependencies, so any caller can list, create or read bookings for any coordinator_id. The other venue and equipment routers verify the caller.'),
-  bullet('frontend/src/VenueRequest.jsx: the "My Submissions" list is loaded once when the page opens and is not refreshed after a request is submitted, so a new request only appears after the page is reloaded.'),
-  bullet('frontend/src/VenueRequest.jsx: selecting an event reads selectedEvent.start_datetime / end_datetime directly, so an event row without those fields would throw a TypeError and blank the page. Events created through the organiser form store event_date, start_time and end_time; this depends on the Event Details table exposing the start_datetime / end_datetime fields.'),
 
   h1('9. Maintaining this document'),
-  bullet('When a pull request adds or changes a unit test, give the test its metadata (tc(...) / @tc(...)) and re-run docs/test-register/build.sh; commit the regenerated .docx with the PR.'),
-  bullet('Give each new test the next ID in its LAYER-FEATURE sequence. Add a new FEATURE code to §4 and a section entry in generate.mjs if a new area appears.'),
-  bullet('The generator refuses to build if an ID is duplicated, malformed, has no matching section, or is missing a scenario, steps or expected result.'),
+  bullet('When a pull request adds or changes a unit test, give the test its metadata (tc(...) / @tc(...)) and run scripts/test-all.sh --register; commit the regenerated .docx with the PR. docs/TESTING.md walks through this.'),
+  bullet('Give each new test the next ID in its LAYER-FEATURE sequence, and check the ID is still free after updating from main. If a new area appears, add its FEATURE code to CODES and a section entry to SECTIONS in docs/test-register/generate.mjs.'),
+  bullet('The generator refuses to build if an ID is duplicated, malformed, has no matching section, or is missing a scenario, steps or expected result, or if a section uses a feature code that is not in CODES.'),
   bullet('If a test is deleted, do not reuse its ID.'),
   bullet('Add a row to §7 for every release and whenever a Status changes.'),
   bullet('Keep the wording implementation-independent where possible: describe the behaviour, not the mock set-up.'),
