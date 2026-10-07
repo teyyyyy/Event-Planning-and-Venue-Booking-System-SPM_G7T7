@@ -379,7 +379,7 @@ def test_other_roles_cannot_use_reservation_routes(monkeypatch):
         assert fake.tables["Equipment Reservation"][0]["status"] == "Reserved"
 
 
-@tc("BE-ROLE-008", "Role access matrix", "coordinator-1 requests coordinator-2's venue booking submissions.",
+@tc("BE-ROLE-010", "Role access matrix", "coordinator-1 requests coordinator-2's venue booking submissions.",
     "HTTP 403 \"You can only access your own coordinator requests.\"; the Venue Booking Requests table is not read.",
     pre="coordinator-1 and coordinator-2 are Event Coordinators; coordinator-2 has a Pending venue booking request.",
     data="path coordinator_id = coordinator-2",

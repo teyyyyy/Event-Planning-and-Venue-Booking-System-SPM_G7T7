@@ -513,7 +513,7 @@ describe('CoordinatorAssignment', () => {
       expect(callsTo(f, '/event-change-requests')).toHaveLength(1);
     });
 
-  tc('FE-COORD-032', 'CoordinatorAssignment (event change request detail)', 'A coordinator selects a change request.',
+  tc('FE-COORD-051', 'CoordinatorAssignment (event change request detail)', 'A coordinator selects a change request.',
     'View expands the read-only event details form below its row while keeping the request list visible; Hide collapses it.',
     { steps: '1. Open Event Change Request. 2. Click View. 3. Inspect the expanded details. 4. Click Hide.' },
     async () => {
@@ -545,7 +545,7 @@ describe('CoordinatorAssignment', () => {
       expect(screen.getByRole('button', { name: 'View' })).toHaveAttribute('aria-expanded', 'false');
     });
 
-  tc('FE-COORD-033', 'CoordinatorAssignment (event change request tab)', 'The coordinator has no assigned change requests.',
+  tc('FE-COORD-052', 'CoordinatorAssignment (event change request tab)', 'The coordinator has no assigned change requests.',
     '"No event change requests found." is shown.', { kind: 'Edge', steps: '1. Open Event Change Request with an empty response.' },
     async () => {
       coordinatorBackend((url) => url.endsWith('/event-change-requests') ? json([]) : null);
@@ -575,7 +575,7 @@ describe('CoordinatorAssignment', () => {
       ]);
     });
 
-  tc('FE-COORD-034', 'CoordinatorAssignment (event change request review)', 'The assigned coordinator approves a pending change request.',
+  tc('FE-COORD-053', 'CoordinatorAssignment (event change request review)', 'The assigned coordinator approves a pending change request.',
     'The approved decision is saved, shown in the list, and the proposed event values are reflected in the expanded form.',
     { steps: '1. Open Event Change Request. 2. Expand a pending request. 3. Click Approve.' },
     async () => {
