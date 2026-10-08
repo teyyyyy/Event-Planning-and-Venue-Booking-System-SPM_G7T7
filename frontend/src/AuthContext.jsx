@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { supabase } from './utils/supabase';
@@ -29,6 +30,11 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   // null, or { step: 'verify', factorId } / { step: 'enroll' } while a password-only session awaits its second factor.
   const [mfa, setMfa] = useState(null);
+  // True while the user arrived from a password-recovery email link and must choose a new password.
+  const [recovery, setRecovery] = useState(false);
+  const recoveryRef = useRef(false);
+  // One-off message for the sign-in screen (e.g. after a successful password reset).
+  const [notice, setNotice] = useState('');
 
   const hydrateUser = useCallback(async (session) => {
     const baseUser = toUser(session);
@@ -60,8 +66,9 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let active = true;
     const apply = async (session) => {
+      if (recoveryRef.current) return;
       const next = await resolveSession(session);
-      if (!active) return;
+      if (!active || recoveryRef.current) return;
       setUser(next.user);
       setMfa(next.mfa);
       setLoading(false);
@@ -69,8 +76,17 @@ export function AuthProvider({ children }) {
 
     supabase.auth.getSession().then(({ data }) => apply(data.session));
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (!active) return;
+      if (event === 'PASSWORD_RECOVERY') {
+        // The recovery link signs the user in with a password-only session; hold it back until a new password is set.
+        recoveryRef.current = true;
+        setRecovery(true);
+        setUser(null);
+        setMfa(null);
+        setLoading(false);
+        return;
+      }
       apply(session);
     });
 
@@ -81,6 +97,7 @@ export function AuthProvider({ children }) {
   }, [resolveSession]);
 
   const login = useCallback(async (email, password) => {
+    setNotice('');
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -93,6 +110,41 @@ export function AuthProvider({ children }) {
     try {
       await supabase.auth.signOut();
     } finally {
+      setUser(null);
+      setMfa(null);
+    }
+  }, []);
+
+  // Sends a recovery email. Never reveals whether the address has an account.
+  const requestPasswordReset = useCallback(async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin,
+    });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  // Sets the new password from a recovery session, then signs out so the user logs in normally (including MFA).
+  const completePasswordReset = useCallback(async (password) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(error.message);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      recoveryRef.current = false;
+      setRecovery(false);
+      setUser(null);
+      setMfa(null);
+      setNotice('Your password has been reset. Sign in with your new password.');
+    }
+  }, []);
+
+  // Abandons a recovery session without changing the password.
+  const cancelPasswordReset = useCallback(async () => {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      recoveryRef.current = false;
+      setRecovery(false);
       setUser(null);
       setMfa(null);
     }
@@ -142,8 +194,13 @@ export function AuthProvider({ children }) {
   }, [listDevices]);
 
   const value = useMemo(
-    () => ({ user, loading, mfa, login, logout, startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice }),
-    [user, loading, mfa, login, logout, startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice]
+    () => ({
+      user, loading, mfa, recovery, notice, login, logout,
+      requestPasswordReset, completePasswordReset, cancelPasswordReset,
+      startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice,
+    }),
+    [user, loading, mfa, recovery, notice, login, logout, requestPasswordReset, completePasswordReset, cancelPasswordReset,
+      startEnrollment, verifyMfa, listDevices, confirmDevice, removeDevice]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

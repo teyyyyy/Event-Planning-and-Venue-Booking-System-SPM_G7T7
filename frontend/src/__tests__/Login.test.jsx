@@ -4,7 +4,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { tc } from '../test/tc';
 
 const login = vi.hoisted(() => vi.fn());
-vi.mock('../AuthContext', () => ({ useAuth: () => ({ login }) }));
+const requestPasswordReset = vi.hoisted(() => vi.fn());
+const authState = vi.hoisted(() => ({ notice: '' }));
+vi.mock('../AuthContext', () => ({ useAuth: () => ({ login, requestPasswordReset, notice: authState.notice }) }));
 
 import Login from '../Login';
 
@@ -12,7 +14,7 @@ const fill = (email, password) => {
   fireEvent.change(document.querySelector('input[type=email]'), { target: { value: email } });
   fireEvent.change(document.querySelector('input[type=password]'), { target: { value: password } });
 };
-const submit = () => fireEvent.click(screen.getByRole('button'));
+const submit = () => fireEvent.click(document.querySelector('button[type=submit]'));
 
 describe('Login', () => {
   tc('FE-LOGIN-001', 'Login', 'The sign-in page renders.', 'Email and password inputs (both required) and an enabled "Sign in" button are shown; no error is displayed.',
@@ -82,5 +84,49 @@ describe('Login', () => {
       login.mockReturnValue(new Promise(() => {}));
       submit();
       await waitFor(() => expect(screen.queryByText('Wrong password')).not.toBeInTheDocument());
+    });
+
+  tc('FE-LOGIN-007', 'Login', 'User clicks "Forgot password?".', 'The reset form replaces the sign-in form, with no password field and a "Back to sign in" option.',
+    { steps: '1. Render <Login />. 2. Click "Forgot password?".' },
+    () => {
+      render(<Login />);
+      fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }));
+      expect(screen.getByRole('heading', { name: 'Reset password' })).toBeInTheDocument();
+      expect(document.querySelector('input[type=password]')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Back to sign in' }));
+      expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    });
+
+  tc('FE-LOGIN-008', 'Login', 'User requests a recovery email.', 'requestPasswordReset is called with the email and a neutral confirmation is shown.',
+    { data: 'email = a@x.com', steps: '1. Open the reset form. 2. Enter the email. 3. Click "Send recovery link".' },
+    async () => {
+      requestPasswordReset.mockResolvedValue();
+      render(<Login />);
+      fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }));
+      fireEvent.change(document.querySelector('input[type=email]'), { target: { value: 'a@x.com' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send recovery link' }));
+      expect(await screen.findByText(/If an account exists/)).toBeInTheDocument();
+      expect(requestPasswordReset).toHaveBeenCalledWith('a@x.com');
+    });
+
+  tc('FE-LOGIN-009', 'Login', 'The recovery email request fails.', 'The error message is shown and no confirmation appears.',
+    { kind: 'Negative', steps: '1. Make requestPasswordReset reject. 2. Submit the reset form.' },
+    async () => {
+      requestPasswordReset.mockRejectedValue(new Error('Rate limit exceeded'));
+      render(<Login />);
+      fireEvent.click(screen.getByRole('button', { name: 'Forgot password?' }));
+      fireEvent.change(document.querySelector('input[type=email]'), { target: { value: 'a@x.com' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send recovery link' }));
+      expect(await screen.findByText('Rate limit exceeded')).toBeInTheDocument();
+      expect(screen.queryByText(/If an account exists/)).toBeNull();
+    });
+
+  tc('FE-LOGIN-010', 'Login', 'The user has just reset their password.', 'The success notice is shown on the sign-in form.',
+    { kind: 'State', pre: 'AuthContext notice is set.', steps: '1. Render <Login />.' },
+    () => {
+      authState.notice = 'Your password has been reset. Sign in with your new password.';
+      render(<Login />);
+      expect(screen.getByText(/Your password has been reset/)).toBeInTheDocument();
+      authState.notice = '';
     });
 });

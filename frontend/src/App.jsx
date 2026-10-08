@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useAuth } from "./AuthContext";
 import Login from "./Login";
 import MfaChallenge from "./MfaChallenge";
+import ResetPassword from "./ResetPassword";
 import SecurityButton from "./SecuritySettings";
 import CoordinatorAssignment from "./coordinator_assignment";
 import EventOrganiser from "./event_organiser";
@@ -405,7 +406,7 @@ function OrganiserWorkspace({ user, logout }) {
 }
 
 export default function App() {
-  const { user, loading, mfa } = useAuth();
+  const { user, loading, mfa, recovery } = useAuth();
 
   if (loading) {
     return (
@@ -415,6 +416,7 @@ export default function App() {
     );
   }
 
+  if (recovery) return <ResetPassword />;
   if (user) return <React.Fragment key={user.id}><AuthedApp /><Notifications /></React.Fragment>;
   return mfa ? <MfaChallenge /> : <Login />;
 }
