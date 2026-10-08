@@ -252,7 +252,7 @@ describe('AuthContext', () => {
       await act(async () => { await expect(result.current.confirmDevice('n', '000000')).rejects.toThrow('Invalid TOTP code entered'); });
     });
 
-  tc('FE-AUTH-RESET-001', 'AuthProvider', 'requestPasswordReset is called with an email.', 'Supabase is asked to email a recovery link redirecting to the app origin.',
+  tc('FE-AUTH-023', 'AuthProvider', 'requestPasswordReset is called with an email.', 'Supabase is asked to email a recovery link redirecting to the app origin.',
     { data: 'email = " a@x.com "', steps: '1. Mount. 2. Call requestPasswordReset.' },
     async () => {
       auth.resetPasswordForEmail.mockResolvedValue({ error: null });
@@ -261,7 +261,7 @@ describe('AuthContext', () => {
       expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('a@x.com', { redirectTo: window.location.origin });
     });
 
-  tc('FE-AUTH-RESET-002', 'AuthProvider', 'Supabase rejects the recovery request.', 'requestPasswordReset throws the error message.',
+  tc('FE-AUTH-024', 'AuthProvider', 'Supabase rejects the recovery request.', 'requestPasswordReset throws the error message.',
     { kind: 'Negative', steps: '1. Make resetPasswordForEmail return an error. 2. Call requestPasswordReset.' },
     async () => {
       auth.resetPasswordForEmail.mockResolvedValue({ error: { message: 'Rate limit' } });
@@ -269,7 +269,7 @@ describe('AuthContext', () => {
       await expect(result.current.requestPasswordReset('a@x.com')).rejects.toThrow('Rate limit');
     });
 
-  tc('FE-AUTH-RESET-003', 'AuthProvider', 'The recovery link is opened.', 'recovery is true and no user is signed in, even though a session exists.',
+  tc('FE-AUTH-025', 'AuthProvider', 'The recovery link is opened.', 'recovery is true and no user is signed in, even though a session exists.',
     { kind: 'State', steps: '1. Mount. 2. Emit PASSWORD_RECOVERY with a session.' },
     async () => {
       const { result } = await mount();
@@ -278,7 +278,7 @@ describe('AuthContext', () => {
       expect(result.current.user).toBeNull();
     });
 
-  tc('FE-AUTH-RESET-004', 'AuthProvider', 'The new password is saved.', 'The password is updated, the session is signed out, recovery ends and a success notice is set.',
+  tc('FE-AUTH-026', 'AuthProvider', 'The new password is saved.', 'The password is updated, the session is signed out, recovery ends and a success notice is set.',
     { steps: '1. Enter recovery. 2. Call completePasswordReset.' },
     async () => {
       auth.updateUser.mockResolvedValue({ error: null });
@@ -291,7 +291,7 @@ describe('AuthContext', () => {
       expect(result.current.notice).toMatch(/password has been reset/);
     });
 
-  tc('FE-AUTH-RESET-005', 'AuthProvider', 'Supabase rejects the new password.', 'completePasswordReset throws and the user stays in recovery.',
+  tc('FE-AUTH-027', 'AuthProvider', 'Supabase rejects the new password.', 'completePasswordReset throws and the user stays in recovery.',
     { kind: 'Negative', steps: '1. Enter recovery. 2. Make updateUser fail. 3. Call completePasswordReset.' },
     async () => {
       auth.updateUser.mockResolvedValue({ error: { message: 'Weak password' } });
@@ -301,7 +301,7 @@ describe('AuthContext', () => {
       expect(result.current.recovery).toBe(true);
     });
 
-  tc('FE-AUTH-RESET-006', 'AuthProvider', 'Other auth events arrive during recovery.', 'The recovery session is not turned into a signed-in user.',
+  tc('FE-AUTH-028', 'AuthProvider', 'Other auth events arrive during recovery.', 'The recovery session is not turned into a signed-in user.',
     { kind: 'State', steps: '1. Enter recovery. 2. Emit SIGNED_IN with the same session.' },
     async () => {
       auth.mfa.getAuthenticatorAssuranceLevel.mockResolvedValue({ data: { currentLevel: 'aal2' } });

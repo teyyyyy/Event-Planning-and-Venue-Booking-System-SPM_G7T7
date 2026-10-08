@@ -26,9 +26,9 @@ const RUN_DATE = process.env.TC_DATE || new Date().toISOString().slice(0, 10);
 const FONT = 'Arial';
 
 const SECTIONS = [
-  { n: '6.1', title: 'Authentication and session', prefixes: ['FE-SUPA', 'FE-AUTH', 'FE-LOGIN', 'FE-API', 'FE-MFA', 'FE-SEC', 'BE-AUTH'],
-    intro: 'Feature codes: SUPA, AUTH, LOGIN, API, MFA, SEC. Sign-in uses Supabase Auth (email + password), followed by an authenticator-app code (MFA); the backend rejects sessions that have not completed MFA. Signed-in users manage their authenticator devices from the Security dialog. Unit tests replace the Supabase client and the network with test doubles — they verify our code calls the SDK and API correctly, not that Supabase authenticates anyone.',
-    fe: 'frontend/src/__tests__/supabase.test.js, api.test.js, AuthContext.test.jsx, Login.test.jsx, MfaChallenge.test.jsx, SecuritySettings.test.jsx', be: 'test/test_be_auth.py' },
+  { n: '6.1', title: 'Authentication and session', prefixes: ['FE-SUPA', 'FE-AUTH', 'FE-LOGIN', 'FE-API', 'FE-MFA', 'FE-SEC', 'FE-RESET', 'BE-AUTH'],
+    intro: 'Feature codes: SUPA, AUTH, LOGIN, API, MFA, SEC, RESET. Sign-in uses Supabase Auth (email + password), followed by an authenticator-app code (MFA); the backend rejects sessions that have not completed MFA. Signed-in users manage their authenticator devices from the Security dialog. Unit tests replace the Supabase client and the network with test doubles — they verify our code calls the SDK and API correctly, not that Supabase authenticates anyone.',
+    fe: 'frontend/src/__tests__/supabase.test.js, api.test.js, AuthContext.test.jsx, Login.test.jsx, MfaChallenge.test.jsx, SecuritySettings.test.jsx, ResetPassword.test.jsx', be: 'test/test_be_auth.py' },
   { n: '6.2', title: 'Application shell and role routing', prefixes: ['FE-APP', 'BE-APP', 'BE-ROLE'],
     intro: 'Feature codes: APP, ROLE. Covers which workspace and navigation each role sees (frontend/src/App.jsx) and the FastAPI application wiring — routers, CORS and request validation (backend/main.py). The ROLE cases check every protected route against all five roles, including requests that put another user\'s id in the path.',
     fe: 'frontend/src/__tests__/App.test.jsx', be: 'test/test_be_app.py, test/test_role_access.py' },
@@ -73,7 +73,7 @@ const SECTIONS = [
 // Listed in §4. A new feature code needs an entry here as well as a section above.
 const CODES = {
   SUPA: 'Supabase client', AUTH: 'login state / backend token checks', LOGIN: 'sign-in form', API: 'authenticated fetch helper',
-  MFA: 'authenticator-app sign-in step', SEC: 'Security dialog for authenticator devices', APP: 'app shell and routing',
+  MFA: 'authenticator-app sign-in step', SEC: 'Security dialog for authenticator devices', RESET: 'password reset (forgot password / new password)', APP: 'app shell and routing',
   ROLE: 'role access matrix', ORG: 'event organiser', COORD: 'coordinator assignment', VENUE: 'venue approval', VREQ: 'venue request',
   VCAT: 'venue catalogue', EQREQ: 'equipment request', EQUPD: 'equipment update', EQAVAIL: 'equipment availability',
   EQRES: 'equipment reservation', VCAL: 'venue availability calendar', SP2: 'Sprint 2 attendee registration and notifications',
