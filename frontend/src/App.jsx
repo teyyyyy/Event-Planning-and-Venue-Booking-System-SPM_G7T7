@@ -16,6 +16,7 @@ import VenueCatalogue from "./VenueCatalogue";
 import EquipmentReservation from "./EquipmentReservation";
 import AttendeeWorkspace from "./AttendeeWorkspace";
 import Notifications from "./Notifications";
+import OperationalFeasibilityCheck from "./operational_feasibility_check";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -25,6 +26,7 @@ function AuthedApp() {
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
   const isAttendee = normalizedRole === "attendee";
+  const isSafetyOfficer = normalizedRole === "safety officer";
 
   if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
@@ -35,6 +37,8 @@ function AuthedApp() {
     return <OrganiserWorkspace user={user} logout={logout} />;
   if (isVenueStaff)
     return <VenueStaffWorkspace logout={logout} email={user.email} />;
+  if (isSafetyOfficer)
+    return <SafetyOfficerWorkspace user={user} logout={logout} />;
 
   return (
     <div className="auth-screen">
@@ -49,6 +53,46 @@ function AuthedApp() {
   );
 }
 
+// Safety Officer workspace
+function SafetyOfficerWorkspace({ user, logout }) {
+  return (
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">SAFETY OFFICER</div>
+
+          <nav className="coordinator-side-nav" aria-label="Safety Officer navigation">
+            <button
+              type="button"
+              className="coordinator-nav-button active"
+            >
+              Operational Safety Check
+            </button>
+          </nav>
+        </div>
+
+        <div className="coordinator-side-footer">
+          <SecurityButton />
+          <button
+            type="button"
+            className="coordinator-logout"
+            onClick={logout}
+            title={user.email}
+          >
+            Log out
+          </button>
+        </div>
+      </aside>
+
+      <div className="coordinator-main">
+        <div className="embedded-existing-page">
+          <OperationalFeasibilityCheck />
+        </div>
+      </div>
+    </div>
+  );
+}
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
 

@@ -22,6 +22,7 @@ ORGANISER_ROLE = "event organiser"
 VENUE_STAFF_ROLE = "venue staff"
 TECHNICAL_SUPPORT_ROLE = "technical support staff"
 ATTENDEE_ROLE = "attendee"
+SAFETY_OFFICER_ROLE = "safety officer"
 
 # Set REQUIRE_MFA=false to accept password-only (aal1) sessions, e.g. for local development.
 MFA_REQUIRED = os.getenv("REQUIRE_MFA", "true").strip().lower() != "false"
@@ -101,6 +102,12 @@ def require_technical_support(user: dict[str, Any] = Depends(current_user)) -> d
 def require_attendee(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if str(user.get("role", "")).strip().lower() != ATTENDEE_ROLE:
         raise HTTPException(403, "Attendee access required.")
+    return user
+
+
+def require_safety_officer(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != SAFETY_OFFICER_ROLE:
+        raise HTTPException(403, "Safety officer access required.")
     return user
 
 

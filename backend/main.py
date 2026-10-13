@@ -12,6 +12,7 @@ from equipment_update import router as equipment_update_router
 from equipment_availability import router as equipment_availability_router
 from venue_catalogue import router as venue_catalogue_router
 from equipment_reservation import router as equipment_reservation_router
+from operational_feasibility_check import router as operational_feasibility_check_router
 
 
 app = FastAPI(title="Event Coordinator Assignment API", version="1.0.0")
@@ -31,6 +32,7 @@ app.include_router(equipment_update_router)
 app.include_router(equipment_availability_router)
 app.include_router(venue_catalogue_router)
 app.include_router(equipment_reservation_router)
+app.include_router(operational_feasibility_check_router)
 
 
 from database import request_actor

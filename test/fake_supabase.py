@@ -7,6 +7,7 @@ PKS = {
     "Equipment Request": "request_id", "Venue Booking Requests": "request_id",
     "event_change_requests": "id", "notifications": "id",
     "Equipment Reservation": "reservation_id", "Equipment Reservation Item": "reservation_item_id",
+    "Operational Safety Check": "check_id",
 }
 
 
