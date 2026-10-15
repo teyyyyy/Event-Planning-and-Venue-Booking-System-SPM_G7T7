@@ -21,20 +21,24 @@ function AuthedApp() {
   const { user, logout } = useAuth();
   const normalizedRole = user.role.trim().toLowerCase();
   const isCoordinator = normalizedRole === "event coordinator";
+  const isCoordinatorLead = normalizedRole === "event coordinator lead";
   const isTechnicalSupport = normalizedRole === "technical support staff";
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
+  const isSafetyOfficer = normalizedRole === "safety officer";
   const isAttendee = normalizedRole === "attendee";
 
   if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
-  if (isCoordinator)
+  if (isCoordinator || isCoordinatorLead)
     return <CoordinatorWorkspace user={user} logout={logout} />;
   if (isOrganiser)
     return <OrganiserWorkspace user={user} logout={logout} />;
   if (isVenueStaff)
     return <VenueStaffWorkspace logout={logout} email={user.email} />;
+  if (isSafetyOfficer)
+    return <SafetyOfficerWorkspace user={user} logout={logout} />;
 
   return (
     <div className="auth-screen">
@@ -44,6 +48,48 @@ function AuthedApp() {
         <button type="button" className="primary" onClick={logout}>
           Log out
         </button>
+      </div>
+    </div>
+  );
+}
+
+// Safety Officer workspace
+function SafetyOfficerWorkspace({ user, logout }) {
+  return (
+    <div className="coordinator-workspace">
+      <aside className="coordinator-sidebar">
+        <div>
+          <div className="logo">G</div>
+          <div className="side-label">SAFETY OFFICER</div>
+
+          <nav className="coordinator-side-nav" aria-label="Safety Officer navigation">
+            <button
+              type="button"
+              className="coordinator-nav-button active"
+            >
+              Operational Safety Check
+            </button>
+          </nav>
+        </div>
+
+        <div className="coordinator-side-footer">
+          <SecurityButton />
+          <button
+            type="button"
+            className="coordinator-logout"
+            onClick={logout}
+            title={user.email}
+          >
+            Log out
+          </button>
+        </div>
+      </aside>
+
+      <div className="coordinator-main">
+        <div className="embedded-existing-page">
+          <h2>Operational Safety Check</h2>
+          <p>Safety check requests are not available yet.</p>
+        </div>
       </div>
     </div>
   );
@@ -265,7 +311,11 @@ function CoordinatorWorkspace({ user, logout }) {
       <aside className="coordinator-sidebar">
         <div>
           <div className="logo">G</div>
-          <div className="side-label">EVENT COORDINATOR</div>
+          <div className="side-label">
+            {user?.role?.trim().toLowerCase() === "event coordinator lead"
+              ? "EVENT COORDINATOR LEAD"
+              : "EVENT COORDINATOR"}
+          </div>
 
           <nav className="coordinator-side-nav">
             <button
