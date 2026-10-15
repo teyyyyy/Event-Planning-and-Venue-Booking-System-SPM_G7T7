@@ -382,22 +382,28 @@ describe('VenueRequest', () => {
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
 
-  tc('FE-VREQ-032', 'VenueRequest (submit)', 'A booking request is submitted for an event that might already have requests, but for a different venue.', 'The submission succeeds and sends the correct payload without a duplicate error.', { kind: 'Positive', data: 'Same event, different venue (Hall B)', steps: '1. Select "Gala". 2. Select "Hall B". 3. Submit successfully.' },
-  async () => {
-    const f = backend();
-    await ready();
-    
-    pickEvent(1);
-    
-    await chooseVenue('Hall B');
-    
-    await waitFor(() => expect(submitBtn()).toBeEnabled());
-    fireEvent.click(submitBtn());
-    
-    expect(await screen.findByText('Venue request #9 was submitted successfully.')).toBeInTheDocument();
-    
-    const [url, options] = callsTo(f, '/venue-bookings', 'POST')[0];
-    expect(url).toMatch(/\/venue-bookings$/);
-    expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 2, coordinator_id: 'c1' });
-  });
+  tc('FE-VREQ-032', 'VenueRequest (submit)', 'A booking request is submitted for an event that might already have requests, but for a different venue.', 'The submission succeeds and sends the correct payload without a duplicate error.', { kind: 'Positive', data: 'Same event, different venue', steps: '1. Select "Gala". 2. Select an alternate valid venue. 3. Submit successfully.' },
+    async () => {
+      // 1. Create a dummy venue that passes Gala's auto-filters so it stays visible
+      const HALL_C = { venue_id: 3, name: 'Hall C', capacity: 100, layouts: ['Theatre'], facilities: ['Wi-Fi'], accessible: 1 };
+      
+      // 2. Inject it into the backend mock alongside Hall A
+      const f = backend({ venues: [HALL_A, HALL_C] });
+      await ready();
+      
+      pickEvent(1);
+      
+      // 3. Choose the new valid venue
+      await chooseVenue('Hall C');
+      
+      await waitFor(() => expect(submitBtn()).toBeEnabled());
+      fireEvent.click(submitBtn());
+      
+      expect(await screen.findByText('Venue request #9 was submitted successfully.')).toBeInTheDocument();
+      
+      // 4. Check the URL and verify the payload sent venue_id: 3
+      const [url, options] = callsTo(f, '/venue-bookings', 'POST')[0];
+      expect(url).toMatch(/\/venue-bookings$/);
+      expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 3, coordinator_id: 'c1' });
+    });
 });
