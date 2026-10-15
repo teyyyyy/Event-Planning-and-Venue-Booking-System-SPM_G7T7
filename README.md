@@ -84,6 +84,19 @@ status list. Requests are available for submitted and active events with an
 assigned coordinator; Draft, Completed, Cancelled, and Rejected events cannot
 receive change requests.
 
+## Coordinator clarification and amendment requests
+
+Before using **Request clarification/amendments** in Event Management, run
+`backend/sql/coordinator_clarification_requests.sql` in the Supabase SQL Editor,
+then restart the backend. The migration safely ensures the
+`coordinator_comments` and `amendments` fields exist on `Event Details`.
+Separate cumulative counters track clarification and amendment submissions and
+appear in red badges for the coordinator and organiser. Existing non-empty
+messages are counted once when the migration first initializes the counters.
+Coordinators can submit either or both messages for an event assigned to them
+while it is Under review. The organiser sees the latest messages in Event
+Status; these requests do not change the submitted event details.
+
 ## Significant event changes and change-request processing (10.2, 44.4)
 
 Rerun `backend/sql/event_change_requests.sql`, then run
@@ -148,18 +161,49 @@ cd docs/test-register && npm install && ./build.sh
 
 ### Automatic checks for new code
 
-`scripts/test-all.sh` runs both suites with coverage gates. It fails if a test fails, if a test
-has no `@tc(...)` / `tc(...)` documentation, or if new code is left untested (backend must stay at
-100% of lines; frontend thresholds are in `frontend/vitest.config.js`). It runs automatically:
+`scripts/test-all.sh` lints the code and runs both suites with coverage gates. It fails if lint finds a
+problem, if a test fails, if a test has no `@tc(...)` / `tc(...)` documentation, or if new code is left
+untested (backend must stay at 90% of lines, set in `.coveragerc`; frontend thresholds are in
+`frontend/vitest.config.js`). It runs automatically:
 
-- **On every push / pull request** — `.github/workflows/tests.yml` also builds the Word register and
-  uploads it as the `unit-test-cases` artifact.
+- **On every push / pull request** — `.github/workflows/ci.yml` runs four jobs in parallel:
+  - **Backend - lint, test & coverage:** `ruff`, then `pytest` with the coverage gate.
+  - **Frontend - lint, test & build:** ESLint, then Vitest with the coverage gate, then a production build.
+  - **Security - secrets & dependency audit:** `gitleaks` scans for committed secrets, and `pip-audit` and
+    `npm audit` fail on a known high or critical vulnerability. These run only in CI.
+  - **Test register - build unit test cases document:** rebuilds the Word register, which also fails on a
+    duplicate test case ID, and uploads it as the `unit-test-cases` artifact.
 - **On every commit that touches code or tests** — enable once per clone:
-  `git config core.hooksPath .githooks`
+  `git config core.hooksPath .githooks`. The hook runs that checkout's own tests, so install the
+  dependencies above in each clone or worktree first. `git commit --no-verify` skips it in an
+  emergency; CI still runs on the pull request.
 - **In Claude Code** — `.claude/settings.json` re-runs it after any edit to a backend or frontend source file.
 
 When you add a function, add a test with the next free case ID in the matching `test/test_be_*.py`
 or `frontend/src/__tests__/*.test.jsx`, then run `scripts/test-all.sh --register` to refresh the register.
+**[docs/TESTING.md](docs/TESTING.md)** is the step-by-step guide, with templates for both suites.
+
+### Keeping CI green
+
+- **Change behaviour, change its tests in the same commit.** A new payload shape, status value,
+  error message or access rule breaks the existing tests that describe the old one.
+- **New code needs tests.** CI fails below the coverage gates: backend 90% of lines; frontend 98% of
+  lines, 96% of statements, 94% of functions and 88% of branches.
+- **Keep lint clean.** `ruff` (backend) and ESLint (frontend) must pass. The frontend allows its 9 existing
+  `react-hooks/exhaustive-deps` warnings but fails on any new warning. If you fix one, lower
+  `--max-warnings` in `frontend/package.json` to match.
+- **Don't add a dependency with a known high or critical vulnerability.** `npm audit` and `pip-audit`
+  fail CI, and they can also start failing later if a new advisory is published for something already installed.
+  Update the package (`npm audit fix` / `pip install -U`).
+- **Never commit secrets.** `gitleaks` scans the whole history, so a key removed in a later commit still fails.
+  `.env` is git-ignored; revoke any key that is committed.
+- **Case IDs must be unique.** Someone else may have taken "the next free ID" since you started, and
+  a duplicate ID breaks the register. Check again after updating from `main`.
+- **Don't hard-code dates that depend on today.** Some forms reject past dates, so a fixed date
+  starts failing once it passes. Derive it from the current date (see `FUTURE` in `event_organiser.test.jsx`).
+- **Update from `main` and run `scripts/test-all.sh` before opening a pull request.** A branch that
+  passes on its own can still fail against a newer `main`.
+- **Never merge a pull request while a CI check is red.** That is how `main` breaks for everyone.
 
 ## Authentication
 

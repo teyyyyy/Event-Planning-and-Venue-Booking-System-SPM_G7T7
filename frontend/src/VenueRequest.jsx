@@ -57,8 +57,6 @@ export default function VenueRequest({ user }) {
   // 2. Form State
   const [eventId, setEventId] = useState("");
   const [selectedVenueId, setSelectedVenueId] = useState(null);
-  const [startDatetime, setStartDatetime] = useState("");
-  const [endDatetime, setEndDatetime] = useState("");
 
   // --- Filter State & Logic ---
   const [showManualFilters, setShowManualFilters] = useState(false);
@@ -96,21 +94,12 @@ export default function VenueRequest({ user }) {
       setFilterLayout(selectedEvent.layout_required || "");
       setFilterAccessible(Number(selectedEvent.accessibility_required) === 1);
       setFilterFacilities(selectedEvent.facilities_required || []);
-
-      if (selectedEvent.start_datetime) {
-        setStartDatetime(selectedEvent.start_datetime.slice(0, 16));
-      }
-      if (selectedEvent.end_datetime) {
-        setEndDatetime(selectedEvent.end_datetime.slice(0, 16));
-      }
     } else {
       // Clear everything if no event is selected
       setFilterCapacity("");
       setFilterLayout("");
       setFilterAccessible(false);
       setFilterFacilities([]);
-      setStartDatetime("");
-      setEndDatetime("");
     }
   }, [selectedEvent]);
 
@@ -218,6 +207,15 @@ export default function VenueRequest({ user }) {
       setNotice({
         type: "error",
         text: "Please ensure an event and venue are selected.",
+      });
+      return;
+    }
+
+    // The overlap check below needs the event's times, so don't submit without them
+    if (!selectedEvent.start_datetime || !selectedEvent.end_datetime) {
+      setNotice({
+        type: "error",
+        text: "This event has no start or end time, so venue availability can't be checked. The event's timing must be set before a venue can be requested.",
       });
       return;
     }
@@ -461,12 +459,19 @@ export default function VenueRequest({ user }) {
                       </td>
                       <td>{selectedEvent.event_date}</td>
                       <td>
-                        {format12HourTime(
-                          selectedEvent.start_datetime.slice(11, 16),
-                        )}{" "}
-                        -{" "}
-                        {format12HourTime(
-                          selectedEvent.end_datetime.slice(11, 16),
+                        {selectedEvent.start_datetime &&
+                        selectedEvent.end_datetime ? (
+                          <>
+                            {format12HourTime(
+                              selectedEvent.start_datetime.slice(11, 16),
+                            )}{" "}
+                            -{" "}
+                            {format12HourTime(
+                              selectedEvent.end_datetime.slice(11, 16),
+                            )}
+                          </>
+                        ) : (
+                          "—"
                         )}
                       </td>
                       <td>

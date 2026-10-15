@@ -7,7 +7,6 @@ import pytest
 from fastapi import HTTPException
 from postgrest.exceptions import APIError
 
-import coordinator_assignment as ca
 import event_organiser as eo
 from fake_supabase import FakeClient
 from tc import tc

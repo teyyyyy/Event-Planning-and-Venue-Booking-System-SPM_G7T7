@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect, vi } from 'vitest';
+import { describe, expect } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
@@ -31,7 +31,6 @@ const openDetail = async () => {
 };
 const qty = () => document.querySelector('input[type=number]');
 const confirm = () => screen.getByRole('button', { name: /Confirm All Updates|Updating…/ });
-const lastNotice = () => within(screen.getByRole('alertdialog'));
 
 describe('EquipmentUpdate', () => {
   tc('FE-EQUPD-001', 'EquipmentUpdate', 'Technical support opens the page.', 'A loading message shows, then /equipment-update/<staff>/requests/summary is fetched and requests are listed by event with equipment description and status.', { steps: '1. Render. 2. Wait for the table.' },

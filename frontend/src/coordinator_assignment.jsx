@@ -58,14 +58,96 @@ function ChangeRequestField({ label, originalValue, proposedValue, wide = false,
   </label>;
 }
 
-function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, coordinators, canManage = false, showChangeDecision = false, historyEventId = null, onToggleHistory }) {
-  const columnCount = 5 + (canManage ? 0 : 1) + (showChangeDecision ? 1 : 0);
+function displayEventDetail(value) {
+  if (Array.isArray(value)) return value.join(', ') || 'Not provided';
+  return value == null || value === '' ? 'Not provided' : String(value);
+}
+
+function FeedbackCount({ count, label }) {
+  return <span className="feedback-count" aria-label={`${count || 0} ${label}`}>{count || 0}</span>;
+}
+
+function CoordinatorFeedbackDialog({ event, clarification, amendments, error, isSubmitting, onChange, onClose, onSubmit }) {
+  const details = [
+    ['Event name', event.event_title],
+    ['Event type', event.event_type],
+    ['Start date', event.event_date],
+    ['End date', event.event_end_date || event.event_date],
+    ['Capacity', event.event_capacity],
+    ['Start time', formatTime(event.start_time)],
+    ['End time', formatTime(event.end_time)],
+    ['Required layout', event.layout_required],
+    ['Required facilities', event.facilities_required],
+    ['Accessibility requirements', event.accessibility_required],
+  ];
+  return <div className="feedback-backdrop">
+    <section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-dialog-title">
+      <div className="feedback-heading">
+        <div><p>Event #{event.id}</p><h2 id="feedback-dialog-title">Request clarification/amendments</h2><span>{event.event_title}</span></div>
+        <button className="feedback-close" type="button" aria-label="Close" onClick={onClose} disabled={isSubmitting}>X</button>
+      </div>
+      <form onSubmit={onSubmit}>
+        <h3>Submitted event details</h3>
+        <div className="feedback-details">
+          {details.map(([label, value]) => <label key={label}>{label}<input value={displayEventDetail(value)} readOnly /></label>)}
+          <label className="wide">Description and planning requirements<textarea value={displayEventDetail(event.description)} readOnly rows="4" /></label>
+        </div>
+        <div className="feedback-inputs">
+          <label><span>Clarification requested <FeedbackCount count={event.coordinator_comments_count} label="clarification requests already sent" /></span><textarea aria-label="Clarification request" value={clarification} onChange={(input) => onChange('coordinator_comments', input.target.value)} maxLength={5000} rows="4" /></label>
+          <label><span>Amendments requested <FeedbackCount count={event.amendments_count} label="amendment requests already sent" /></span><textarea aria-label="Amendment request" value={amendments} onChange={(input) => onChange('amendments', input.target.value)} maxLength={5000} rows="4" /></label>
+        </div>
+        {error && <p className="message" role="alert">{error}</p>}
+        <div className="form-actions">
+          <button className="primary" type="submit" disabled={isSubmitting || (!clarification.trim() && !amendments.trim())}>{isSubmitting ? 'Sending request...' : 'Send request to organiser'}</button>
+          <button className="secondary" type="button" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+        </div>
+      </form>
+    </section>
+  </div>;
+}
+
+function CoordinatorFeedbackLogDialog({ event, onClose }) {
+  const details = [
+    ['Event name', event.event_title],
+    ['Event type', event.event_type],
+    ['Start date', event.event_date],
+    ['End date', event.event_end_date || event.event_date],
+    ['Capacity', event.event_capacity],
+    ['Start time', formatTime(event.start_time)],
+    ['End time', formatTime(event.end_time)],
+    ['Required layout', event.layout_required],
+    ['Required facilities', event.facilities_required],
+    ['Accessibility requirements', event.accessibility_required],
+  ];
+  return <div className="feedback-backdrop">
+    <section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="feedback-log-title">
+      <div className="feedback-heading">
+        <div><p>Event #{event.id}</p><h2 id="feedback-log-title">Coordinator request log</h2><span>{event.event_title}</span></div>
+        <button className="feedback-close" type="button" aria-label="Close logs" onClick={onClose}>X</button>
+      </div>
+      <h3>Submitted event details</h3>
+      <div className="feedback-details">
+        {details.map(([label, value]) => <label key={label}>{label}<input value={displayEventDetail(value)} readOnly /></label>)}
+        <label className="wide">Description and planning requirements<textarea value={displayEventDetail(event.description)} readOnly rows="4" /></label>
+        <label>Clarification requested<textarea aria-label="Coordinator clarification requested" value={event.coordinator_comments || 'No clarification request.'} readOnly rows="4" /></label>
+        <label>Amendments requested<textarea aria-label="Coordinator amendments requested" value={event.amendments || 'No amendment request.'} readOnly rows="4" /></label>
+      </div>
+    </section>
+  </div>;
+}
+
+function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, onRequestClarification, onViewFeedbackLog, coordinators, canManage = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
+  const columnCount = 6 + (showChangeDecision ? 1 : 0);
   return events.length ? events.map((event) => <React.Fragment key={event.id}><tr>
     <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
     <td>{canManage ? <select aria-label={`Status for ${event.event_title}`} value={event.event_status || ''} onChange={(e) => onStatusChange(event.id, e.target.value)}>{EVENT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select> : <span className="pill">{event.event_status}</span>}</td>
     <td>{canManage ? <select aria-label={`Coordinator for ${event.event_title}`} value={event.assigned_coordinator_id || ''} onChange={(e) => onAssign(event.id, e.target.value)}>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select> : event.coordinator_name ? <span>{event.coordinator_name}<br /><small>{event.coordinator_email || 'Email unavailable'}</small></span> : <button className="assign" onClick={() => onAssign(event.id)}>Assign coordinator</button>}</td>
     {showChangeDecision && <td>{event.latest_change_request ? <><span className="pill">{event.latest_change_request.review_status}</span>{event.latest_change_request.review_status === 'Rejected' && event.latest_change_request.review_comments && <small className="change-request-reason">Reason: {event.latest_change_request.review_comments}</small>}{event.latest_change_request.change_type && <small className="change-request-reason">{event.latest_change_request.change_type} change{PROCESSING_LABELS[event.latest_change_request.processing_status] ? ` · ${PROCESSING_LABELS[event.latest_change_request.processing_status]}` : ''}</small>}</> : '—'}</td>}
+    {showCoordinatorFeedback && <td>{event.coordinator_comments || event.amendments
+      ? <button className="assign" type="button" onClick={() => onViewFeedbackLog(event)}>View clarification/amendments</button>
+      : '—'}</td>}
     {!canManage && <td>{String(event.event_status).trim().toLowerCase() === 'draft' && <button className="assign" onClick={() => onSubmit(event.id)}>Submit</button>}{!['draft', 'completed', 'cancelled', 'rejected'].includes(String(event.event_status).trim().toLowerCase()) && (event.has_pending_change_request ? <span className="pill">Pending change request</span> : <button className="assign" onClick={() => onRequestChanges(event)}>Request changes</button>)}</td>}
+    {canManage && <td>{['submitted', 'under review'].includes(String(event.event_status || '').trim().toLowerCase()) && <button className="assign" type="button" onClick={() => onRequestClarification(event)}>Request clarification/amendments</button>}</td>}
     <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
   </tr>
   {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
@@ -164,6 +246,12 @@ export default function CoordinatorAssignment({ user }) {
   const [changeRequestReviewError, setChangeRequestReviewError] = useState('');
   const [processingChangeRequestId, setProcessingChangeRequestId] = useState(null);
   const [historyEventId, setHistoryEventId] = useState(null);
+  const [feedbackEvent, setFeedbackEvent] = useState(null);
+  const [feedbackClarification, setFeedbackClarification] = useState('');
+  const [feedbackAmendments, setFeedbackAmendments] = useState('');
+  const [feedbackError, setFeedbackError] = useState('');
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [feedbackLogEvent, setFeedbackLogEvent] = useState(null);
   const changeRequestFormRef = useRef(null);
   const changeCapacityOptions = capacityOptions.some(({ value }) => String(value) === String(changeProposal.event_capacity))
     ? capacityOptions
@@ -326,6 +414,52 @@ export default function CoordinatorAssignment({ user }) {
     setMessage(`${result.event_title} status updated to ${result.event_status}.`);
   }
 
+  function startCoordinatorFeedback(event) {
+    setFeedbackEvent(event);
+    setFeedbackClarification('');
+    setFeedbackAmendments('');
+    setFeedbackError('');
+  }
+
+  function closeCoordinatorFeedback() {
+    if (isSubmittingFeedback) return;
+    setFeedbackEvent(null);
+    setFeedbackError('');
+  }
+
+  function changeCoordinatorFeedback(field, value) {
+    if (field === 'coordinator_comments') setFeedbackClarification(value);
+    else setFeedbackAmendments(value);
+  }
+
+  async function submitCoordinatorFeedback(submitEvent) {
+    submitEvent.preventDefault();
+    if (!feedbackEvent || isSubmittingFeedback) return;
+    setIsSubmittingFeedback(true);
+    setFeedbackError('');
+    try {
+      const response = await fetch(`${API}/events/${feedbackEvent.id}/clarification-requests`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ coordinator_comments: feedbackClarification, amendments: feedbackAmendments }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setFeedbackError(result.detail || 'Could not send the clarification/amendment request.');
+        return;
+      }
+      setEvents((current) => current.map((event) => event.id === result.id ? { ...event, ...result } : event));
+      setFeedbackEvent(null);
+      setFeedbackClarification('');
+      setFeedbackAmendments('');
+      setMessage('Clarification/amendment request sent to the event organiser.');
+    } catch (error) {
+      setFeedbackError(`Unable to send the clarification/amendment request. (${error.message})`);
+    } finally {
+      setIsSubmittingFeedback(false);
+    }
+  }
+
   async function submitEvent(eventId) {
     const response = await fetch(`${API}/event-organisers/${user.id}/requests/${eventId}/submit`, { method: 'POST' });
     const result = await response.json();
@@ -416,7 +550,7 @@ export default function CoordinatorAssignment({ user }) {
       {message && <p className="message">{message}</p>}
       {activeTab !== 'change-requests' && <>
         <h2>Event status</h2>
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
       </>}
       {isCoordinator && activeTab === 'change-requests' && <>
         <h2>Submitted change requests</h2>
@@ -439,6 +573,8 @@ export default function CoordinatorAssignment({ user }) {
         <ChangeSignificance event={changeRequestEvent} proposal={changeProposal} />
         <div className="form-actions"><button className="primary" type="submit" disabled={!changeRequestText.trim() || isSubmittingChangeRequest}>{isSubmittingChangeRequest ? 'Sending request...' : 'Send for coordinator approval'}</button><button className="secondary" type="button" onClick={cancelChangeRequest} disabled={isSubmittingChangeRequest}>Cancel</button></div>
       </form>}
+      {isCoordinator && feedbackEvent && <CoordinatorFeedbackDialog event={feedbackEvent} clarification={feedbackClarification} amendments={feedbackAmendments} error={feedbackError} isSubmitting={isSubmittingFeedback} onChange={changeCoordinatorFeedback} onClose={closeCoordinatorFeedback} onSubmit={submitCoordinatorFeedback} />}
+      {isOrganiser && feedbackLogEvent && <CoordinatorFeedbackLogDialog event={feedbackLogEvent} onClose={() => setFeedbackLogEvent(null)} />}
     </section>
   </main>;
 }

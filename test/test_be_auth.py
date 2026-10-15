@@ -171,8 +171,12 @@ def test_role_constants():
 
 
 def jwt(aal):
-    import base64, json
-    part = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+    import base64
+    import json
+
+    def part(d):
+        return base64.urlsafe_b64encode(json.dumps(d).encode()).decode().rstrip("=")
+
     return f"{part({'alg': 'HS256'})}.{part({'aal': aal} if aal else {})}.sig"
 
 
@@ -227,3 +231,21 @@ def test_technical_support_path_identity():
     user = {"id": "t1", "role": "Technical Support Staff"}
     assert auth.require_technical_support_path("t1", user) is user
     assert status_of(auth.require_technical_support_path, "t2", user)[0] == 403
+
+
+@tc("BE-AUTH-026", "require_coordinator_lead", "Caller is an Event Coordinator Lead.", "The user is returned; other roles are rejected.",
+    steps="1. Call require_coordinator_lead with lead profile. 2. Call with standard coordinator profile.", kind="Security")
+def test_coordinator_lead_role_guard():
+    user = {"id": "cl1", "role": "Event Coordinator Lead"}
+    assert auth.require_coordinator_lead(user) is user
+    assert auth.require_coordinator(user) is user
+    assert status_of(auth.require_coordinator_lead, {"id": "c1", "role": "Event Coordinator"}) == (403, "Event coordinator lead access required.")
+
+
+@tc("BE-AUTH-027", "require_safety_officer", "Caller is a Safety Officer.", "The user is returned; other roles are rejected.",
+    steps="1. Call require_safety_officer with safety officer profile. 2. Call with coordinator profile.", kind="Security")
+def test_safety_officer_role_guard():
+    user = {"id": "so1", "role": "Safety Officer"}
+    assert auth.require_safety_officer(user) is user
+    assert status_of(auth.require_safety_officer, {"id": "c1", "role": "Event Coordinator"}) == (403, "Safety officer access required.")
+

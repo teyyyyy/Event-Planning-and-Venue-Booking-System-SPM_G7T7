@@ -1,7 +1,5 @@
 """Unit tests for backend/venue_request.py (coordinators request venues)."""
 
-from datetime import datetime
-
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
@@ -20,7 +18,7 @@ def use(monkeypatch, tables=None):
 
 
 def create(**kw):
-    base = dict(event_id=10, venue_id=5, coordinator_id="c1", start_datetime="2026-10-03T09:00:00", end_datetime="2026-10-03T17:00:00")
+    base = dict(event_id=10, venue_id=5, coordinator_id="c1")
     return vr.VenueBookingCreate(**{**base, **kw})
 
 
@@ -28,17 +26,18 @@ def row(rid, venue, coordinator, status):
     return {"request_id": rid, "venue_id": venue, "coordinator_id": coordinator, "status": status}
 
 
-@tc("BE-VREQ-001", "VenueBookingCreate", "A valid booking with ISO date-time strings.", "Datetimes are parsed into datetime objects.", data="2026-10-03T09:00:00", steps="1. Instantiate VenueBookingCreate.")
-def test_model_parses_datetimes():
-    assert create().start_datetime == datetime(2026, 10, 3, 9, 0)
+@tc("BE-VREQ-001", "VenueBookingCreate", "A valid booking with numeric-string ids.", "Ids are coerced to integers; the booking window comes from the event, not the request.", data="event_id = \"10\", venue_id = \"5\"", steps="1. Instantiate VenueBookingCreate.")
+def test_model_parses_ids():
+    booking = create(event_id="10", venue_id="5")
+    assert booking.model_dump() == {"event_id": 10, "venue_id": 5, "coordinator_id": "c1"}
 
 
-@tc("BE-VREQ-002", "VenueBookingCreate", "A required field is missing or a datetime is malformed.", "Validation error.", data="no coordinator_id; start = \"soon\"", steps="1. Omit coordinator_id. 2. Use a malformed start.", kind="Negative")
+@tc("BE-VREQ-002", "VenueBookingCreate", "A required field is missing or an id is not a number.", "Validation error.", data="no coordinator_id; venue_id = \"hall\"", steps="1. Omit coordinator_id. 2. Use a non-numeric venue_id.", kind="Negative")
 def test_model_invalid():
     with pytest.raises(ValidationError):
-        vr.VenueBookingCreate(event_id=1, venue_id=1, start_datetime="2026-10-03T09:00:00", end_datetime="2026-10-03T10:00:00")
+        vr.VenueBookingCreate(event_id=1, venue_id=1)
     with pytest.raises(ValidationError):
-        create(start_datetime="soon")
+        create(venue_id="hall")
 
 
 @tc("BE-VREQ-003", "get_supabase", "The helper is called with the configured URL and key.", "A client is created from the module's URL and service key.", pre="Module URL/key set.", steps="1. Stub create_client. 2. Call get_supabase().", kind="Config")
@@ -55,13 +54,13 @@ def test_all_venues(monkeypatch):
     assert [v["name"] for v in vr.get_all_venues()] == ["A", "B"]
 
 
-@tc("BE-VREQ-005", "create_venue_booking", "A coordinator submits a booking.", "A Pending row with ISO datetimes is inserted and its request_id returned.", data="event 10, venue 5, coordinator c1", steps="1. Call create_venue_booking(create()).")
+@tc("BE-VREQ-005", "create_venue_booking", "A coordinator submits a booking.", "A Pending row for the event and venue is inserted and its request_id returned.", data="event 10, venue 5, coordinator c1", steps="1. Call create_venue_booking(create()).")
 def test_create_ok(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     out = vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     saved = client.tables[BOOKING][0]
     assert out == {"request_id": saved["request_id"]}
-    assert (saved["status"], saved["start_datetime"], saved["coordinator_id"]) == ("Pending", "2026-10-03T09:00:00", "c1")
+    assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}
 
 
 @tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
@@ -109,6 +108,22 @@ def test_by_venue(monkeypatch):
 def test_by_venue_empty(monkeypatch):
     use(monkeypatch)
     assert vr.list_requests_by_venue(9) == []
+
+
+@tc("BE-VREQ-014", "list_requests_by_venue", "Venue staff check a venue including requests still awaiting a decision.", "Approved and Pending bookings for that venue are returned; Rejected ones are not.", pre="Venue 5 has Approved, Pending and Rejected bookings.", data="include_pending = True", steps="1. Call list_requests_by_venue(5, include_pending=True).")
+def test_by_venue_include_pending(monkeypatch):
+    use(monkeypatch, {BOOKING: [row(1, 5, "c1", "Approved"), row(2, 5, "c1", "Pending"), row(3, 5, "c2", "Rejected"), row(4, 6, "c1", "Pending")]})
+    assert sorted(r["request_id"] for r in vr.list_requests_by_venue(5, include_pending=True)) == [1, 2]
+
+
+@tc("BE-VREQ-015", "list_requests_by_venue", "The database query fails.", "HTTP 500 carrying the database error text.", pre="Select raises.", data="\"connection reset\"", steps="1. Make the select raise. 2. Call list_requests_by_venue(5).", kind="Negative")
+def test_by_venue_db_error(monkeypatch):
+    client = use(monkeypatch)
+    client.fail_tables.add(BOOKING)
+    client.fail_error = RuntimeError("connection reset")
+    with pytest.raises(HTTPException) as info:
+        vr.list_requests_by_venue(5)
+    assert (info.value.status_code, info.value.detail) == (500, "connection reset")
 
 
 @tc("BE-VREQ-010", "list_requests_by_coordinator", "A coordinator views their submissions.", "All of that coordinator's bookings are returned, whatever their status, and nobody else's.", pre="c1 has Pending and Approved bookings; c2 has one.", steps="1. Call list_requests_by_coordinator(\"c1\").")

@@ -119,6 +119,8 @@ def can_view_changes(client, event: dict[str, Any], user: dict[str, Any]) -> boo
         return str(event.get("organiser_id")) == uid
     if role == "event coordinator":
         return str(event.get("coordinator_id")) == uid
+    if role == "event coordinator lead":
+        return True
     if role == "venue staff":
         bookings = client.table(BOOKING_TABLE).select("venue_staff_id").eq("event_id", event["id"]).execute().data or []
         # Unassigned bookings are worked from the shared venue staff queue.

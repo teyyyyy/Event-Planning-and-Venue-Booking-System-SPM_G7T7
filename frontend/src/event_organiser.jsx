@@ -6,7 +6,6 @@ const emptyRequest = { event_name: '', event_type: '', event_date: '', event_end
 export const eventTypes = ['Conference', 'Workshop', 'Seminar', 'Training', 'Meeting', 'Networking', 'Exhibition', 'Social event', 'Other'];
 export const capacityOptions = [{ label: '1-25 attendees', value: 25 }, { label: '26-50 attendees', value: 50 }, { label: '51-100 attendees', value: 100 }, { label: '101-250 attendees', value: 250 }, { label: '251-500 attendees', value: 500 }, { label: '501-1000 attendees', value: 1000 }, { label: 'More than 1000 attendees', value: 1001 }];
 export const timeOptions = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
-const editableStatuses = ['Submitted'];
 const today = new Date().toISOString().split('T')[0];
 
 function formTime(value) { return String(value ?? '').slice(0, 5); }
@@ -78,7 +77,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     let response;
     try {
       response = await fetch(`${API}/event-organisers/${organiserId}/requests/${editingId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
       return;
@@ -91,7 +90,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     }
     try {
       await loadRequests();
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: 'Event was updated, but the refreshed event list could not be loaded.' });
       setLoadingAction(null);
       return;
@@ -122,7 +121,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
       } else {
         response = await fetch(`${requestsUrl}/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }) });
       }
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: `${draftUpdated ? 'Draft changes were saved, but submission failed. ' : ''}Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
       return;
@@ -135,7 +134,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     }
     try {
       await loadRequests();
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: 'Event was submitted, but the refreshed event list could not be loaded.' });
       setLoadingAction(null);
       return;
@@ -154,7 +153,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, event_capacity: Number(form.event_capacity) }),
       });
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
       setLoadingAction(null);
       return;
@@ -167,7 +166,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     }
     try {
       await loadRequests();
-    } catch (error) {
+    } catch {
       setNotice({ type: 'error', text: `${editingId ? 'Draft was updated' : 'Draft was saved'}, but the refreshed event list could not be loaded.` });
       setLoadingAction(null);
       return;

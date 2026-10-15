@@ -10,7 +10,6 @@ from supabase import Client
 from database import create_client
 from auth import require_coordinator, require_coordinator_path
 from equipment_reservation import (
-    RESERVATION_TABLE,
     ACTIVE_RESERVATION_STATUSES,
 )
 

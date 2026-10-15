@@ -1,0 +1,4 @@
+# Backend coverage gate, read by pytest-cov in CI and in scripts/test-all.sh.
+# (The frontend gate lives in frontend/vitest.config.js.)
+[report]
+fail_under = 90

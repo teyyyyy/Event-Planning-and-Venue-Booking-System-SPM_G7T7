@@ -154,6 +154,8 @@ def test_missing_setup_names_migration():
 
     assert detail("PGRST202", "Could not find the function public.process_event_change_request(p_coordinator_id, p_request_id)") == (
         503, "Database setup is incomplete. Run significant_event_changes.sql in the Supabase SQL Editor, then refresh.")
+    assert detail("PGRST202", "Could not find the function public.submit_coordinator_feedback(p_event_id, p_coordinator_id)") == (
+        503, "Database setup is incomplete. Run coordinator_clarification_requests.sql in the Supabase SQL Editor, then refresh.")
     assert "sprint2_registration_notifications.sql" in detail("PGRST205", "Could not find the table public.notifications")[1]
     assert detail("PGRST205", "Could not find the table public.other_table")[1] == "The database request could not be completed. Please try again."
     assert detail("XX000", "event_change_log is broken")[1] == "The database request could not be completed. Please try again."

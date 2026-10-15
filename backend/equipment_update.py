@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from equipment_request import db, calculate_availability, live_requests, require_live_request, EVENT_TABLE, EQUIPMENT_TABLE, REQUEST_TABLE, REQUEST_ITEM_TABLE
+from equipment_request import db, live_requests, require_live_request, EVENT_TABLE, EQUIPMENT_TABLE, REQUEST_TABLE, REQUEST_ITEM_TABLE
 from auth import require_technical_support_path
 from equipment_reservation import RESERVATION_TABLE
 from equipment_request import calculate_request_edit_availability

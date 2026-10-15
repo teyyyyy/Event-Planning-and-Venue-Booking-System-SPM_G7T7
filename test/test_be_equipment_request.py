@@ -161,9 +161,9 @@ def test_validate_unknown():
     assert err(er.validate_request_items, [Item(equipment_id="GHOST", requested_quantity=1)], ROWS)[1] == "Selected equipment does not exist."
 
 
-@tc("BE-EQREQ-024", "validate_request_items", "Requested quantity exceeds availability.", "HTTP 400 \"Microphone has only 8 available.\"", data="requested 9, available 8", steps="1. Call validate_request_items with quantity 9.", kind="Negative")
+@tc("BE-EQREQ-024", "validate_request_items", "Requested quantity exceeds availability.", "HTTP 400 \"Microphone has only 8 available for this event.\"", data="requested 9, available 8", steps="1. Call validate_request_items with quantity 9.", kind="Negative")
 def test_validate_exceeds():
-    assert err(er.validate_request_items, [Item(equipment_id="MIC", requested_quantity=9)], ROWS)[1] == "Microphone has only 8 available."
+    assert err(er.validate_request_items, [Item(equipment_id="MIC", requested_quantity=9)], ROWS)[1] == "Microphone has only 8 available for this event."
 
 
 @tc("BE-EQREQ-025", "validate_request_items", "Requested quantity equals availability.", "Accepted (no exception).", data="requested 8, available 8", steps="1. Call validate_request_items with quantity 8.", kind="Edge")
@@ -401,3 +401,65 @@ def test_edit_superseded_rejected(use_db):
     assert err(er.edit_equipment_request, "c1", 7, er.EquipmentRequestEditInput(items=[Item(equipment_id="MIC", requested_quantity=1)])) == (
         409, "Equipment request #7 was replaced by a newer request after an approved event change.")
     assert len(client.tables["Equipment Request Item"]) == 2
+
+
+def own_and_other_reservations():
+    """Reservation 1 belongs to request 7 (MIC x3); reservation 2 belongs to another request (MIC x2)."""
+    return {
+        "Equipment Reservation": [
+            {"reservation_id": 1, "status": "Reserved", "event_id": 1, "request_id": 7},
+            {"reservation_id": 2, "status": "Modified", "event_id": 99, "request_id": 8},
+        ],
+        "Equipment Reservation Item": [
+            {"reservation_id": 1, "equipment_id": "MIC", "reserved_quantity": 3, "start_datetime": "2026-10-01T09:00:00", "end_datetime": "2026-10-01T17:00:00"},
+            {"reservation_id": 2, "equipment_id": "MIC", "reserved_quantity": 2, "start_datetime": "2026-10-01T10:00:00", "end_datetime": "2026-10-01T12:00:00"},
+        ],
+    }
+
+
+@tc("BE-EQREQ-053", "calculate_request_edit_availability", "The request has no active reservation.", "Availability is the same as calculate_availability.", pre="Request 7's only reservation is Cancelled.",
+    steps="1. Call calculate_request_edit_availability(client, EVENT, 7).", kind="Edge")
+def test_edit_avail_no_reservation():
+    client = world(**reservation(status="Cancelled", event_id=1))
+    client.tables["Equipment Reservation"][0]["request_id"] = 7
+    assert er.calculate_request_edit_availability(client, dict(EVENT), 7) == avail(client)
+
+
+@tc("BE-EQREQ-054", "calculate_request_edit_availability", "The request already holds an active reservation.", "Its own reserved quantity is added back (capped at stock minus maintenance); other requests' reservations still count.",
+    pre="MIC: 10 total, 2 maintenance; request 7 holds 3, another request holds 2.", data="request_id = 7", steps="1. Call calculate_request_edit_availability(client, EVENT, 7).")
+def test_edit_avail_adds_back_own():
+    rows = {r["equipment_id"]: r for r in er.calculate_request_edit_availability(world(**own_and_other_reservations()), dict(EVENT), 7)}
+    assert rows["MIC"]["available_quantity"] == 6 and rows["PRJ"]["available_quantity"] == 3
+
+
+@tc("BE-EQREQ-055", "edit_equipment_request", "The coordinator saves the request without changing anything.", "No reservation recheck is required and the reservation status is untouched.",
+    pre="Request 7 has MIC x2 (\"a\") and PRJ x1; reservation 1 is Reserved.", data="same items", steps="1. Call edit_equipment_request with the existing items.", kind="Edge")
+def test_edit_unchanged_no_recheck(use_db):
+    client = use_db(edit_world(), er)
+    client.tables.update(own_and_other_reservations())
+    out = er.edit_equipment_request("c1", 7, er.EquipmentRequestEditInput(items=[
+        Item(equipment_id="MIC", requested_quantity=2, technical_requirements=" a "), Item(equipment_id="PRJ", requested_quantity=1)]))
+    assert out["reservation_recheck_required"] is False
+    assert client.tables["Equipment Reservation"][0]["status"] == "Reserved"
+
+
+@tc("BE-EQREQ-056", "edit_equipment_request / mark_reservation_for_recheck", "The coordinator changes a quantity on a request that has been reserved.",
+    "The response flags a recheck; Reserved/Modified reservations of this request become Needs Recheck, other reservations are untouched.",
+    pre="Request 7 reserved (Reserved) and a Cancelled reservation of request 7; reservation 2 belongs to request 8.", data="MIC x2 -> x3", steps="1. Call edit_equipment_request with MIC x3 and PRJ x1.", kind="State")
+def test_edit_quantity_marks_recheck(use_db):
+    client = use_db(edit_world(), er)
+    client.tables.update(own_and_other_reservations())
+    client.tables["Equipment Reservation"].append({"reservation_id": 3, "status": "Cancelled", "event_id": 1, "request_id": 7})
+    out = er.edit_equipment_request("c1", 7, er.EquipmentRequestEditInput(items=[
+        Item(equipment_id="MIC", requested_quantity=3, technical_requirements="a"), Item(equipment_id="PRJ", requested_quantity=1)]))
+    assert out["reservation_recheck_required"] is True
+    assert [r["status"] for r in client.tables["Equipment Reservation"]] == ["Needs Recheck", "Modified", "Cancelled"]
+
+
+@tc("BE-EQREQ-057", "edit_equipment_request", "Only the technical requirements of an item change.", "The response flags a reservation recheck.", data="MIC requirements \"a\" -> \"b\"",
+    steps="1. Call edit_equipment_request with the same quantities and new requirements.", kind="Edge")
+def test_edit_requirements_marks_recheck(use_db):
+    use_db(edit_world(), er)
+    out = er.edit_equipment_request("c1", 7, er.EquipmentRequestEditInput(items=[
+        Item(equipment_id="MIC", requested_quantity=2, technical_requirements="b"), Item(equipment_id="PRJ", requested_quantity=1)]))
+    assert out["reservation_recheck_required"] is True
