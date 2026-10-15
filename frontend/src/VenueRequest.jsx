@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import VenueCalendar from "./components/VenueCalendar";
-import { authenticatedFetch as fetch } from './api';
+import { authenticatedFetch as fetch } from "./api";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {
@@ -305,15 +305,16 @@ export default function VenueRequest({ user }) {
       setSelectedVenueId(null);
       loadInitialData(); // Refresh submissions tab
     } catch (error) {
-      let errorMessage = error.message;
+      let errorMessage = error.message || "";
 
+      // 23505 is the PostgreSQL error code for unique_violation
       if (
-        errorMessage &&
-        (errorMessage.includes("23505") ||
-          errorMessage.includes("event_id_key"))
+        errorMessage.includes("23505") ||
+        errorMessage.includes("event_id") ||
+        errorMessage.includes("venue_id")
       ) {
         errorMessage =
-          "A venue booking request has already been submitted for this event.";
+          "A booking request for this specific venue has already been submitted for this event.";
       } else {
         errorMessage = errorMessage || "Venue request could not be submitted.";
       }

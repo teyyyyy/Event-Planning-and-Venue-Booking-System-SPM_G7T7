@@ -224,7 +224,7 @@ describe('VenueRequest', () => {
       expect(await screen.findByText('Venue is closed on Sundays.')).toBeInTheDocument();
     });
 
-  tc('FE-VREQ-018', 'VenueRequest (submit)', 'The database reports a duplicate booking for the event (unique-constraint error 23505).', 'A friendly message "A venue booking request has already been submitted for this event." replaces the raw database text.', { kind: 'Negative', data: '"duplicate key … 23505"', steps: '1. Return a 23505 error for the POST. 2. Submit.' },
+  tc('FE-VREQ-018', 'VenueRequest (submit)', 'The database reports a duplicate booking for the specific venue (unique-constraint error 23505).', 'A friendly message "A booking request for this specific venue has already been submitted for this event." replaces the raw database text.', { kind: 'Negative', data: '"duplicate key … 23505"', steps: '1. Return a 23505 error for the POST. 2. Submit.' },
     async () => {
       backend({ post: () => json({ detail: 'duplicate key value violates unique constraint 23505' }, 500) });
       await ready();
@@ -232,7 +232,7 @@ describe('VenueRequest', () => {
       await chooseVenue();
       await waitFor(() => expect(submitBtn()).toBeEnabled());
       fireEvent.click(submitBtn());
-      expect(await screen.findByText('A venue booking request has already been submitted for this event.')).toBeInTheDocument();
+      expect(await screen.findByText('A booking request for this specific venue has already been submitted for this event.')).toBeInTheDocument();
     });
 
   tc('FE-VREQ-019', 'VenueRequest (submit)', 'A submission is in flight.', 'The button reads "Submitting…" and is disabled.', { kind: 'State', pre: 'POST never resolves.', steps: '1. Submit. 2. Inspect the button.' },
