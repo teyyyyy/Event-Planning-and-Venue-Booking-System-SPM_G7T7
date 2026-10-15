@@ -25,6 +25,8 @@ from tc import tc
 USER_IDS = {
     "Event Organiser": "organiser-1",
     "Event Coordinator": "coordinator-1",
+    "Event Coordinator Lead": "lead-coordinator-1",
+    "Safety Officer": "safety-officer-1",
     "Venue Staff": "venue-staff-1",
     "Technical Support Staff": "technical-staff-1",
     "Attendee": "attendee-1",
@@ -49,6 +51,20 @@ ROLE_PATHS = {
         "/api/venue-booking-requests/coordinators/{user_id}",
         "/api/venue-catalogue",
     ),
+    "Event Coordinator Lead": (
+        "/api/events",
+        "/api/coordinators",
+        "/api/coordinator-workloads",
+        "/api/event-coordinators/{user_id}/events",
+        "/api/event-change-requests",
+        "/api/events/1/change-log",
+        "/api/equipment",
+        "/api/venues",
+        "/api/venue-booking-requests/venues/1",
+        "/api/venue-booking-requests/coordinators/{user_id}",
+        "/api/venue-catalogue",
+    ),
+    "Safety Officer": (),
     "Venue Staff": (
         "/api/venue-booking-requests",
         "/api/venue-catalogue",
@@ -235,7 +251,7 @@ def assert_role_access(client, role, user_id):
         assert review_response.status_code == 403, f"{role} must not review event change requests."
 
     process_response = client.post("/api/event-change-requests/1/process")
-    if role == "Event Coordinator":
+    if role in ("Event Coordinator", "Event Coordinator Lead"):
         assert process_response.status_code == 200, process_response.text
     else:
         assert process_response.status_code == 403, f"{role} must not process event change requests."
@@ -391,3 +407,20 @@ def test_coordinator_cannot_list_another_coordinators_venue_requests(monkeypatch
     response = client.get("/api/venue-booking-requests/coordinators/coordinator-2")
     assert (response.status_code, response.json()["detail"]) == (403, "You can only access your own coordinator requests.")
     assert not [name for name, _, _ in fake.log if name == "Venue Booking Requests"]
+
+
+@tc("BE-ROLE-011", "Role access matrix", "An Event Coordinator Lead requests permitted and restricted route families.",
+    "Coordinator event, change history, change-request processing, equipment, venue-planning (including the coordinator's own venue booking submissions) and profile routes are accessible; unrelated routes are denied.",
+    steps="1. Authenticate as an Event Coordinator Lead. 2. Request each route in the role matrix.", kind="Security")
+def test_event_coordinator_lead_access(monkeypatch):
+    client, user_id = client_for_role(monkeypatch, "Event Coordinator Lead")
+    assert_role_access(client, "Event Coordinator Lead", user_id)
+
+
+@tc("BE-ROLE-012", "Role access matrix", "A Safety Officer requests permitted and restricted route families.",
+    "Only notifications and profile routes are accessible until safety check request features are implemented; all other routes are denied.",
+    steps="1. Authenticate as a Safety Officer. 2. Request each route in the role matrix.", kind="Security")
+def test_safety_officer_access(monkeypatch):
+    client, user_id = client_for_role(monkeypatch, "Safety Officer")
+    assert_role_access(client, "Safety Officer", user_id)
+

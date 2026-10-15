@@ -18,9 +18,11 @@ def db():
     return coordinator_db()
 
 COORDINATOR_ROLE = "event coordinator"
+COORDINATOR_LEAD_ROLE = "event coordinator lead"
 ORGANISER_ROLE = "event organiser"
 VENUE_STAFF_ROLE = "venue staff"
 TECHNICAL_SUPPORT_ROLE = "technical support staff"
+SAFETY_OFFICER_ROLE = "safety officer"
 ATTENDEE_ROLE = "attendee"
 
 # Set REQUIRE_MFA=false to accept password-only (aal1) sessions, e.g. for local development.
@@ -71,12 +73,22 @@ def current_user(authorization: str | None = Header(default=None)) -> dict[str, 
 
 
 def require_coordinator(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    if str(user.get("role", "")).strip().lower() != COORDINATOR_ROLE:
+    if str(user.get("role", "")).strip().lower() not in (COORDINATOR_ROLE, COORDINATOR_LEAD_ROLE):
         raise HTTPException(403, "Event coordinator access required.")
     return user
 
+def require_coordinator_lead(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != COORDINATOR_LEAD_ROLE:
+        raise HTTPException(403, "Event coordinator lead access required.")
+    return user
+
+def require_safety_officer(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    if str(user.get("role", "")).strip().lower() != SAFETY_OFFICER_ROLE:
+        raise HTTPException(403, "Safety officer access required.")
+    return user
+
 def require_coordinator_or_staff(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
-    if str(user.get("role", "")).strip().lower() not in (COORDINATOR_ROLE, VENUE_STAFF_ROLE):
+    if str(user.get("role", "")).strip().lower() not in (COORDINATOR_ROLE, COORDINATOR_LEAD_ROLE, VENUE_STAFF_ROLE):
         raise HTTPException(403, "Event coordinator OR venue staff access required.")
     return user
 
