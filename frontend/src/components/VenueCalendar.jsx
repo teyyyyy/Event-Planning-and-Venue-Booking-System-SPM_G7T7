@@ -40,6 +40,14 @@ export default function VenueCalendar({ venues }) {
     }
   }, [calendarVenueId]);
 
+  const selectedVenue = useMemo(() => {
+    return (
+      venues.find((v) => String(v.venue_id) === String(calendarVenueId)) || {}
+    );
+  }, [venues, calendarVenueId]);
+
+  const setupMinutes = parseInt(selectedVenue.setup_time || 0, 10);
+  const teardownMinutes = parseInt(selectedVenue.teardown_time || 0, 10);
   // Helper to generate the 7 days of the currently selected week
   const weekDays = useMemo(() => {
     return Array.from({ length: 7 }).map((_, i) => {
@@ -202,23 +210,31 @@ export default function VenueCalendar({ venues }) {
                         b.end_datetime || b["Event Details"]?.end_datetime;
                       if (!startStr || !endStr) return false;
 
-                      const actualStart = new Date(
+                      const eventStart = new Date(
                         startStr.substring(0, 16).replace(" ", "T"),
                       );
-                      const actualEnd = new Date(
+                      const eventEnd = new Date(
                         endStr.substring(0, 16).replace(" ", "T"),
                       );
 
-                      // Ignore if the event doesn't overlap this day at all
-                      if (actualEnd <= dayStart || actualStart >= dayEnd)
-                        return false;
-
-                      // If an event spans multiple days, clamp its start time to midnight of THIS day
-                      const effectiveStart = new Date(
-                        Math.max(actualStart, dayStart),
+                      // Expand boundaries by setup and teardown times
+                      const overallStart = new Date(
+                        eventStart.getTime() - setupMinutes * 60000,
+                      );
+                      const overallEnd = new Date(
+                        eventEnd.getTime() + teardownMinutes * 60000,
                       );
 
-                      // Only render the block in the table cell matching its start hour
+                      // Ignore if the block doesn't overlap this day at all
+                      if (overallEnd <= dayStart || overallStart >= dayEnd)
+                        return false;
+
+                      // Clamp the START time to midnight of THIS day to find the block's anchor
+                      const effectiveStart = new Date(
+                        Math.max(overallStart, dayStart),
+                      );
+
+                      // Render block in the cell matching its anchor hour
                       return effectiveStart.getHours() === hour;
                     });
 
@@ -234,7 +250,6 @@ export default function VenueCalendar({ venues }) {
                         }}
                       >
                         {startingBookings.map((booking, bIdx) => {
-                          // Extract data directly from your nested JSON structure
                           const eventDetails = booking["Event Details"] || {};
                           const startStr =
                             booking.start_datetime ||
@@ -244,25 +259,54 @@ export default function VenueCalendar({ venues }) {
                           const eventName =
                             eventDetails.event_name || "Unknown Event";
 
-                          const actualStart = new Date(
+                          const eventStart = new Date(
                             startStr.substring(0, 16).replace(" ", "T"),
                           );
-                          const actualEnd = new Date(
+                          const eventEnd = new Date(
                             endStr.substring(0, 16).replace(" ", "T"),
                           );
 
+                          // Calculate overall bounds including setup & teardown
+                          const overallStart = new Date(
+                            eventStart.getTime() - setupMinutes * 60000,
+                          );
+                          const overallEnd = new Date(
+                            eventEnd.getTime() + teardownMinutes * 60000,
+                          );
+
                           const effectiveStart = new Date(
-                            Math.max(actualStart, dayStart),
+                            Math.max(overallStart, dayStart),
                           );
-                          const effectiveEnd = new Date(
-                            Math.min(actualEnd, dayEnd),
-                          );
-
                           const startMinute = effectiveStart.getMinutes();
-                          const durationMinutes =
-                            (effectiveEnd - effectiveStart) / (1000 * 60);
 
-                          // This variable triggers the shaded styling
+                          // Format inclusive times for tooltip
+                          const overallStartStr = format12HourTime(
+                            overallStart.toTimeString().slice(0, 5),
+                          );
+                          const overallEndStr = format12HourTime(
+                            overallEnd.toTimeString().slice(0, 5),
+                          );
+
+                          // Calculate exact visible pixel heights for the current day
+                          const visibleSetup = Math.max(
+                            0,
+                            (Math.min(eventStart, dayEnd) -
+                              Math.max(overallStart, dayStart)) /
+                              60000,
+                          );
+                          const visibleEvent = Math.max(
+                            0,
+                            (Math.min(eventEnd, dayEnd) -
+                              Math.max(eventStart, dayStart)) /
+                              60000,
+                          );
+                          const visibleTeardown = Math.max(
+                            0,
+                            (Math.min(overallEnd, dayEnd) -
+                              Math.max(eventEnd, dayStart)) /
+                              60000,
+                          );
+
                           const isPending = booking.status === "Pending";
 
                           return (
@@ -273,57 +317,139 @@ export default function VenueCalendar({ venues }) {
                                 top: `${startMinute}px`,
                                 left: "4px",
                                 right: "4px",
-                                height: `${durationMinutes}px`,
-                                // --- Conditional Styling for Shaded vs Solid ---
-                                background: isPending
-                                  ? "repeating-linear-gradient(45deg, #f5f7fb, #f5f7fb 8px, #ffffff 8px, #ffffff 16px)"
-                                  : "#192541",
-                                border: isPending
-                                  ? "1px dashed #8b98ab"
-                                  : "1px solid #0d1424",
-                                color: isPending ? "#53647d" : "white",
-                                // -----------------------------------------------
-                                fontSize: "11px",
-                                padding: "4px 6px",
-                                borderRadius: "4px",
+                                display: "flex",
+                                flexDirection: "column",
                                 zIndex: 5,
-                                overflow: "hidden",
-                                boxShadow: isPending
-                                  ? "none"
-                                  : "0 2px 5px rgba(25, 37, 65, 0.2)",
                               }}
-                              title={`${eventName} (Req ID: ${booking.request_id}) - ${booking.status}`}
+                              title={`${eventName} (Req ID: ${booking.request_id}) - ${booking.status}\nBooking (incl. setup & teardown): ${overallStartStr} - ${overallEndStr}`}
                             >
-                              <strong
-                                style={{
-                                  display: "block",
-                                  marginBottom: "2px",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {eventName} {isPending ? "(Pending)" : ""}
-                              </strong>
-                              <span
-                                style={{
-                                  opacity: 0.8,
-                                  fontSize: "9px",
-                                  display: "block",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                  color: isPending ? "#68758a" : "inherit",
-                                }}
-                              >
-                                {format12HourTime(
-                                  effectiveStart.toTimeString().slice(0, 5),
-                                )}{" "}
-                                -{" "}
-                                {format12HourTime(
-                                  effectiveEnd.toTimeString().slice(0, 5),
-                                )}
-                              </span>
+                              {/* --- Setup Block --- */}
+                              {visibleSetup > 0 && (
+                                <div
+                                  style={{
+                                    height: `${visibleSetup}px`,
+                                    background: isPending
+                                      ? "repeating-linear-gradient(45deg, #f8faff, #f8faff 4px, #ffffff 4px, #ffffff 8px)"
+                                      : "#f1f5f9",
+                                    color: "#64748b",
+                                    fontSize: "9px",
+                                    fontWeight: 600,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    border: isPending
+                                      ? "1px dashed #cbd5e1"
+                                      : "1px solid #e2e8f0",
+                                    borderBottom:
+                                      visibleEvent > 0 || visibleTeardown > 0
+                                        ? "none"
+                                        : undefined,
+                                    borderRadius:
+                                      visibleEvent === 0 &&
+                                      visibleTeardown === 0
+                                        ? "4px"
+                                        : "4px 4px 0 0",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  {visibleSetup >= 15 ? "Setup" : ""}
+                                </div>
+                              )}
+
+                              {/* --- Event Block --- */}
+                              {visibleEvent > 0 && (
+                                <div
+                                  style={{
+                                    height: `${visibleEvent}px`,
+                                    background: isPending
+                                      ? "repeating-linear-gradient(45deg, #f5f7fb, #f5f7fb 8px, #ffffff 8px, #ffffff 16px)"
+                                      : "#192541",
+                                    border: isPending
+                                      ? "1px dashed #8b98ab"
+                                      : "1px solid #0d1424",
+                                    borderRadius:
+                                      visibleSetup === 0 &&
+                                      visibleTeardown === 0
+                                        ? "4px"
+                                        : visibleSetup === 0
+                                          ? "4px 4px 0 0"
+                                          : visibleTeardown === 0
+                                            ? "0 0 4px 4px"
+                                            : "0",
+                                    boxShadow: isPending
+                                      ? "none"
+                                      : "0 2px 5px rgba(25, 37, 65, 0.2)",
+                                    color: isPending ? "#53647d" : "white",
+                                    fontSize: "11px",
+                                    padding: "4px 6px",
+                                    boxSizing: "border-box",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  <strong
+                                    style={{
+                                      display: "block",
+                                      marginBottom: "2px",
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                    }}
+                                  >
+                                    {eventName} {isPending ? "(Pending)" : ""}
+                                  </strong>
+                                  <span
+                                    style={{
+                                      opacity: 0.8,
+                                      fontSize: "9px",
+                                      display: "block",
+                                      whiteSpace: "nowrap",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      color: isPending ? "#68758a" : "inherit",
+                                    }}
+                                  >
+                                    {format12HourTime(
+                                      eventStart.toTimeString().slice(0, 5),
+                                    )}{" "}
+                                    -{" "}
+                                    {format12HourTime(
+                                      eventEnd.toTimeString().slice(0, 5),
+                                    )}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* --- Teardown Block --- */}
+                              {visibleTeardown > 0 && (
+                                <div
+                                  style={{
+                                    height: `${visibleTeardown}px`,
+                                    background: isPending
+                                      ? "repeating-linear-gradient(45deg, #f8faff, #f8faff 4px, #ffffff 4px, #ffffff 8px)"
+                                      : "#f1f5f9",
+                                    color: "#64748b",
+                                    fontSize: "9px",
+                                    fontWeight: 600,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    border: isPending
+                                      ? "1px dashed #cbd5e1"
+                                      : "1px solid #e2e8f0",
+                                    borderTop:
+                                      visibleEvent > 0 || visibleSetup > 0
+                                        ? "none"
+                                        : undefined,
+                                    borderRadius:
+                                      visibleEvent === 0 && visibleSetup === 0
+                                        ? "4px"
+                                        : "0 0 4px 4px",
+                                    boxSizing: "border-box",
+                                  }}
+                                >
+                                  {visibleTeardown >= 15 ? "Teardown" : ""}
+                                </div>
+                              )}
                             </div>
                           );
                         })}
