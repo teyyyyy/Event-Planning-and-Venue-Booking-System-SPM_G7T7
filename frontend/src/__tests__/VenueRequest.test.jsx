@@ -381,4 +381,23 @@ describe('VenueRequest', () => {
       expect(callsTo(f, '/venue-booking-requests/venues/')).toHaveLength(0);
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
+
+  tc('FE-VREQ-032', 'VenueRequest (submit)', 'A booking request is submitted for an event that might already have requests, but for a different venue.', 'The submission succeeds and sends the correct payload without a duplicate error.', { kind: 'Positive', data: 'Same event, different venue (Hall B)', steps: '1. Select "Gala". 2. Select "Hall B". 3. Submit successfully.' },
+  async () => {
+    const f = backend();
+    await ready();
+    
+    pickEvent(1);
+    
+    await chooseVenue('Hall B');
+    
+    await waitFor(() => expect(submitBtn()).toBeEnabled());
+    fireEvent.click(submitBtn());
+    
+    expect(await screen.findByText('Venue request #9 was submitted successfully.')).toBeInTheDocument();
+    
+    const [url, options] = callsTo(f, '/venue-bookings', 'POST')[0];
+    expect(url).toMatch(/\/venue-bookings$/);
+    expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 2, coordinator_id: 'c1' });
+  });
 });

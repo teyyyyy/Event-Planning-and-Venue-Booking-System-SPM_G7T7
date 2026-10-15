@@ -63,7 +63,7 @@ def test_create_ok(monkeypatch):
     assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}
 
 
-@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
+@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event/venue combination).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
 def test_create_db_error(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     client.fail_tables.add((BOOKING, "insert"))
@@ -136,3 +136,19 @@ def test_by_coordinator(monkeypatch):
 def test_by_coordinator_empty(monkeypatch):
     use(monkeypatch)
     assert vr.list_requests_by_coordinator("nobody") == []
+
+@tc("BE-VREQ-016", "create_venue_booking", "A coordinator submits a booking for an event that already has a request for a DIFFERENT venue.", "A Pending row for the event and the new venue is inserted.", pre="Event 10 already has a request for venue 5.", data="event 10, venue 6, coordinator c1", steps="1. Pre-populate a booking. 2. Call create_venue_booking with a different venue.", kind="Positive")
+def test_create_different_venue_ok(monkeypatch):
+    client = use(monkeypatch, {
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+        BOOKING: [row(1, 5, "c1", "Pending")]
+    })
+    
+    new_booking = create(event_id=10, venue_id=6)
+    out = vr.create_venue_booking(new_booking, {"id": "c1", "role": "Event Coordinator"})
+    
+    assert len(client.tables[BOOKING]) == 2
+    
+    saved = client.tables[BOOKING][1]
+    assert out == {"request_id": saved["request_id"]}
+    assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 6, "coordinator_id": "c1", "status": "Pending"}
