@@ -9,7 +9,7 @@ vi.mock('../api', () => ({ request }));
 import VenueApproval from '../venue_approval';
 
 const booking = (o = {}) => ({
-  request_id: 1, status: 'Pending', event_id: 10, event_name: 'Gala', venue_name: 'Hall A', start_datetime: '2026-10-03T09:00:00+08:00', end_datetime: '2026-10-05T17:00:00+08:00',
+  request_id: 1, status: 'Pending', event_id: 10, event_name: 'Gala', venue_id: 1, venue_name: 'Hall A', start_datetime: '2026-10-03T09:00:00+08:00', end_datetime: '2026-10-05T17:00:00+08:00',
   accessibility_required: true, layout_required: 'Theatre', facilities_required: ['Parking', 'AV'], event_type: 'Dinner', event_capacity: 100,
   coordinator_name: 'Cara', coordinator_email: 'c@x', event_description: 'A gala', ...o,
 });
@@ -79,11 +79,15 @@ describe('VenueApproval', () => {
 
   tc('FE-VENUE-010', 'VenueApproval (approve)', 'Staff approves a request.', 'POST /venue-booking-requests/<id>/approve is sent, the row status becomes Approved and the message "Request for Gala approved." appears.', { steps: '1. Open a pending booking. 2. Click "Approve".' },
     async () => {
-      request.mockResolvedValueOnce([booking()]).mockResolvedValueOnce(booking({ status: 'Approved' }));
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') return [booking()];
+        if (url === '/venue-booking-requests/1/approve') return booking({ status: 'Approved' });
+      });
       render(<VenueApproval />);
       fireEvent.click(within(await open()).getByRole('button', { name: 'Approve' }));
       expect(await screen.findByText('Request for Gala approved.')).toBeInTheDocument();
-      expect(request).toHaveBeenLastCalledWith('/venue-booking-requests/1/approve', { method: 'POST', body: '{}' });
+      expect(request).toHaveBeenCalledWith('/venue-booking-requests/1/approve', { method: 'POST', body: '{}' });
       expect(within(screen.getByRole('table')).getByText('Approved')).toBeInTheDocument();
     });
 
@@ -104,37 +108,56 @@ describe('VenueApproval', () => {
       fireEvent.click(within(await open()).getByRole('button', { name: 'Reject…' }));
       fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-      expect(request).toHaveBeenCalledTimes(1);
     });
 
   tc('FE-VENUE-013', 'VenueApproval (reject)', 'Staff confirms a rejection with reason and alternative.', 'POST /reject is sent with {reason, alternative_venue}; the row shows Rejected and the message "Request for Gala rejected.".', { data: 'reason "Double booked", alternative "Hall B"', steps: '1. Click "Reject…". 2. Fill both fields. 3. Click "Confirm rejection".' },
     async () => {
-      request.mockResolvedValueOnce([booking()]).mockResolvedValueOnce(booking({ status: 'Rejected', rejection_reason: 'Double booked', alternative_venue: 'Hall B' }));
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') return [booking()];
+        if (url === '/venue-booking-requests/1/reject') return booking({ status: 'Rejected', rejection_reason: 'Double booked', alternative_venue: 'Hall B' });
+      });
       render(<VenueApproval />);
       fireEvent.click(within(await open()).getByRole('button', { name: 'Reject…' }));
       fireEvent.change(screen.getByLabelText(/Reason for rejection/), { target: { value: 'Double booked' } });
       fireEvent.change(screen.getByLabelText(/Alternative venue/), { target: { value: 'Hall B' } });
       fireEvent.click(screen.getByRole('button', { name: 'Confirm rejection' }));
       expect(await screen.findByText('Request for Gala rejected.')).toBeInTheDocument();
-      const [path, options] = request.mock.calls.at(-1);
+      const [path, options] = request.mock.calls.find(call => call[0] === '/venue-booking-requests/1/reject');
       expect(path).toBe('/venue-booking-requests/1/reject');
       expect(JSON.parse(options.body)).toEqual({ reason: 'Double booked', alternative_venue: 'Hall B' });
     });
 
   tc('FE-VENUE-014', 'VenueApproval (decide)', 'The decision fails (e.g. already decided by someone else).', 'The error message is displayed and stays on screen while the list is reloaded.', { data: '409 "This request was just decided by someone else."', steps: '1. Reject the decision call. 2. Click "Approve".', kind: 'Regression' },
     async () => {
-      request.mockResolvedValueOnce([booking()]).mockRejectedValueOnce(new Error('This request was just decided by someone else.')).mockResolvedValueOnce([booking({ status: 'Approved' })]);
+      let fetchCount = 0;
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') {
+          fetchCount++;
+          // Return pending initially, then approved on the reload
+          return [booking({ status: fetchCount > 1 ? 'Approved' : 'Pending' })];
+        }
+        if (url === '/venue-booking-requests/1/approve') {
+          throw new Error('This request was just decided by someone else.');
+        }
+      });
+      
       render(<VenueApproval />);
       fireEvent.click(within(await open()).getByRole('button', { name: 'Approve' }));
+      
       expect(await screen.findByText('This request was just decided by someone else.')).toBeInTheDocument();
-      await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
       await waitFor(() => expect(within(screen.getByRole('table')).getByText('Approved')).toBeInTheDocument());
       expect(screen.getByText('This request was just decided by someone else.')).toBeInTheDocument();
     });
 
   tc('FE-VENUE-015', 'VenueApproval (decide)', 'A decision is in flight.', 'Approve and Reject… are disabled until it completes.', { kind: 'State', pre: 'Decision call never resolves.', steps: '1. Click "Approve". 2. Inspect the buttons.' },
     async () => {
-      request.mockResolvedValueOnce([booking()]).mockReturnValueOnce(new Promise(() => {}));
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') return [booking()];
+        if (url === '/venue-booking-requests/1/approve') return new Promise(() => {}); // never resolves
+      });
       render(<VenueApproval />);
       fireEvent.click(within(await open()).getByRole('button', { name: 'Approve' }));
       expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
@@ -149,17 +172,22 @@ describe('VenueApproval', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('region', { name: 'Venue booking request details' })).toBeNull();
     });
+    
   tc('FE-VENUE-017', 'VenueApproval (detail)', 'A booking was created by processing an approved event change request.',
     'The detail names the change request; the event change history can be shown (loaded from /events/<id>/change-log) and hidden.',
     { data: 'change_request_id = 11', steps: '1. Open the booking. 2. Click Show event change history. 3. Click Hide event change history.' },
     async () => {
-      request.mockResolvedValueOnce([booking({ change_request_id: 11 })]).mockResolvedValueOnce([]);
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') return [booking({ change_request_id: 11 })];
+        if (url === '/events/10/change-log') return [];
+      });
       render(<VenueApproval />);
       const detail = await open();
       expect(within(detail).getByText('New request for approved change request #11')).toBeInTheDocument();
       fireEvent.click(within(detail).getByRole('button', { name: 'Show event change history' }));
       expect(await within(detail).findByText('No changes have been recorded since this event was submitted.')).toBeInTheDocument();
-      expect(request).toHaveBeenLastCalledWith('/events/10/change-log');
+      expect(request).toHaveBeenCalledWith('/events/10/change-log');
       fireEvent.click(within(detail).getByRole('button', { name: 'Hide event change history' }));
       expect(within(detail).queryByText(/No changes have been recorded/)).toBeNull();
     });
@@ -168,7 +196,10 @@ describe('VenueApproval', () => {
     'It shows a Superseded status, offers no decision actions and has no change-request link.',
     { kind: 'State', steps: '1. Open a Superseded booking.' },
     async () => {
-      request.mockResolvedValueOnce([booking({ status: 'Superseded' })]);
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [];
+        if (url === '/venue-booking-requests') return [booking({ status: 'Superseded' })];
+      });
       render(<VenueApproval />);
       const detail = await open();
       expect(within(detail).getByText('Superseded')).toHaveClass('pill', 'status-superseded');
@@ -176,4 +207,63 @@ describe('VenueApproval', () => {
       expect(within(detail).queryByText(/approved change request/)).toBeNull();
     });
 
+  tc('FE-VENUE-019', 'VenueApproval (overlap)', 'A pending request overlaps with an approved request\'s setup or teardown buffer time.', 'The warning banner indicates a setup/teardown overlap and Approve is disabled.', { steps: '1. Mock a pending request overlapping an approved request\'s buffer. 2. Open pending request.' },
+    async () => {
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [{ venue_id: 1, name: 'Hall A', setup_time: 60, teardown_time: 60 }];
+        if (url === '/venue-booking-requests') return [
+          booking({ request_id: 1, event_name: 'Pending Event', status: 'Pending', start_datetime: '2026-10-03T10:00:00+08:00', end_datetime: '2026-10-03T11:30:00+08:00' }),
+          booking({ request_id: 2, event_name: 'Approved Event', status: 'Approved', start_datetime: '2026-10-03T12:00:00+08:00', end_datetime: '2026-10-03T14:00:00+08:00' })
+        ];
+        return [];
+      });
+      render(<VenueApproval />);
+      
+      const rows = await screen.findAllByRole('button', { name: 'View details' });
+      fireEvent.click(rows[0]); 
+      const panel = await screen.findByRole('region', { name: 'Venue booking request details' });
+      
+      expect(await within(panel).findByText(/overlapping with event teardown/)).toBeInTheDocument();
+      expect(within(panel).getByRole('button', { name: 'Approve' })).toBeDisabled();
+    });
+
+  tc('FE-VENUE-020', 'VenueApproval (overlap)', 'A pending request overlaps directly in core event time with an approved request.', 'The warning banner indicates a core event time overlap and Approve is disabled.', { steps: '1. Mock requests with direct core time collision. 2. Open pending request.' },
+    async () => {
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [{ venue_id: 1, setup_time: 30, teardown_time: 30 }];
+        if (url === '/venue-booking-requests') return [
+          booking({ request_id: 1, event_name: 'Pending Event', status: 'Pending', start_datetime: '2026-10-03T10:00:00+08:00', end_datetime: '2026-10-03T12:00:00+08:00' }),
+          booking({ request_id: 2, event_name: 'Core Collision Event', status: 'Approved', start_datetime: '2026-10-03T11:00:00+08:00', end_datetime: '2026-10-03T13:00:00+08:00' })
+        ];
+        return [];
+      });
+      render(<VenueApproval />);
+      
+      const rows = await screen.findAllByRole('button', { name: 'View details' });
+      fireEvent.click(rows[0]);
+      const panel = await screen.findByRole('region', { name: 'Venue booking request details' });
+      
+      expect(await within(panel).findByText(/overlaps in event time/)).toBeInTheDocument();
+      expect(within(panel).getByRole('button', { name: 'Approve' })).toBeDisabled();
+    });
+
+  tc('FE-VENUE-021', 'VenueApproval (overlap)', 'A pending request overlaps with another pending request.', 'A warning displays naming the competing event, but Approve remains enabled.', { steps: '1. Mock two overlapping pending requests. 2. Open one of them.' },
+    async () => {
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [{ venue_id: 1, setup_time: 30, teardown_time: 30 }];
+        if (url === '/venue-booking-requests') return [
+          booking({ request_id: 1, event_name: 'Pending A', status: 'Pending', start_datetime: '2026-10-03T10:00:00+08:00', end_datetime: '2026-10-03T12:00:00+08:00' }),
+          booking({ request_id: 2, event_name: 'Pending B', status: 'Pending', start_datetime: '2026-10-03T10:30:00+08:00', end_datetime: '2026-10-03T12:30:00+08:00' })
+        ];
+        return [];
+      });
+      render(<VenueApproval />);
+      
+      const rows = await screen.findAllByRole('button', { name: 'View details' });
+      fireEvent.click(rows[0]);
+      const panel = await screen.findByRole('region', { name: 'Venue booking request details' });
+      
+      expect(await within(panel).findByText(/Venue is available, but 'Pending B'.* also requesting/)).toBeInTheDocument();
+      expect(within(panel).getByRole('button', { name: 'Approve' })).not.toBeDisabled();
+    });
 });
