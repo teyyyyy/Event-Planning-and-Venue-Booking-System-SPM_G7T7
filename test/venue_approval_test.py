@@ -62,6 +62,17 @@ class ViewTests(unittest.TestCase):
         self.assertFalse(result["accessibility_required"])
         self.assertEqual(result["venue_name"], "Hall A")
 
+    def test_includes_setup_and_teardown_hours_from_venue(self):
+        venue = {"setup_time": 2, "teardown_time": 1}
+        result = venue_approval.view(BOOKING, {}, venue, {})
+        self.assertEqual(result["setup_time"], 2)
+        self.assertEqual(result["teardown_time"], 1)
+
+    def test_missing_setup_and_teardown_hours_remain_unset(self):
+        result = venue_approval.view(BOOKING, {}, {}, {})
+        self.assertIsNone(result["setup_time"])
+        self.assertIsNone(result["teardown_time"])
+
 
 class DecisionTests(unittest.TestCase):
     def run_decide(self, booking, staff, changes):
