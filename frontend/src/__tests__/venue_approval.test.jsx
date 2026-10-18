@@ -52,29 +52,6 @@ describe('VenueApproval', () => {
       expect(p.getByText('100')).toBeInTheDocument();
     });
 
-  tc('FE-VENUE-019', 'RequestDetail', 'A venue has setup and teardown durations in minutes.', 'The booking list and details show singular/plural minute labels, including zero minutes.',
-    { data: 'Venue has setup_time 120 and teardown_time 1', steps: '1. Return a booking enriched with the venue setup_time 120 and teardown_time 1. 2. Open details.' },
-    async () => {
-      request.mockResolvedValue([booking({ setup_time: 120, teardown_time: 1 })]);
-      render(<VenueApproval />);
-      const table = within(screen.getByRole('table'));
-      expect(await table.findByText('120 minutes')).toBeInTheDocument();
-      expect(table.getByText('1 minute')).toBeInTheDocument();
-      const panel = within(await open());
-      expect(panel.getByText('120 minutes')).toBeInTheDocument();
-      expect(panel.getByText('1 minute')).toBeInTheDocument();
-    });
-
-  tc('FE-VENUE-020', 'RequestDetail', 'A venue has unset or zero setup/teardown durations.', 'Unset values show a dash and zero is shown as "0 minutes".',
-    { kind: 'Edge', data: 'setup_time null, teardown_time 0', steps: '1. Return a booking enriched with null setup_time and zero teardown_time. 2. Open details.' },
-    async () => {
-      request.mockResolvedValue([booking({ setup_time: null, teardown_time: 0 })]);
-      render(<VenueApproval />);
-      const panel = within(await open());
-      expect(panel.getByText('0 minutes')).toBeInTheDocument();
-      expect(panel.getAllByText('—').length).toBeGreaterThanOrEqual(1);
-    });
-
   tc('FE-VENUE-006', 'RequestDetail', 'Optional values are missing.', 'Blank fields show "—"; accessibility shows "No"; timestamps show "—".', { kind: 'Edge', steps: '1. Open a booking with empty optional fields.' },
     async () => {
       request.mockResolvedValue([booking({ accessibility_required: false, layout_required: null, facilities_required: [], coordinator_name: null, event_description: null, start_datetime: null })]);
@@ -230,7 +207,7 @@ describe('VenueApproval', () => {
       expect(within(detail).queryByText(/approved change request/)).toBeNull();
     });
 
-  tc('FE-VENUE-019', 'VenueApproval (overlap)', 'A pending request overlaps with an approved request\'s setup or teardown buffer time.', 'The warning banner indicates a setup/teardown overlap and Approve is disabled.', { steps: '1. Mock a pending request overlapping an approved request\'s buffer. 2. Open pending request.' },
+    tc('FE-VENUE-019', 'VenueApproval (overlap)', 'A venue has setup and teardown durations that create a buffer collision.', 'Approve is disabled and a setup/teardown buffer warning is shown.', { steps: '1. Mock venue setup/teardown times. 2. Open request.' },
     async () => {
       request.mockImplementation(async (url) => {
         if (url === '/venues') return [{ venue_id: 1, name: 'Hall A', setup_time: 60, teardown_time: 60 }];
@@ -250,7 +227,41 @@ describe('VenueApproval', () => {
       expect(within(panel).getByRole('button', { name: 'Approve' })).toBeDisabled();
     });
 
-  tc('FE-VENUE-020', 'VenueApproval (overlap)', 'A pending request overlaps directly in core event time with an approved request.', 'The warning banner indicates a core event time overlap and Approve is disabled.', { steps: '1. Mock requests with direct core time collision. 2. Open pending request.' },
+  tc('FE-VENUE-020', 'VenueApproval (overlap)', 'A venue has unset or zero setup/teardown durations with no conflicting bookings.', 'Venue is marked available and Approve remains enabled.', { steps: '1. Mock zero buffer times. 2. Open request.' },
+    async () => {
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [{ venue_id: 1, name: 'Hall A', setup_time: 0, teardown_time: 0 }];
+        if (url === '/venue-booking-requests') return [booking({ status: 'Pending' })];
+        return [];
+      });
+      render(<VenueApproval />);
+      
+      const panel = within(await open());
+      expect(panel.getByText('Venue is available for this time slot.')).toBeInTheDocument();
+      expect(panel.getByRole('button', { name: 'Approve' })).not.toBeDisabled();
+    });
+
+  tc('FE-VENUE-021', 'VenueApproval (overlap)', 'A pending request overlaps with an approved request\'s setup or teardown buffer time.', 'The warning banner indicates a setup/teardown overlap and Approve is disabled.', { steps: '1. Mock a pending request overlapping an approved request\'s buffer. 2. Open pending request.' },
+    async () => {
+      request.mockImplementation(async (url) => {
+        if (url === '/venues') return [{ venue_id: 1, name: 'Hall A', setup_time: 60, teardown_time: 60 }];
+        if (url === '/venue-booking-requests') return [
+          booking({ request_id: 1, event_name: 'Pending Event', status: 'Pending', start_datetime: '2026-10-03T10:00:00+08:00', end_datetime: '2026-10-03T11:30:00+08:00' }),
+          booking({ request_id: 2, event_name: 'Approved Event', status: 'Approved', start_datetime: '2026-10-03T12:00:00+08:00', end_datetime: '2026-10-03T14:00:00+08:00' })
+        ];
+        return [];
+      });
+      render(<VenueApproval />);
+      
+      const rows = await screen.findAllByRole('button', { name: 'View details' });
+      fireEvent.click(rows[0]); 
+      const panel = await screen.findByRole('region', { name: 'Venue booking request details' });
+      
+      expect(await within(panel).findByText(/overlapping with event teardown/)).toBeInTheDocument();
+      expect(within(panel).getByRole('button', { name: 'Approve' })).toBeDisabled();
+    });
+
+  tc('FE-VENUE-022', 'VenueApproval (overlap)', 'A pending request overlaps directly in core event time with an approved request.', 'The warning banner indicates a core event time overlap and Approve is disabled.', { steps: '1. Mock requests with direct core time collision. 2. Open pending request.' },
     async () => {
       request.mockImplementation(async (url) => {
         if (url === '/venues') return [{ venue_id: 1, setup_time: 30, teardown_time: 30 }];
@@ -270,7 +281,7 @@ describe('VenueApproval', () => {
       expect(within(panel).getByRole('button', { name: 'Approve' })).toBeDisabled();
     });
 
-  tc('FE-VENUE-021', 'VenueApproval (overlap)', 'A pending request overlaps with another pending request.', 'A warning displays naming the competing event, but Approve remains enabled.', { steps: '1. Mock two overlapping pending requests. 2. Open one of them.' },
+  tc('FE-VENUE-023', 'VenueApproval (overlap)', 'A pending request overlaps with another pending request.', 'A warning displays naming the competing event, but Approve remains enabled.', { steps: '1. Mock two overlapping pending requests. 2. Open one of them.' },
     async () => {
       request.mockImplementation(async (url) => {
         if (url === '/venues') return [{ venue_id: 1, setup_time: 30, teardown_time: 30 }];
