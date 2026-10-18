@@ -103,6 +103,13 @@ ROLE_ACTIONS = (
      {"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."}, {200}),
     ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
+    ("Venue Staff", "PUT", "/api/venue-catalogue/1", {
+        "operating_hours": {day: {"closed": False, "opens": "09:00", "closes": "18:00"} for day in (
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+        )},
+        "facilities": ["Wi-Fi"], "accessible": 1, "accessibility_details": "",
+        "layouts": [], "setup_time": 60, "teardown_time": 30,
+    }, {200}),
     ("Technical Support Staff", "PUT", "/api/equipment-update/{user_id}/events/1/requests", {"requests": []}, {400}),
     # Reach the handler without writing: request 2 is not event 1's request, reservation 999 does not exist.
     ("Technical Support Staff", "POST", "/api/equipment-reservation/{user_id}", {"event_id": 1, "request_id": 2}, {400}),
