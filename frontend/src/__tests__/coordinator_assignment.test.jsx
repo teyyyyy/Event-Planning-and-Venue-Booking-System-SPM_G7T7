@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
@@ -901,6 +901,28 @@ describe('CoordinatorAssignment', () => {
       const fallback = await viewRequest('Fallback gala');
       expect(within(fallback).getByRole('heading', { level: 2 })).toHaveTextContent('Event change request: Fallback gala');
       expect(within(fallback).getByLabelText('Event name').closest('label')).toHaveTextContent('Original: Fallback gala');
+    });
+
+  tc('FE-COORD-054', 'CoordinatorAssignment (organiser change request)', 'An organiser edits a pending change request.',
+    'The edit form opens with the submitted proposal and saves with PATCH.', {}, async () => {
+      const pending = changeReq({ id: 31, proposed_event_name: 'Edited Gala', proposed_event_type: 'Workshop', proposed_event_date: '2026-10-02', proposed_event_end_date: '2026-10-02', proposed_event_capacity: 50, proposed_description: 'Edited plan', proposed_start_time: '08:00:00', proposed_end_time: '12:00:00' });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/31') ? json({ ...pending, request_text: 'Saved edit' }) : json([]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      expect(screen.getByDisplayValue('Edited Gala')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Change summary for the event coordinator'), { target: { value: 'Saved edit' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save change request' }));
+      await waitFor(() => expect(callsTo(f, '/change-requests/31', 'PATCH')).toHaveLength(1));
+    });
+
+  tc('FE-COORD-055', 'CoordinatorAssignment (organiser change request)', 'An organiser cancels a pending change request.',
+    'The cancel endpoint is called and the request is reloaded with its cancelled status.', {}, async () => {
+      const pending = changeReq({ id: 32 });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/32/cancel') ? json({ ...pending, review_status: 'Cancelled' }) : json([]));
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(callsTo(f, '/change-requests/32/cancel', 'POST')).toHaveLength(1));
     });
 
 });

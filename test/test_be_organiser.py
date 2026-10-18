@@ -480,3 +480,34 @@ def test_change_request_notification_failure_rolls_back(use_db):
     with pytest.raises(RuntimeError, match="simulated failure on notifications"):
         eo.create_event_change_request("o1", 1, make_change_request("Change the schedule"))
     assert client.tables.get("event_change_requests", []) == []
+
+
+@tc("BE-ORG-054", "update_event_change_request", "An organiser edits a pending request.",
+   "The update RPC receives the organiser and request details and its result is returned.", kind="State", steps="1. Call the update endpoint.")
+def test_change_request_update_pending(monkeypatch):
+    captured = {}
+    updated = {"id": 11, "review_status": "Pending", "request_text": "Updated"}
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=lambda name, params: SimpleNamespace(
+        execute=lambda: (captured.update(name=name, params=params) or SimpleNamespace(data=updated)))))
+    result = eo.update_event_change_request("o1", 11, make_change_request("Updated", event_name="Updated Gala"))
+    assert result == updated
+    assert captured["name"] == "update_event_change_request"
+    assert captured["params"]["p_organiser_id"] == "o1"
+
+
+@tc("BE-ORG-055", "cancel_event_change_request", "An organiser cancels a pending request.",
+   "The cancellation RPC is called with the request and organiser IDs.", kind="State", steps="1. Call the cancellation endpoint.")
+def test_change_request_cancel_pending(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=lambda name, params: SimpleNamespace(
+        execute=lambda: (captured.update(name=name, params=params) or SimpleNamespace(data={"id": 11, "review_status": "Cancelled"})))))
+    assert eo.cancel_event_change_request("o1", 11)["review_status"] == "Cancelled"
+    assert captured == {"name": "cancel_event_change_request", "params": {"p_request_id": 11, "p_organiser_id": "o1"}}
+
+
+@tc("BE-ORG-056", "update_event_change_request", "An already reviewed request is edited.",
+   "HTTP 409 is returned and the database error is preserved.", kind="Negative", steps="1. Return the reviewed-state database error. 2. Call the update endpoint.")
+def test_change_request_update_reviewed_rejected(monkeypatch):
+    error = APIError({"message": "Only pending change requests can be edited.", "code": "55000", "details": None, "hint": None})
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=lambda *_: SimpleNamespace(execute=lambda: (_ for _ in ()).throw(error))))
+    assert err(eo.update_event_change_request, "o1", 11, make_change_request("Updated")) == (409, str(error.message))
