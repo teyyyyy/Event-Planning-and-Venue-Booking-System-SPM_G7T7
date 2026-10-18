@@ -14,7 +14,8 @@
 .catalogue-hours-row{display:grid;grid-template-columns:1fr 90px 1fr 1fr;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid #edf0f5;font-size:13px}
 .catalogue-hours-row label,.catalogue-fields label{display:flex;flex-direction:column;gap:7px;font-size:13px;color:#405875}
 .catalogue-hours-row .catalogue-checkbox{flex-direction:row;align-items:center}
-.catalogue-hours-row input[type=time],.catalogue-fields textarea{min-width:0;width:100%;padding:10px;border:1px solid #ccd5e2;border-radius:5px;background:#fbfcff;color:#1c2940;font:inherit;resize:vertical}
+.catalogue-hours-row input[type=time],.catalogue-fields input,.catalogue-fields textarea{min-width:0;width:100%;padding:10px;border:1px solid #ccd5e2;border-radius:5px;background:#fbfcff;color:#1c2940;font:inherit}
+.catalogue-fields textarea{resize:vertical}
 .catalogue-fields label{margin-top:18px}.catalogue-fields textarea{line-height:1.5}
 .catalogue-actions{display:flex;justify-content:flex-end;gap:12px}
 .venue-catalogue .secondary{color:#405875}.venue-catalogue button:disabled{opacity:.55;cursor:not-allowed}

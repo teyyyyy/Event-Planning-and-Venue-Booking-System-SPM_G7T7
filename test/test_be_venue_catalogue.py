@@ -18,7 +18,7 @@ WEEK = {day: {"closed": False, "opens": "09:00", "closes": "18:00"} for day in v
 
 
 def update(**kw):
-    base = dict(operating_hours=copy.deepcopy(WEEK), facilities=["Wi-Fi"], accessible=1, accessibility_details="Step-free", layouts=["Theatre"])
+    base = dict(operating_hours=copy.deepcopy(WEEK), facilities=["Wi-Fi"], accessible=1, accessibility_details="Step-free", layouts=["Theatre"], setup_time=90, teardown_time=30)
     return vc.VenueUpdate(**{**base, **kw})
 
 
@@ -151,6 +151,20 @@ def test_update_accessible_values():
     assert update(accessible=0).accessible == 0
 
 
+@tc("BE-VCAT-033", "VenueUpdate", "Setup and teardown durations are whole non-negative minutes.", "Zero and positive whole minutes are accepted; missing values are allowed.", data="setup_time=0, teardown_time=45", steps="1. Instantiate VenueUpdate with valid durations. 2. Instantiate without duration fields.")
+def test_update_durations():
+    assert update(setup_time=0, teardown_time=45).teardown_time == 45
+    assert update(setup_time=None, teardown_time=None).setup_time is None
+    assert vc.VenueUpdate(**{key: value for key, value in update().model_dump().items() if key not in {"setup_time", "teardown_time"}}).setup_time is None
+
+
+@tc("BE-VCAT-034", "VenueUpdate", "A setup or teardown duration is negative, fractional, non-numeric or too large.", "Validation error for every invalid value.", data="-1, 2.5, \"45\", 2147483648", steps="1. Instantiate VenueUpdate with each invalid duration.", kind="Negative")
+def test_update_invalid_durations():
+    for bad in (-1, 2.5, "45", 2_147_483_648, True):
+        with pytest.raises(ValidationError):
+            update(setup_time=bad)
+
+
 @tc("BE-VCAT-018", "VenueUpdate", "Accessibility details have padding, or exceed 1000 characters.", "Padding is trimmed; over-length is rejected.", data="\"  ramp  \"; 1001 chars", steps="1. Instantiate with padded text. 2. Instantiate with 1001 characters.", kind="Edge")
 def test_update_details():
     assert update(accessibility_details="  ramp  ").accessibility_details == "ramp"
@@ -212,9 +226,11 @@ def test_detail_unavailable(use_db):
 @tc("BE-VCAT-027", "update_venue", "Venue staff saves valid changes.", "The venue row is updated with the new hours, lists and accessibility, and returned.", steps="1. Call update_venue(1, update, staff).")
 def test_update_venue_ok(use_db):
     client = use_db(world(), vc)
-    out = vc.update_venue(1, update(facilities=["Stage"], accessible=0), user={"role": "venue staff"})
+    out = vc.update_venue(1, update(facilities=["Stage"], accessible=0, setup_time=120, teardown_time=45), user={"role": "venue staff"})
     assert out["facilities"] == ["Stage"] and out["accessible"] == 0 and out["operating_hours"]["monday"] == WEEK["monday"]
+    assert out["setup_time"] == 120 and out["teardown_time"] == 45
     assert client.tables["Venues"][1]["facilities"] == ["Stage"]
+    assert client.tables["Venues"][1]["setup_time"] == 120 and client.tables["Venues"][1]["teardown_time"] == 45
 
 
 @tc("BE-VCAT-028", "update_venue", "The venue does not exist.", "HTTP 404 \"Venue not found. Changes were not saved.\"", steps="1. Call update_venue(99, update, staff).", kind="Negative")
@@ -239,7 +255,7 @@ def http(role, monkeypatch, client=None):
     return TestClient(app)
 
 
-BODY = {"operating_hours": WEEK, "facilities": ["Wi-Fi"], "accessible": 1, "accessibility_details": "", "layouts": []}
+BODY = {"operating_hours": WEEK, "facilities": ["Wi-Fi"], "accessible": 1, "accessibility_details": "", "layouts": [], "setup_time": 60, "teardown_time": 30}
 
 
 @tc("BE-VCAT-030", "PUT /api/venue-catalogue/{id}", "A Technical Support user tries to edit a venue.", "HTTP 403 (read-only role) and nothing is saved.", pre="Caller role = technical support staff.", steps="1. PUT a valid body as technical support.", kind="Security")
@@ -259,5 +275,13 @@ def test_http_get_roles(monkeypatch):
 def test_http_put_validation(monkeypatch):
     client = world()
     bad = {**BODY, "operating_hours": {d: WEEK[d] for d in vc.DAYS[:-1]}}
+    assert http("venue staff", monkeypatch, client).put("/api/venue-catalogue/1", json=bad).status_code == 422
+    assert not client.writes("Venues", "update")
+
+
+@tc("BE-VCAT-035", "PUT /api/venue-catalogue/{id}", "Venue staff sends a fractional setup duration.", "HTTP 422 and nothing is saved.", data="setup_time = 2.5", steps="1. PUT a valid body with setup_time 2.5 as venue staff.", kind="Negative")
+def test_http_put_rejects_fractional_duration(monkeypatch):
+    client = world()
+    bad = {**BODY, "setup_time": 2.5}
     assert http("venue staff", monkeypatch, client).put("/api/venue-catalogue/1", json=bad).status_code == 422
     assert not client.writes("Venues", "update")
