@@ -4,6 +4,11 @@ import EventChangeHistory from './EventChangeHistory';
 
 // The API returns SGT (+08:00) timestamps, so slicing the string keeps them in SGT.
 const formatDateTime = (value) => (value ? `${value.replace('T', ' ').slice(0, 16)} SGT` : '—');
+const formatMinutes = (value) => (
+  value === null || value === undefined || value === ''
+    ? '—'
+    : `${value} ${Number(value) === 1 ? 'minute' : 'minutes'}`
+);
 
 function Detail({ label, children }) {
   return <div className="detail-item"><dt>{label}</dt><dd>{children || '—'}</dd></div>;
@@ -27,6 +32,8 @@ function RequestDetail({ booking, busy, onApprove, onReject, onClose }) {
       <Detail label="Venue">{booking.venue_name}</Detail>
       <Detail label="Start">{formatDateTime(booking.start_datetime)}</Detail>
       <Detail label="End">{formatDateTime(booking.end_datetime)}</Detail>
+      <Detail label="Setup time">{formatMinutes(booking.setup_time)}</Detail>
+      <Detail label="Teardown time">{formatMinutes(booking.teardown_time)}</Detail>
       <Detail label="Accessibility required">{booking.accessibility_required ? 'Yes' : 'No'}</Detail>
       <Detail label="Layout">{booking.layout_required}</Detail>
       <Detail label="Facilities">{booking.facilities_required.join(', ')}</Detail>
@@ -110,15 +117,17 @@ export default function VenueApproval() {
         onClose={() => setSelectedId(null)}
       />}
       <div className="table-wrap"><table>
-        <thead><tr><th>Event</th><th>Venue</th><th>Start</th><th>End</th><th>Status</th><th>Action</th></tr></thead>
+        <thead><tr><th>Event</th><th>Venue</th><th>Start</th><th>End</th><th>Setup time</th><th>Teardown time</th><th>Status</th><th>Action</th></tr></thead>
         <tbody>{bookings.length ? bookings.map((item) => <tr key={item.request_id}>
           <td>{item.event_name || `Event #${item.event_id}`}</td>
           <td>{item.venue_name}</td>
           <td>{formatDateTime(item.start_datetime)}</td>
           <td>{formatDateTime(item.end_datetime)}</td>
+          <td>{formatMinutes(item.setup_time)}</td>
+          <td>{formatMinutes(item.teardown_time)}</td>
           <td><span className={`pill status-${item.status.toLowerCase()}`}>{item.status}</span></td>
           <td><button className="assign" onClick={() => setSelectedId(item.request_id)}>View details</button></td>
-        </tr>) : <tr><td className="empty" colSpan={6}>{loading ? 'Loading…' : 'No venue booking requests found.'}</td></tr>}</tbody>
+        </tr>) : <tr><td className="empty" colSpan={8}>{loading ? 'Loading…' : 'No venue booking requests found.'}</td></tr>}</tbody>
       </table></div>
     </section>
   </main>;

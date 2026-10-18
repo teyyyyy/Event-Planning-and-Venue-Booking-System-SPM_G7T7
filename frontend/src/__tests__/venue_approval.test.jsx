@@ -52,6 +52,29 @@ describe('VenueApproval', () => {
       expect(p.getByText('100')).toBeInTheDocument();
     });
 
+  tc('FE-VENUE-013', 'RequestDetail', 'A venue has setup and teardown durations in minutes.', 'The booking list and details show singular/plural minute labels, including zero minutes.',
+    { data: 'Venue has setup_time 120 and teardown_time 1', steps: '1. Return a booking enriched with the venue setup_time 120 and teardown_time 1. 2. Open details.' },
+    async () => {
+      request.mockResolvedValue([booking({ setup_time: 120, teardown_time: 1 })]);
+      render(<VenueApproval />);
+      const table = within(screen.getByRole('table'));
+      expect(await table.findByText('120 minutes')).toBeInTheDocument();
+      expect(table.getByText('1 minute')).toBeInTheDocument();
+      const panel = within(await open());
+      expect(panel.getByText('120 minutes')).toBeInTheDocument();
+      expect(panel.getByText('1 minute')).toBeInTheDocument();
+    });
+
+  tc('FE-VENUE-014', 'RequestDetail', 'A venue has unset or zero setup/teardown durations.', 'Unset values show a dash and zero is shown as "0 minutes".',
+    { kind: 'Edge', data: 'setup_time null, teardown_time 0', steps: '1. Return a booking enriched with null setup_time and zero teardown_time. 2. Open details.' },
+    async () => {
+      request.mockResolvedValue([booking({ setup_time: null, teardown_time: 0 })]);
+      render(<VenueApproval />);
+      const panel = within(await open());
+      expect(panel.getByText('0 minutes')).toBeInTheDocument();
+      expect(panel.getAllByText('—').length).toBeGreaterThanOrEqual(1);
+    });
+
   tc('FE-VENUE-006', 'RequestDetail', 'Optional values are missing.', 'Blank fields show "—"; accessibility shows "No"; timestamps show "—".', { kind: 'Edge', steps: '1. Open a booking with empty optional fields.' },
     async () => {
       request.mockResolvedValue([booking({ accessibility_required: false, layout_required: null, facilities_required: [], coordinator_name: null, event_description: null, start_datetime: null })]);
