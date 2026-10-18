@@ -904,7 +904,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-054', 'CoordinatorAssignment (organiser change request)', 'An organiser edits a pending change request.',
-    'The edit form opens with the submitted proposal and saves with PATCH.', {}, async () => {
+    'The edit form opens with the submitted proposal and saves with PATCH.', { steps: '1. Open Edit. 2. Change the summary. 3. Save the request.' }, async () => {
       const pending = changeReq({ id: 31, proposed_event_name: 'Edited Gala', proposed_event_type: 'Workshop', proposed_event_date: '2026-10-02', proposed_event_end_date: '2026-10-02', proposed_event_capacity: 50, proposed_description: 'Edited plan', proposed_start_time: '08:00:00', proposed_end_time: '12:00:00' });
       const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/31') ? json({ ...pending, request_text: 'Saved edit' }) : json([]));
       render(<CoordinatorAssignment user={ORGANISER} />);
@@ -916,7 +916,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-055', 'CoordinatorAssignment (organiser change request)', 'An organiser cancels a pending change request.',
-    'The cancel endpoint is called and the request is reloaded with its cancelled status.', {}, async () => {
+    'The cancel endpoint is called and the request is reloaded with its cancelled status.', { steps: '1. Click Cancel. 2. Confirm the cancellation.' }, async () => {
       const pending = changeReq({ id: 32 });
       const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/32/cancel') ? json({ ...pending, review_status: 'Cancelled' }) : json([]));
       vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -926,7 +926,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-056', 'CoordinatorAssignment (organiser submission)', 'An organiser submits a draft event.',
-    'The submit endpoint is called and the success message is shown.', {}, async () => {
+    'The submit endpoint is called and the success message is shown.', { steps: '1. Open a draft event. 2. Click Submit.' }, async () => {
       const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ event_status: 'Draft' }) }]) : url.endsWith('/submit') ? json({ ...ev({ event_status: 'Under review' }) }) : json([]));
       render(<CoordinatorAssignment user={{ id: 'o1', role: 'Event Manager' }} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
@@ -950,7 +950,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-058', 'CoordinatorAssignment (organiser change request)', 'An organiser declines cancellation confirmation.',
-    'The cancellation endpoint is not called.', {}, async () => {
+    'The cancellation endpoint is not called.', { steps: '1. Click Cancel. 2. Decline the confirmation.' }, async () => {
       const pending = changeReq({ id: 33 });
       const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : json([]));
       vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -971,7 +971,7 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-060', 'CoordinatorAssignment (change request ordering)', 'Non-pending requests have different submission dates.',
-    'Pending remains first and the remaining requests are newest first.', {}, async () => {
+    'Pending remains first and the remaining requests are newest first.', { steps: '1. Open Event Change Request. 2. Inspect the order.' }, async () => {
       const requests = [
         changeReq({ id: 41, review_status: 'Approved', created_at: '2026-04-01T00:00:00Z', proposal: { event_name: 'Older approved' } }),
         changeReq({ id: 42, review_status: 'Pending', created_at: '2026-03-01T00:00:00Z', proposal: { event_name: 'Pending request' } }),
