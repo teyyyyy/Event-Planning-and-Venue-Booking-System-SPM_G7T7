@@ -52,7 +52,7 @@ describe('VenueApproval', () => {
       expect(p.getByText('100')).toBeInTheDocument();
     });
 
-  tc('FE-VENUE-013', 'RequestDetail', 'A venue has setup and teardown durations in minutes.', 'The booking list and details show singular/plural minute labels, including zero minutes.',
+  tc('FE-VENUE-019', 'RequestDetail', 'A venue has setup and teardown durations in minutes.', 'The booking list and details show singular/plural minute labels, including zero minutes.',
     { data: 'Venue has setup_time 120 and teardown_time 1', steps: '1. Return a booking enriched with the venue setup_time 120 and teardown_time 1. 2. Open details.' },
     async () => {
       request.mockResolvedValue([booking({ setup_time: 120, teardown_time: 1 })]);
@@ -65,7 +65,7 @@ describe('VenueApproval', () => {
       expect(panel.getByText('1 minute')).toBeInTheDocument();
     });
 
-  tc('FE-VENUE-014', 'RequestDetail', 'A venue has unset or zero setup/teardown durations.', 'Unset values show a dash and zero is shown as "0 minutes".',
+  tc('FE-VENUE-020', 'RequestDetail', 'A venue has unset or zero setup/teardown durations.', 'Unset values show a dash and zero is shown as "0 minutes".',
     { kind: 'Edge', data: 'setup_time null, teardown_time 0', steps: '1. Return a booking enriched with null setup_time and zero teardown_time. 2. Open details.' },
     async () => {
       request.mockResolvedValue([booking({ setup_time: null, teardown_time: 0 })]);
