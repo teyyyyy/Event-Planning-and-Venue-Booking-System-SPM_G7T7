@@ -136,13 +136,13 @@ function CoordinatorFeedbackLogDialog({ event, onClose }) {
   </div>;
 }
 
-function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, onRequestClarification, onViewFeedbackLog, coordinators, canManage = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
+function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, onEditChangeRequest, onCancelChangeRequest, onRequestClarification, onViewFeedbackLog, coordinators, canManage = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
   const columnCount = 6 + (showChangeDecision ? 1 : 0);
   return events.length ? events.map((event) => <React.Fragment key={event.id}><tr>
     <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
     <td>{canManage ? <select aria-label={`Status for ${event.event_title}`} value={event.event_status || ''} onChange={(e) => onStatusChange(event.id, e.target.value)}>{EVENT_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</select> : <span className="pill">{event.event_status}</span>}</td>
     <td>{canManage ? <select aria-label={`Coordinator for ${event.event_title}`} value={event.assigned_coordinator_id || ''} onChange={(e) => onAssign(event.id, e.target.value)}>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select> : event.coordinator_name ? <span>{event.coordinator_name}<br /><small>{event.coordinator_email || 'Email unavailable'}</small></span> : <button className="assign" onClick={() => onAssign(event.id)}>Assign coordinator</button>}</td>
-    {showChangeDecision && <td>{event.latest_change_request ? <><span className="pill">{event.latest_change_request.review_status}</span>{event.latest_change_request.review_status === 'Rejected' && event.latest_change_request.review_comments && <small className="change-request-reason">Reason: {event.latest_change_request.review_comments}</small>}{event.latest_change_request.change_type && <small className="change-request-reason">{event.latest_change_request.change_type} change{PROCESSING_LABELS[event.latest_change_request.processing_status] ? ` · ${PROCESSING_LABELS[event.latest_change_request.processing_status]}` : ''}</small>}</> : '—'}</td>}
+    {showChangeDecision && <td>{event.latest_change_request ? <><span className="pill">{event.latest_change_request.review_status}</span>{event.latest_change_request.review_status === 'Rejected' && event.latest_change_request.review_comments && <small className="change-request-reason">Reason: {event.latest_change_request.review_comments}</small>}{event.latest_change_request.change_type && <small className="change-request-reason">{event.latest_change_request.change_type} change{PROCESSING_LABELS[event.latest_change_request.processing_status] ? ` · ${PROCESSING_LABELS[event.latest_change_request.processing_status]}` : ''}</small>}{event.latest_change_request.review_status === 'Pending' && <span className="change-request-actions"><button className="assign" type="button" onClick={() => onEditChangeRequest(event)}>Edit</button><button className="assign" type="button" onClick={() => onCancelChangeRequest(event.latest_change_request.id)}>Cancel</button></span>}</> : '—'}</td>}
     {showCoordinatorFeedback && <td>{event.coordinator_comments || event.amendments
       ? <button className="assign" type="button" onClick={() => onViewFeedbackLog(event)}>View clarification/amendments</button>
       : '—'}</td>}
@@ -155,11 +155,16 @@ function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChange
 }
 
 function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError, onProcess, processingChangeRequestId }) {
-  const statusPriority = { pending: 0, approved: 1, rejected: 2 };
   const sortedRequests = [...requests].sort((first, second) => {
-    const firstPriority = statusPriority[String(first.review_status || 'Pending').trim().toLowerCase()] ?? 3;
-    const secondPriority = statusPriority[String(second.review_status || 'Pending').trim().toLowerCase()] ?? 3;
-    return firstPriority - secondPriority;
+    const firstPending = String(first.review_status || 'Pending').trim().toLowerCase() === 'pending';
+    const secondPending = String(second.review_status || 'Pending').trim().toLowerCase() === 'pending';
+    if (firstPending !== secondPending) return firstPending ? -1 : 1;
+    if (!first.created_at || !second.created_at || first.created_at === second.created_at) {
+      const order = { approved: 0, rejected: 1, cancelled: 2 };
+      return (order[String(first.review_status || '').trim().toLowerCase()] ?? 3)
+        - (order[String(second.review_status || '').trim().toLowerCase()] ?? 3);
+    }
+    return String(second.created_at || '').localeCompare(String(first.created_at || ''));
   });
   return sortedRequests.length ? sortedRequests.map((request) => {
     const proposal = request.proposal || {};
@@ -240,6 +245,7 @@ export default function CoordinatorAssignment({ user }) {
   const [changeRequestText, setChangeRequestText] = useState('');
   const [changeRequestMessage, setChangeRequestMessage] = useState('');
   const [isSubmittingChangeRequest, setIsSubmittingChangeRequest] = useState(false);
+  const [editingChangeRequestId, setEditingChangeRequestId] = useState(null);
   const [coordinatorChangeRequests, setCoordinatorChangeRequests] = useState([]);
   const [selectedChangeRequest, setSelectedChangeRequest] = useState(null);
   const [reviewingChangeRequestId, setReviewingChangeRequestId] = useState(null);
@@ -484,14 +490,33 @@ export default function CoordinatorAssignment({ user }) {
     setChangeRequestText('');
   }
 
+  function editChangeRequest(event) {
+    const request = event.latest_change_request;
+    setEditingChangeRequestId(request.id);
+    setChangeRequestEvent(event);
+    setChangeRequestMessage('');
+    setChangeProposal({ event_name: request.proposed_event_name ?? event.event_name ?? '', event_type: request.proposed_event_type ?? '', event_date: request.proposed_event_date ?? event.event_date ?? '', event_end_date: request.proposed_event_end_date ?? request.proposed_event_date ?? event.event_date ?? '', event_capacity: request.proposed_event_capacity ?? '', description: request.proposed_description ?? '', start_time: formatTime(request.proposed_start_time), end_time: formatTime(request.proposed_end_time) });
+    setChangeRequestText(request.request_text || '');
+  }
+
+  async function cancelSubmittedChangeRequest(requestId) {
+    if (!window.confirm('Cancel this pending change request?')) return;
+    const response = await fetch(`${API}/event-organisers/${user.id}/change-requests/${requestId}/cancel`, { method: 'POST' });
+    const result = await response.json();
+    if (!response.ok) { setMessage(result.detail || 'Could not cancel the change request.'); return; }
+    setMessage('Change request cancelled.');
+    await loadOrganiser(true);
+  }
+
   async function submitChangeRequest(submitEvent) {
     submitEvent.preventDefault();
     if (!changeRequestEvent || isSubmittingChangeRequest) return;
     setIsSubmittingChangeRequest(true);
     setChangeRequestMessage('');
     try {
-      const response = await fetch(`${API}/event-organisers/${user.id}/requests/${changeRequestEvent.id}/change-requests`, {
-        method: 'POST',
+      const editing = editingChangeRequestId !== null;
+      const response = await fetch(editing ? `${API}/event-organisers/${user.id}/change-requests/${editingChangeRequestId}` : `${API}/event-organisers/${user.id}/requests/${changeRequestEvent.id}/change-requests`, {
+        method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...changeProposal, event_capacity: Number(changeProposal.event_capacity), request_text: changeRequestText }),
       });
@@ -501,9 +526,10 @@ export default function CoordinatorAssignment({ user }) {
         return;
       }
       setChangeRequestEvent(null);
+      setEditingChangeRequestId(null);
       setChangeProposal(EMPTY_PROPOSAL);
       setChangeRequestText('');
-      setMessage('Change request sent to the assigned event coordinator.');
+      setMessage(editing ? 'Change request updated and sent to the assigned event coordinator.' : 'Change request sent to the assigned event coordinator.');
       await loadOrganiser(true);
     } catch (error) {
       setChangeRequestMessage(`Unable to send change request. (${error.message})`);
@@ -514,6 +540,7 @@ export default function CoordinatorAssignment({ user }) {
 
   function cancelChangeRequest() {
     setChangeRequestEvent(null);
+    setEditingChangeRequestId(null);
     setChangeProposal(EMPTY_PROPOSAL);
     setChangeRequestText('');
     setChangeRequestMessage('');
@@ -550,7 +577,7 @@ export default function CoordinatorAssignment({ user }) {
       {message && <p className="message">{message}</p>}
       {activeTab !== 'change-requests' && <>
         <h2>Event status</h2>
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onEditChangeRequest={editChangeRequest} onCancelChangeRequest={cancelSubmittedChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} coordinators={coordinators} canManage={activeTab === 'management'} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
       </>}
       {isCoordinator && activeTab === 'change-requests' && <>
         <h2>Submitted change requests</h2>
@@ -571,7 +598,7 @@ export default function CoordinatorAssignment({ user }) {
           <label className="wide">Summary for the event coordinator<textarea aria-label="Change summary for the event coordinator" value={changeRequestText} onChange={(event) => setChangeRequestText(event.target.value)} maxLength={5000} required rows="3" /></label>
         </div>
         <ChangeSignificance event={changeRequestEvent} proposal={changeProposal} />
-        <div className="form-actions"><button className="primary" type="submit" disabled={!changeRequestText.trim() || isSubmittingChangeRequest}>{isSubmittingChangeRequest ? 'Sending request...' : 'Send for coordinator approval'}</button><button className="secondary" type="button" onClick={cancelChangeRequest} disabled={isSubmittingChangeRequest}>Cancel</button></div>
+        <div className="form-actions"><button className="primary" type="submit" disabled={!changeRequestText.trim() || isSubmittingChangeRequest}>{isSubmittingChangeRequest ? (editingChangeRequestId !== null ? 'Saving...' : 'Sending request...') : editingChangeRequestId !== null ? 'Save change request' : 'Send for coordinator approval'}</button><button className="secondary" type="button" onClick={cancelChangeRequest} disabled={isSubmittingChangeRequest}>Cancel</button></div>
       </form>}
       {isCoordinator && feedbackEvent && <CoordinatorFeedbackDialog event={feedbackEvent} clarification={feedbackClarification} amendments={feedbackAmendments} error={feedbackError} isSubmitting={isSubmittingFeedback} onChange={changeCoordinatorFeedback} onClose={closeCoordinatorFeedback} onSubmit={submitCoordinatorFeedback} />}
       {isOrganiser && feedbackLogEvent && <CoordinatorFeedbackLogDialog event={feedbackLogEvent} onClose={() => setFeedbackLogEvent(null)} />}
