@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
@@ -47,7 +47,7 @@ describe('CoordinatorAssignment', () => {
     { data: '2026-10-01 to 2026-10-03', steps: '1. Render with a multi-day and a single-day event.' },
     async () => {
       mockFetch(() => json([ev({ id: 1, event_end_date: '2026-10-03' }), ev({ id: 2, event_title: 'One day', event_date: '2026-11-01', event_end_date: '2026-11-01' })]));
-      render(<CoordinatorAssignment user={ORGANISER} />);
+      render(<CoordinatorAssignment user={{ id: 'o1', role: 'Event Manager' }} />);
       expect(await screen.findByText('2026-10-01 to 2026-10-03')).toBeInTheDocument();
       expect(screen.getByText('2026-11-01')).toBeInTheDocument();
     });
@@ -901,6 +901,88 @@ describe('CoordinatorAssignment', () => {
       const fallback = await viewRequest('Fallback gala');
       expect(within(fallback).getByRole('heading', { level: 2 })).toHaveTextContent('Event change request: Fallback gala');
       expect(within(fallback).getByLabelText('Event name').closest('label')).toHaveTextContent('Original: Fallback gala');
+    });
+
+  tc('FE-COORD-054', 'CoordinatorAssignment (organiser change request)', 'An organiser edits a pending change request.',
+    'The edit form opens with the submitted proposal and saves with PATCH.', { steps: '1. Open Edit. 2. Change the summary. 3. Save the request.' }, async () => {
+      const pending = changeReq({ id: 31, proposed_event_name: 'Edited Gala', proposed_event_type: 'Workshop', proposed_event_date: '2026-10-02', proposed_event_end_date: '2026-10-02', proposed_event_capacity: 50, proposed_description: 'Edited plan', proposed_start_time: '08:00:00', proposed_end_time: '12:00:00' });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/31') ? json({ ...pending, request_text: 'Saved edit' }) : json([]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      expect(screen.getByDisplayValue('Edited Gala')).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText('Change summary for the event coordinator'), { target: { value: 'Saved edit' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save change request' }));
+      await waitFor(() => expect(callsTo(f, '/change-requests/31', 'PATCH')).toHaveLength(1));
+    });
+
+  tc('FE-COORD-055', 'CoordinatorAssignment (organiser change request)', 'An organiser cancels a pending change request.',
+    'The cancel endpoint is called and the request is reloaded with its cancelled status.', { steps: '1. Click Cancel. 2. Confirm the cancellation.' }, async () => {
+      const pending = changeReq({ id: 32 });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/32/cancel') ? json({ ...pending, review_status: 'Cancelled' }) : json([]));
+      vi.spyOn(window, 'confirm').mockReturnValue(true);
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(callsTo(f, '/change-requests/32/cancel', 'POST')).toHaveLength(1));
+    });
+
+  tc('FE-COORD-056', 'CoordinatorAssignment (organiser submission)', 'An organiser submits a draft event.',
+    'The submit endpoint is called and the success message is shown.', { steps: '1. Open a draft event. 2. Click Submit.' }, async () => {
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ event_status: 'Draft' }) }]) : url.endsWith('/submit') ? json({ ...ev({ event_status: 'Under review' }) }) : json([]));
+      render(<CoordinatorAssignment user={{ id: 'o1', role: 'Event Manager' }} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Submit' }));
+      await waitFor(() => expect(callsTo(f, '/submit', 'POST')).toHaveLength(1));
+      expect(await screen.findByText('Request submitted for review.')).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-057', 'CoordinatorAssignment (coordinator feedback)', 'The clarification request network call fails.',
+    'The popup shows the network error.', { kind: 'Negative', steps: '1. Open the clarification popup. 2. Enter a clarification. 3. Make the request fail.' }, async () => {
+      const f = coordinatorBackend((url) => {
+        if (url.endsWith('/clarification-requests')) throw new Error('Network unavailable');
+        return null;
+      });
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request clarification/amendments' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Request clarification/amendments' });
+      fireEvent.change(within(dialog).getByRole('textbox', { name: 'Clarification request' }), { target: { value: 'Please clarify.' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Send request to organiser' }));
+      expect(await within(dialog).findByText(/Unable to send the clarification\/amendment request/)).toBeInTheDocument();
+      expect(callsTo(f, '/clarification-requests', 'POST')).toHaveLength(1);
+    });
+
+  tc('FE-COORD-058', 'CoordinatorAssignment (organiser change request)', 'An organiser declines cancellation confirmation.',
+    'The cancellation endpoint is not called.', { steps: '1. Click Cancel. 2. Decline the confirmation.' }, async () => {
+      const pending = changeReq({ id: 33 });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : json([]));
+      vi.spyOn(window, 'confirm').mockReturnValue(false);
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      expect(callsTo(f, '/change-requests/33/cancel', 'POST')).toHaveLength(0);
+    });
+
+  tc('FE-COORD-059', 'CoordinatorAssignment (organiser change request)', 'Editing a request is rejected by the backend.',
+    'The edit error is shown and the form remains open.', { kind: 'Negative', steps: '1. Open Edit. 2. Save the request. 3. Return HTTP 409.' }, async () => {
+      const pending = changeReq({ id: 34, proposed_event_name: 'Edited Gala', proposed_event_type: 'Workshop', proposed_event_date: '2026-10-02', proposed_event_end_date: '2026-10-02', proposed_event_capacity: 50, proposed_description: 'Edited plan', proposed_start_time: '08:00:00', proposed_end_time: '12:00:00' });
+      const f = mockFetch((url) => url.endsWith('/requests') ? json([{ ...ev({ latest_change_request: pending, has_pending_change_request: true }) }]) : url.endsWith('/change-requests/34') ? json({ detail: 'Only pending change requests can be edited.' }, 409) : json([]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save change request' }));
+      expect(await screen.findByText('Only pending change requests can be edited.')).toBeInTheDocument();
+      expect(callsTo(f, '/change-requests/34', 'PATCH')).toHaveLength(1);
+    });
+
+  tc('FE-COORD-060', 'CoordinatorAssignment (change request ordering)', 'Non-pending requests have different submission dates.',
+    'Pending remains first and the remaining requests are newest first.', { steps: '1. Open Event Change Request. 2. Inspect the order.' }, async () => {
+      const requests = [
+        changeReq({ id: 41, review_status: 'Approved', created_at: '2026-04-01T00:00:00Z', proposal: { event_name: 'Older approved' } }),
+        changeReq({ id: 42, review_status: 'Pending', created_at: '2026-03-01T00:00:00Z', proposal: { event_name: 'Pending request' } }),
+        changeReq({ id: 43, review_status: 'Rejected', created_at: '2026-05-01T00:00:00Z', proposal: { event_name: 'Newer rejected' } }),
+      ];
+      coordinatorBackend((url) => url.endsWith('/event-change-requests') ? json(requests) : null);
+      render(<CoordinatorAssignment user={COORDINATOR} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Event Change Request' }));
+      await screen.findByText('Pending request');
+      const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
+      expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['Pending request', 'Newer rejected', 'Older approved']);
     });
 
 });

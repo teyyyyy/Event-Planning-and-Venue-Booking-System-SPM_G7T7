@@ -39,15 +39,9 @@ alter table public.event_change_requests
 
 do $$
 begin
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid = 'public.event_change_requests'::regclass
-      and conname = 'event_change_requests_review_status_check'
-  ) then
-    alter table public.event_change_requests
-      add constraint event_change_requests_review_status_check
-      check (review_status in ('Pending', 'Approved', 'Rejected'));
-  end if;
+  alter table public.event_change_requests drop constraint if exists event_change_requests_review_status_check;
+  alter table public.event_change_requests add constraint event_change_requests_review_status_check
+    check (review_status in ('Pending', 'Approved', 'Rejected', 'Cancelled'));
 end $$;
 
 create index if not exists event_change_requests_event
@@ -71,6 +65,8 @@ grant usage, select on sequence public.event_change_requests_id_seq to service_r
 
 drop function if exists public.submit_event_change_request(bigint, uuid, text);
 drop function if exists public.review_event_change_request(bigint, uuid, text, text);
+drop function if exists public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time);
+drop function if exists public.cancel_event_change_request(bigint, uuid);
 
 create or replace function public.submit_event_change_request(
   p_event_id bigint,
@@ -274,6 +270,41 @@ begin
 end;
 $$;
 
+create or replace function public.update_event_change_request(
+  p_request_id bigint, p_organiser_id uuid, p_request_text text,
+  p_event_name text, p_event_type text, p_event_date date, p_event_end_date date,
+  p_event_capacity integer, p_description text, p_start_time time, p_end_time time
+)
+returns public.event_change_requests language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare r public.event_change_requests%rowtype;
+begin
+  if p_request_text is null or length(trim(p_request_text)) not between 1 and 5000 then
+    raise exception 'Change requests must contain 1 to 5,000 characters.' using errcode = '22023';
+  end if;
+  select * into r from public.event_change_requests where id = p_request_id for update;
+  if not found then raise exception 'Event change request not found.' using errcode = 'P0002'; end if;
+  if r.organiser_id is distinct from p_organiser_id then raise exception 'You can only edit your own change requests.' using errcode = '42501'; end if;
+  if r.review_status <> 'Pending' then raise exception 'Only pending change requests can be edited.' using errcode = '55000'; end if;
+  update public.event_change_requests set request_text=trim(p_request_text), proposed_event_name=trim(p_event_name), proposed_event_type=trim(p_event_type), proposed_event_date=p_event_date, proposed_event_end_date=p_event_end_date, proposed_event_capacity=p_event_capacity, proposed_description=trim(p_description), proposed_start_time=p_start_time, proposed_end_time=p_end_time where id=p_request_id returning * into r;
+  perform public.emit_notifications(array[r.coordinator_id::text], format('Change request #%s was edited by the event organiser.', r.id), 'event', r.event_id::text);
+  return r;
+end; $$;
+
+create or replace function public.cancel_event_change_request(p_request_id bigint, p_organiser_id uuid)
+returns public.event_change_requests language plpgsql security definer set search_path = public, pg_temp
+as $$
+declare r public.event_change_requests%rowtype;
+begin
+  select * into r from public.event_change_requests where id=p_request_id for update;
+  if not found then raise exception 'Event change request not found.' using errcode = 'P0002'; end if;
+  if r.organiser_id is distinct from p_organiser_id then raise exception 'You can only cancel your own change requests.' using errcode = '42501'; end if;
+  if r.review_status <> 'Pending' then raise exception 'Only pending change requests can be cancelled.' using errcode = '55000'; end if;
+  update public.event_change_requests set review_status='Cancelled' where id=p_request_id returning * into r;
+  perform public.emit_notifications(array[r.coordinator_id::text], format('Change request #%s was cancelled by the event organiser.', r.id), 'event', r.event_id::text);
+  return r;
+end; $$;
+
 revoke all on function public.submit_event_change_request(
   bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone
 ) from public, anon, authenticated;
@@ -285,5 +316,10 @@ revoke all on function public.review_event_change_request(bigint, uuid, text, te
   from public, anon, authenticated;
 grant execute on function public.review_event_change_request(bigint, uuid, text, text)
   to service_role;
+
+revoke all on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time) from public, anon, authenticated;
+grant execute on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time) to service_role;
+revoke all on function public.cancel_event_change_request(bigint, uuid) from public, anon, authenticated;
+grant execute on function public.cancel_event_change_request(bigint, uuid) to service_role;
 
 commit;

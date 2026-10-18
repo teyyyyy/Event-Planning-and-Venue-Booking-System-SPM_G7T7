@@ -194,3 +194,33 @@ def create_event_change_request(organiser_id: str, event_id: int, request: Event
     if not result.data:
         raise HTTPException(500, "Event change request could not be saved.")
     return result.data[0] if isinstance(result.data, list) else result.data
+
+@router.patch("/api/event-organisers/{organiser_id}/change-requests/{request_id}")
+def update_event_change_request(organiser_id: str, request_id: int, request: EventChangeRequest):
+    request_text = request.request_text.strip()
+    validate_request(request, allow_past_date=True)
+    try:
+        result = db().rpc("update_event_change_request", {
+            "p_request_id": request_id, "p_organiser_id": organiser_id, "p_request_text": request_text,
+            "p_event_name": request.event_name, "p_event_type": request.event_type,
+            "p_event_date": request.event_date, "p_event_end_date": request.event_end_date or request.event_date,
+            "p_event_capacity": request.event_capacity, "p_description": request.description,
+            "p_start_time": request.start_time, "p_end_time": request.end_time,
+        }).execute()
+    except APIError as error:
+        code = {"P0002": 404, "42501": 403, "22023": 400, "55000": 409}.get(error.code)
+        if code: raise HTTPException(code, error.message) from error
+        raise
+    if not result.data: raise HTTPException(500, "Event change request could not be updated.")
+    return result.data[0] if isinstance(result.data, list) else result.data
+
+@router.post("/api/event-organisers/{organiser_id}/change-requests/{request_id}/cancel")
+def cancel_event_change_request(organiser_id: str, request_id: int):
+    try:
+        result = db().rpc("cancel_event_change_request", {"p_request_id": request_id, "p_organiser_id": organiser_id}).execute()
+    except APIError as error:
+        code = {"P0002": 404, "42501": 403, "55000": 409}.get(error.code)
+        if code: raise HTTPException(code, error.message) from error
+        raise
+    if not result.data: raise HTTPException(500, "Event change request could not be cancelled.")
+    return result.data[0] if isinstance(result.data, list) else result.data

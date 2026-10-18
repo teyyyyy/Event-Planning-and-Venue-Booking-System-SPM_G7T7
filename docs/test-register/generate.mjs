@@ -54,7 +54,7 @@ const SECTIONS = [
     intro: 'Feature code: VREQ. Coordinators browse the venue catalogue (auto-filtered by the event\'s requirements), request a venue for an event, and track their submissions. The frontend checks approved bookings for overlaps before submitting.',
     fe: 'frontend/src/__tests__/VenueRequest.test.jsx', be: 'test/test_be_venue_request.py' },
   { n: '6.10', title: 'Venue catalogue (Venue Staff, Technical Support)', prefixes: ['FE-VCAT', 'BE-VCAT'],
-    intro: 'Feature code: VCAT. Venue staff and technical support browse venue information; only venue staff may edit operating hours, facilities, accessibility and layouts, and all input is validated on the server.',
+    intro: 'Feature code: VCAT. Venue staff and technical support browse venue information; only venue staff may edit operating hours, setup and teardown durations, facilities, accessibility and layouts, and all input is validated on the server.',
     fe: 'frontend/src/__tests__/VenueCatalogue.test.jsx', be: 'test/test_be_venue_catalogue.py' },
   { n: '6.11', title: 'Sprint 2 attendee registration and notifications', prefixes: ['FE-SP2', 'BE-SP2'],
     intro: 'Stories 38.1, 38.2 and 48.1. Feature code: SP2. Covers attendee browsing and registration, private registration lists, cancelled events, notification ownership, linked-record permissions, read status, polling, refresh and error recovery. Backend tests use database doubles; database capacity, duplicate enforcement and notification triggers are verified separately by test/sprint2_sql.mjs.',
