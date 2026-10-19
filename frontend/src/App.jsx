@@ -22,16 +22,17 @@ function AuthedApp() {
   const { user, logout } = useAuth();
   const normalizedRole = user.role.trim().toLowerCase();
   const isCoordinator = normalizedRole === "event coordinator";
+  const isCoordinatorLead = normalizedRole === "event coordinator lead";
   const isTechnicalSupport = normalizedRole === "technical support staff";
   const isOrganiser = normalizedRole === "event organiser";
   const isVenueStaff = normalizedRole === "venue staff";
-  const isAttendee = normalizedRole === "attendee";
   const isSafetyOfficer = normalizedRole === "safety officer";
+  const isAttendee = normalizedRole === "attendee";
 
   if (isAttendee) return <AttendeeWorkspace user={user} logout={logout} />;
   if (isTechnicalSupport)
     return <TechnicalSupportWorkspace user={user} logout={logout} />;
-  if (isCoordinator)
+  if (isCoordinator || isCoordinatorLead)
     return <CoordinatorWorkspace user={user} logout={logout} />;
   if (isOrganiser)
     return <OrganiserWorkspace user={user} logout={logout} />;
@@ -93,6 +94,7 @@ function SafetyOfficerWorkspace({ user, logout }) {
     </div>
   );
 }
+
 // Venue Staff workspace
 function VenueStaffWorkspace({ logout, email }) {
 
@@ -309,7 +311,11 @@ function CoordinatorWorkspace({ user, logout }) {
       <aside className="coordinator-sidebar">
         <div>
           <div className="logo">G</div>
-          <div className="side-label">EVENT COORDINATOR</div>
+          <div className="side-label">
+            {user?.role?.trim().toLowerCase() === "event coordinator lead"
+              ? "EVENT COORDINATOR LEAD"
+              : "EVENT COORDINATOR"}
+          </div>
 
           <nav className="coordinator-side-nav">
             <button

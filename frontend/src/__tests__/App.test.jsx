@@ -261,4 +261,24 @@ describe('App', () => {
       expect(screen.getByText('VENUE STAFF CALENDAR')).toBeInTheDocument();
       expect(screen.queryByText(/VENUE CATALOGUE PAGE/)).toBeNull();
     });
+
+  tc('FE-APP-024', 'AuthedApp (coordinator lead)', 'An Event Coordinator Lead is signed in.', 'The coordinator sidebar shows with EVENT COORDINATOR LEAD and Event Management open.',
+    { data: 'role = "event coordinator lead"', steps: '1. Render App as event coordinator lead.' },
+    () => {
+      as('event coordinator lead');
+      render(<App />);
+      expect(screen.getByText('EVENT COORDINATOR LEAD')).toBeInTheDocument();
+      expect(screen.getByText(/COORDINATOR PAGE/)).toBeInTheDocument();
+    });
+
+  tc('FE-APP-025', 'AuthedApp (safety officer)', 'A Safety Officer is signed in.', 'The safety officer workspace shows with SAFETY OFFICER and Operational Safety Check.',
+    { data: 'role = "safety officer"', steps: '1. Render App as safety officer.' },
+    () => {
+      as('safety officer');
+      render(<App />);
+      expect(screen.getByText('SAFETY OFFICER')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Operational Safety Check' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Log out' })).toBeInTheDocument();
+    });
 });
+
