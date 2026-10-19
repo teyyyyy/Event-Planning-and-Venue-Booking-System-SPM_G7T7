@@ -14,10 +14,11 @@ const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', star
 const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { start_datetime: '2026-10-01T09:30:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00' } };
 
 function backend(o = {}) {
-  const d = { venues: [HALL_A, HALL_B], events: [GALA, WORKSHOP], submitted: [], booked: [], post: () => json({ request_id: 9 }), ...o };
+  const d = { venues: [HALL_A, HALL_B], events: [GALA, WORKSHOP], submitted: [], booked: [], catalogue: { setup_time: 0, teardown_time: 0 }, post: () => json({ request_id: 9 }), ...o };
   const pick = (v) => (v instanceof Function ? v() : json(v));
   return mockFetch((url, opts) => {
     if ((opts.method || 'GET') === 'POST') return d.post(url, opts);
+    if (url.includes('/venue-catalogue/')) return pick(d.catalogue);
     if (url.includes('/venue-booking-requests/venues/')) return pick(d.booked);
     if (url.includes('/venue-booking-requests/coordinators/')) return pick(d.submitted);
     if (url.includes('/event-coordinators/')) return pick(d.events);
@@ -179,7 +180,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-014', 'VenueRequest (submit)', 'The venue already has an approved booking overlapping the requested time.', 'An error dialog says the venue is already booked and no POST is sent.', { kind: 'Negative', pre: 'Approved booking 08:00-10:00 on the same day.', steps: '1. Choose event and venue. 2. Click "Submit Request".' },
     async () => {
-      const f = backend({ booked: [{ start_datetime: '2026-10-01 08:00:00+00', end_datetime: '2026-10-01 10:00:00+00' }] });
+      const f = backend({ booked: [{ status: 'Approved', start_datetime: '2026-10-01 08:00:00+00', end_datetime: '2026-10-01 10:00:00+00' }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -201,7 +202,7 @@ describe('VenueRequest', () => {
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(1);
     });
 
-  tc('FE-VREQ-016', 'VenueRequest (submit)', 'The availability check itself fails.', 'An error dialog "Unable to verify venue availability." shows and no POST is sent.', { kind: 'Negative', steps: '1. Return 500 for the availability call. 2. Submit.' },
+  tc('FE-VREQ-016', 'VenueRequest (submit)', 'The availability check itself fails.', 'An error dialog "Unable to verify venue availability or buffer constraints." shows and no POST is sent.', { kind: 'Negative', steps: '1. Return 500 for the availability call. 2. Submit.' },
     async () => {
       const f = backend({ booked: () => json({}, 500) });
       await ready();
@@ -209,7 +210,7 @@ describe('VenueRequest', () => {
       await chooseVenue();
       await waitFor(() => expect(submitBtn()).toBeEnabled());
       fireEvent.click(submitBtn());
-      expect(await screen.findByText('Unable to verify venue availability.')).toBeInTheDocument();
+      expect(await screen.findByText('Unable to verify venue availability or buffer constraints.')).toBeInTheDocument();
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
 
@@ -224,7 +225,7 @@ describe('VenueRequest', () => {
       expect(await screen.findByText('Venue is closed on Sundays.')).toBeInTheDocument();
     });
 
-  tc('FE-VREQ-018', 'VenueRequest (submit)', 'The database reports a duplicate booking for the event (unique-constraint error 23505).', 'A friendly message "A venue booking request has already been submitted for this event." replaces the raw database text.', { kind: 'Negative', data: '"duplicate key … 23505"', steps: '1. Return a 23505 error for the POST. 2. Submit.' },
+  tc('FE-VREQ-018', 'VenueRequest (submit)', 'The database reports a duplicate booking for the specific venue (unique-constraint error 23505).', 'A friendly message "A booking request for this specific venue has already been submitted for this event." replaces the raw database text.', { kind: 'Negative', data: '"duplicate key … 23505"', steps: '1. Return a 23505 error for the POST. 2. Submit.' },
     async () => {
       backend({ post: () => json({ detail: 'duplicate key value violates unique constraint 23505' }, 500) });
       await ready();
@@ -232,7 +233,7 @@ describe('VenueRequest', () => {
       await chooseVenue();
       await waitFor(() => expect(submitBtn()).toBeEnabled());
       fireEvent.click(submitBtn());
-      expect(await screen.findByText('A venue booking request has already been submitted for this event.')).toBeInTheDocument();
+      expect(await screen.findByText('A booking request for this specific venue has already been submitted for this event.')).toBeInTheDocument();
     });
 
   tc('FE-VREQ-019', 'VenueRequest (submit)', 'A submission is in flight.', 'The button reads "Submitting…" and is disabled.', { kind: 'State', pre: 'POST never resolves.', steps: '1. Submit. 2. Inspect the button.' },
@@ -311,7 +312,7 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-026', 'VenueRequest (submit)', 'An existing booking only has its times on the linked event, and another booking has no times at all.',
     'Nested "Event Details" times are used for the overlap check; a booking without times is ignored.', { kind: 'Edge', pre: 'Pending booking whose event runs 16:00-18:00; a booking with no times.', steps: '1. Choose Gala (09:00-17:00) and Hall A. 2. Submit.' },
     async () => {
-      const f = backend({ booked: [{ 'Event Details': null }, { 'Event Details': { start_datetime: '2026-10-01 16:00:00+00', end_datetime: '2026-10-01 18:00:00+00' } }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': null }, { status: 'Approved', 'Event Details': { start_datetime: '2026-10-01 16:00:00+00', end_datetime: '2026-10-01 18:00:00+00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -379,6 +380,51 @@ describe('VenueRequest', () => {
       fireEvent.click(submitBtn());
       expect(await screen.findByText(/This event has no start or end time/)).toBeInTheDocument();
       expect(callsTo(f, '/venue-booking-requests/venues/')).toHaveLength(0);
+      expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+    });
+
+  tc('FE-VREQ-032', 'VenueRequest (submit)', 'A booking request is submitted for an event that might already have requests, but for a different venue.', 'The submission succeeds and sends the correct payload without a duplicate error.', { kind: 'Positive', data: 'Same event, different venue', steps: '1. Select "Gala". 2. Select an alternate valid venue. 3. Submit successfully.' },
+    async () => {
+      // 1. Create a dummy venue that passes Gala's auto-filters so it stays visible
+      const HALL_C = { venue_id: 3, name: 'Hall C', capacity: 100, layouts: ['Theatre'], facilities: ['Wi-Fi'], accessible: 1 };
+      
+      // 2. Inject it into the backend mock alongside Hall A
+      const f = backend({ venues: [HALL_A, HALL_C] });
+      await ready();
+      
+      pickEvent(1);
+      
+      // 3. Choose the new valid venue
+      await chooseVenue('Hall C');
+      
+      await waitFor(() => expect(submitBtn()).toBeEnabled());
+      fireEvent.click(submitBtn());
+      
+      expect(await screen.findByText('Venue request #9 was submitted successfully.')).toBeInTheDocument();
+      
+      // 4. Check the URL and verify the payload sent venue_id: 3
+      const [url, options] = callsTo(f, '/venue-bookings', 'POST')[0];
+      expect(url).toMatch(/\/venue-bookings$/);
+      expect(JSON.parse(options.body)).toEqual({ event_id: 1, venue_id: 3, coordinator_id: 'c1' });
+    });
+
+  tc('FE-VREQ-033', 'VenueRequest (submit)', 'The venue already has an approved booking whose core time does not overlap, but its setup or teardown buffer overlaps the requested event window.', 'An error dialog says the venue is already booked (including setup/teardown buffers) and no POST is sent.', { kind: 'Negative', pre: 'Approved booking 12:00-14:00 with 60m setup (effective start 11:00); requested event 10:00-11:30.', steps: '1. Choose event and venue with buffer collision. 2. Click "Submit Request".' },
+    async () => {
+      const f = mockFetch((url, opts) => {
+        if ((opts.method || 'GET') === 'POST') return json({ request_id: 9 });
+        if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', start_datetime: '2026-10-01 12:00:00+00', end_datetime: '2026-10-01 14:00:00+00' }]);
+        if (url.includes('/venue-catalogue/')) return json({ ...HALL_A, setup_time: 60, teardown_time: 60 });
+        if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
+        if (url.includes('/event-coordinators/')) return json([GALA]);
+        if (url.endsWith('/venues')) return json([HALL_A]);
+        return json({}, 404);
+      });
+      await ready();
+      pickEvent(1);
+      await chooseVenue();
+      await waitFor(() => expect(submitBtn()).toBeEnabled());
+      fireEvent.click(submitBtn());
+      expect(await screen.findByText(/already booked for the selected time period \(including setup\/teardown buffers\)/)).toBeInTheDocument();
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
 });

@@ -180,6 +180,14 @@
         "default": "",
         "format": "text",
         "type": "string"
+      },
+      "setup_time": {
+        "format": "integer",
+        "type": "integer"
+      },
+      "teardown_time": {
+        "format": "integer",
+        "type": "integer"
       }
     },
     "type": "object"

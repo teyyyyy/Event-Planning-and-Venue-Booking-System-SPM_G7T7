@@ -14,7 +14,7 @@ const HOURS = {
   friday: { closed: false, opens: '09:00', closes: '18:00' }, saturday: { closed: false, opens: '10:00', closes: '14:00' },
   sunday: { closed: true, opens: null, closes: null },
 };
-const VENUE = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 100, operating_hours: HOURS, facilities: ['Wi-Fi', 'Projector'], accessible: 1, accessibility_details: 'Step-free entrance', layouts: ['Theatre', 'Banquet'] };
+const VENUE = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 100, operating_hours: HOURS, facilities: ['Wi-Fi', 'Projector'], accessible: 1, accessibility_details: 'Step-free entrance', layouts: ['Theatre', 'Banquet'], setup_time: 90, teardown_time: 30 };
 
 // Route the mocked request(): '/venue-catalogue' -> list, '/venue-catalogue/<id>' -> detail, PUT -> putResult.
 function backend({ list = [VENUE], detail = VENUE, put } = {}) {
@@ -28,7 +28,7 @@ const openDetail = async (props = {}) => {
   fireEvent.click(await screen.findByRole('button', { name: 'View Hall A' }));
   await screen.findByRole('heading', { name: 'Hall A' });
 };
-const startEdit = async () => { await openDetail({ canEdit: true }); fireEvent.click(screen.getByRole('button', { name: 'Edit venue' })); await screen.findByRole('heading', { name: 'Edit Hall A' }); };
+const startEdit = async () => { await openDetail({ canEdit: true }); fireEvent.click(screen.getByRole('button', { name: 'Edit venue' })); await screen.findByRole('heading', { name: 'Hall A' }); };
 const form = () => document.querySelector('form.catalogue-panel');
 const area = (i) => document.querySelectorAll('textarea')[i]; // 0 facilities, 1 notes, 2 layouts
 
@@ -61,7 +61,7 @@ describe('VenueCatalogue', () => {
       expect(screen.queryByRole('alert')).toBeNull();
     });
 
-  tc('FE-VCAT-004', 'VenueCatalogue (details)', 'The user opens a venue.', 'GET /venue-catalogue/<id> is called and the details show the week\'s hours ("Closed" for a closed day), facilities, accessibility and layouts.',
+  tc('FE-VCAT-004', 'VenueCatalogue (details)', 'The user opens a venue.', 'GET /venue-catalogue/<id> is called and the details show the week\'s hours ("Closed" for a closed day), setup and teardown minutes, facilities, accessibility and layouts.',
     { steps: '1. Render. 2. Click "View Hall A".' },
     async () => {
       backend();
@@ -73,6 +73,8 @@ describe('VenueCatalogue', () => {
       expect(screen.getByText('Wi-Fi, Projector')).toBeInTheDocument();
       expect(screen.getByText('Accessible')).toBeInTheDocument();
       expect(screen.getByText('Step-free entrance')).toBeInTheDocument();
+      expect(screen.getByText('90 minutes')).toBeInTheDocument();
+      expect(screen.getByText('30 minutes')).toBeInTheDocument();
     });
 
   tc('FE-VCAT-005', 'VenueCatalogue (details)', 'A venue has no hours, lists or accessibility information.', 'The page shows "Not specified" placeholders and "No additional accessibility information."',
@@ -111,7 +113,7 @@ describe('VenueCatalogue', () => {
       expect(await screen.findByRole('button', { name: 'View Hall A' })).toBeInTheDocument();
     });
 
-  tc('FE-VCAT-009', 'VenueCatalogue (edit)', 'Venue staff clicks "Edit venue".', 'The form is pre-filled: one item per line in the list boxes, a closed day ticked with its time inputs disabled, and the accessibility select set.',
+  tc('FE-VCAT-009', 'VenueCatalogue (edit)', 'Venue staff clicks "Edit venue".', 'The form is pre-filled with setup and teardown durations, one item per line in the list boxes, a closed day ticked with its time inputs disabled, and the accessibility select set.',
     { steps: '1. Open a venue as staff. 2. Click "Edit venue".' },
     async () => {
       backend();
@@ -122,6 +124,8 @@ describe('VenueCatalogue', () => {
       expect(screen.getByLabelText('Sunday opening time')).toBeDisabled();
       expect(document.querySelector('select')).toHaveValue('1');
       expect(area(1)).toHaveValue('Step-free entrance');
+      expect(screen.getByLabelText('Setup time (minutes)')).toHaveValue('90');
+      expect(screen.getByLabelText('Teardown time (minutes)')).toHaveValue('30');
     });
 
   tc('FE-VCAT-010', 'VenueCatalogue (edit)', 'Venue staff cancels editing.', 'The details view returns and no PUT is sent.', { kind: 'State', steps: '1. Click "Edit venue". 2. Click "Cancel".' },
@@ -133,12 +137,25 @@ describe('VenueCatalogue', () => {
       expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
     });
 
-  tc('FE-VCAT-011', 'VenueCatalogue (edit)', 'Staff edits facilities (with blank lines and padding) and saves.', 'PUT /venue-catalogue/<id> is sent with the lists as trimmed arrays (blank lines dropped) and accessible as a number; a success message and the updated details follow.',
+  tc('FE-VCAT-020', 'VenueCatalogue (edit)', 'Staff enters a fractional setup duration.', 'A whole-number validation message appears and no PUT is sent.',
+    { kind: 'Negative', data: 'setup_time = 2.5', steps: '1. Edit a venue. 2. Enter 2.5 for setup time. 3. Save.' },
+    async () => {
+      backend();
+      await startEdit();
+      fireEvent.change(screen.getByLabelText('Setup time (minutes)'), { target: { value: '2.5' } });
+      fireEvent.submit(form());
+      expect(await screen.findByText(/Setup time must be a whole number of minutes/)).toBeInTheDocument();
+      expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-VCAT-011', 'VenueCatalogue (edit)', 'Staff edits venue planning fields and saves.', 'PUT /venue-catalogue/<id> includes whole-number setup and teardown minutes with the trimmed lists and accessibility; the success message and updated details follow.',
     { data: 'facilities "Wi-Fi\\n\\n  Stage  "', steps: '1. Click "Edit venue". 2. Change facilities. 3. Click "Save changes".' },
     async () => {
       backend();
       await startEdit();
       fireEvent.change(area(0), { target: { value: 'Wi-Fi\n\n  Stage  ' } });
+      fireEvent.change(screen.getByLabelText('Setup time (minutes)'), { target: { value: '120' } });
+      fireEvent.change(screen.getByLabelText('Teardown time (minutes)'), { target: { value: '45' } });
       fireEvent.submit(form());
       expect(await screen.findByText('Hall A updated successfully.')).toBeInTheDocument();
       const [path, options] = request.mock.calls.find(([, o]) => o?.method === 'PUT');
@@ -147,7 +164,11 @@ describe('VenueCatalogue', () => {
       expect(body.facilities).toEqual(['Wi-Fi', 'Stage']);
       expect(body.layouts).toEqual(['Theatre', 'Banquet']);
       expect(body.accessible).toBe(1);
+      expect(body.setup_time).toBe(120);
+      expect(body.teardown_time).toBe(45);
       expect(screen.getByText('Wi-Fi, Stage')).toBeInTheDocument();
+      expect(screen.getByText('120 minutes')).toBeInTheDocument();
+      expect(screen.getByText('45 minutes')).toBeInTheDocument();
     });
 
   tc('FE-VCAT-012', 'VenueCatalogue (edit)', 'A day\'s closing time is not later than its opening time.', 'The error "Monday: closing time must be later than opening time on the same day." is shown and no PUT is sent.',
@@ -227,5 +248,40 @@ describe('VenueCatalogue', () => {
       await openDetail();
       expect(form()).toBeNull();
       await waitFor(() => expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0));
+    });
+
+  tc('FE-VCAT-021', 'VenueCatalogue (details)', 'A venue has a 1-minute setup and teardown duration.', 'The details show "1 minute" singular format.',
+    { data: 'setup_time = 1, teardown_time = 1', steps: '1. Open a venue with 1 minute setup/teardown.' },
+    async () => {
+      backend({ detail: { ...VENUE, setup_time: 1, teardown_time: 1 } });
+      await openDetail();
+      expect(screen.getAllByText('1 minute')).toHaveLength(2);
+    });
+
+  tc('FE-VCAT-022', 'VenueCatalogue (details)', 'A venue is marked as not accessible.', 'The details show "Not accessible".',
+    { data: 'accessible = 0', steps: '1. Open a venue with accessible = 0.' },
+    async () => {
+      backend({ detail: { ...VENUE, accessible: 0 } });
+      await openDetail();
+      expect(screen.getByText('Not accessible')).toBeInTheDocument();
+    });
+
+  tc('FE-VCAT-023', 'VenueCatalogue (edit)', 'Staff enters a setup time exceeding the maximum allowed value.', 'An error message appears and no PUT is sent.',
+    { kind: 'Negative', data: 'setup_time = 3000000000', steps: '1. Edit a venue. 2. Enter 3000000000 for setup time. 3. Save.' },
+    async () => {
+      backend();
+      await startEdit();
+      fireEvent.change(screen.getByLabelText('Setup time (minutes)'), { target: { value: '3000000000' } });
+      fireEvent.submit(form());
+      expect(await screen.findByText(/Setup time must be a whole number of minutes/)).toBeInTheDocument();
+      expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-VCAT-024', 'VenueCatalogue', 'Loading fails with an error having no message.', 'A default fallback error message is shown.',
+    { kind: 'Negative', data: 'Error with empty message', steps: '1. Reject load with new Error(). 2. Check error text.' },
+    async () => {
+      request.mockRejectedValueOnce(new Error(''));
+      render(<VenueCatalogue />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load venues.');
     });
 });

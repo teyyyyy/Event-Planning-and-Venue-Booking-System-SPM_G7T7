@@ -302,6 +302,10 @@
   background-color: #fafcff;
 }
 
+/* Pending change-request actions */
+.change-request-actions{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px}
+.change-request-actions .assign{margin-left:0;padding:0 0 4px}
+
 /* --- Operational Safety Check --- */
 
 .safety-intro {

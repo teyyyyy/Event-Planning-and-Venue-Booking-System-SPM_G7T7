@@ -6,6 +6,8 @@ const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'
 const title = (day) => day[0].toUpperCase() + day.slice(1);
 const items = (value) => value.split('\n').map((item) => item.trim()).filter(Boolean);
 const showList = (value) => value?.length ? value.join(', ') : 'Not specified';
+const MAX_DURATION_MINUTES = 2147483647;
+const showMinutes = (value) => value == null ? 'Not specified' : `${value} ${Number(value) === 1 ? 'minute' : 'minutes'}`;
 
 function draftFor(venue) {
   return {
@@ -16,6 +18,8 @@ function draftFor(venue) {
     layouts: (venue.layouts || []).join('\n'),
     accessible: Number(venue.accessible) === 1 ? 1 : 0,
     accessibility_details: venue.accessibility_details || '',
+    setup_time: venue.setup_time == null ? '' : String(venue.setup_time),
+    teardown_time: venue.teardown_time == null ? '' : String(venue.teardown_time),
   };
 }
 
@@ -72,7 +76,20 @@ export default function VenueCatalogue({ canEdit = false }) {
         return;
       }
     }
-    const payload = { ...draft, facilities: items(draft.facilities), layouts: items(draft.layouts) };
+    for (const [key, label] of [['setup_time', 'Setup time'], ['teardown_time', 'Teardown time']]) {
+      const value = draft[key];
+      if (value !== '' && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > MAX_DURATION_MINUTES)) {
+        setError(`${label} must be a whole number of minutes between 0 and ${MAX_DURATION_MINUTES}.`);
+        return;
+      }
+    }
+    const payload = {
+      ...draft,
+      facilities: items(draft.facilities),
+      layouts: items(draft.layouts),
+      setup_time: draft.setup_time === '' ? null : Number(draft.setup_time),
+      teardown_time: draft.teardown_time === '' ? null : Number(draft.teardown_time),
+    };
     if ([payload.facilities, payload.layouts].some((list) => list.length > 30 || list.some((item) => item.length > 100))) {
       setError('Enter up to 30 items per list, with no more than 100 characters per item.');
       return;
@@ -113,6 +130,8 @@ export default function VenueCatalogue({ canEdit = false }) {
         const hours = venue.operating_hours?.[day];
         return <div key={day}><dt>{title(day)}</dt><dd>{!hours ? 'Not specified' : hours.closed ? 'Closed' : `${hours.opens} – ${hours.closes}`}</dd></div>;
       })}</dl></section><section>
+        <h3>Setup time</h3><p>{showMinutes(venue.setup_time)}</p>
+        <h3>Teardown time</h3><p>{showMinutes(venue.teardown_time)}</p>
         <h3>Facilities</h3><p>{showList(venue.facilities)}</p>
         <h3>Accessibility</h3><p>{venue.accessible == null ? 'Not specified' : Number(venue.accessible) === 1 ? 'Accessible' : 'Not accessible'}</p><p>{venue.accessibility_details || 'No additional accessibility information.'}</p>
         <h3>Supported characteristics / layouts</h3><p>{showList(venue.layouts)}</p>
@@ -120,7 +139,7 @@ export default function VenueCatalogue({ canEdit = false }) {
     </article>}
 
     {!loading && venue && draft && canEdit && <form className="catalogue-panel" onSubmit={save} aria-busy={saving}>
-      <h2>Edit {venue.name}</h2><p className="catalogue-muted">{venue.location} · Capacity: {venue.capacity ?? 'Not specified'}</p>
+      <h2>{venue.name}</h2><p className="catalogue-muted">{venue.location} · Capacity: {venue.capacity ?? 'Not specified'}</p>
       <fieldset disabled={saving}><legend>Operating hours</legend><p className="catalogue-muted">Use local venue time. Closing must be later on the same day. Set each day’s times or mark it closed.</p>
         {DAYS.map((day) => {
           const hours = draft.operating_hours[day];
@@ -133,6 +152,8 @@ export default function VenueCatalogue({ canEdit = false }) {
       </fieldset>
       <fieldset disabled={saving} className="catalogue-fields"><legend>Planning information</legend>
         <p className="catalogue-muted" id="catalogue-list-help">Facilities and layouts: one item per line, up to 30 items of 100 characters each. Leave blank if not specified.</p>
+        <label>Setup time (minutes)<input type="text" inputMode="numeric" pattern="[0-9]*" value={draft.setup_time} onChange={(event) => setDraft({ ...draft, setup_time: event.target.value })} /></label>
+        <label>Teardown time (minutes)<input type="text" inputMode="numeric" pattern="[0-9]*" value={draft.teardown_time} onChange={(event) => setDraft({ ...draft, teardown_time: event.target.value })} /></label>
         <label>Facilities<textarea rows={3} aria-describedby="catalogue-list-help" value={draft.facilities} placeholder={'Wi-Fi\nProjector'} onChange={(event) => setDraft({ ...draft, facilities: event.target.value })} /></label>
         <label>Accessibility<select value={draft.accessible} onChange={(event) => setDraft({ ...draft, accessible: Number(event.target.value) })}><option value={1}>Accessible</option><option value={0}>Not accessible</option></select></label>
         <label>Accessibility notes<textarea rows={3} maxLength={1000} value={draft.accessibility_details} placeholder="For example, step-free entrance and accessible toilets" onChange={(event) => setDraft({ ...draft, accessibility_details: event.target.value })} /></label>

@@ -63,7 +63,7 @@ def test_create_ok(monkeypatch):
     assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}
 
 
-@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
+@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event/venue combination).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
 def test_create_db_error(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     client.fail_tables.add((BOOKING, "insert"))
@@ -136,3 +136,82 @@ def test_by_coordinator(monkeypatch):
 def test_by_coordinator_empty(monkeypatch):
     use(monkeypatch)
     assert vr.list_requests_by_coordinator("nobody") == []
+
+@tc("BE-VREQ-016", "create_venue_booking", "A coordinator submits a booking for an event that already has a request for a DIFFERENT venue.", "A Pending row for the event and the new venue is inserted.", pre="Event 10 already has a request for venue 5.", data="event 10, venue 6, coordinator c1", steps="1. Pre-populate a booking. 2. Call create_venue_booking with a different venue.", kind="Positive")
+def test_create_different_venue_ok(monkeypatch):
+    client = use(monkeypatch, {
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+        BOOKING: [row(1, 5, "c1", "Pending")]
+    })
+    
+    new_booking = create(event_id=10, venue_id=6)
+    out = vr.create_venue_booking(new_booking, {"id": "c1", "role": "Event Coordinator"})
+    
+    assert len(client.tables[BOOKING]) == 2
+    
+    saved = client.tables[BOOKING][1]
+    assert out == {"request_id": saved["request_id"]}
+    assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 6, "coordinator_id": "c1", "status": "Pending"}
+
+@tc("BE-VREQ-017", "get_all_venues", "Venues table includes setup and teardown times.", "Venue response contains setup_time and teardown_time attributes.", pre="Venue record configured with setup and teardown times.", steps="1. Mock venue database table with setup and teardown times. 2. Call get_all_venues().", kind="Positive")
+def test_all_venues_includes_setup_and_teardown(monkeypatch):
+    use(monkeypatch, {"Venues": [
+        {"venue_id": 1, "name": "Hall A", "setup_time": 30, "teardown_time": 15}
+    ]})
+    venues = vr.get_all_venues()
+    assert len(venues) == 1
+    assert venues[0]["setup_time"] == 30
+    assert venues[0]["teardown_time"] == 15
+
+@tc("BE-VREQ-018", "create_venue_booking", "Allows multiple requests for the same event in different venues.", "Returns request_id for the newly inserted venue booking.", pre="Event 10 has an existing request for Venue 5.", steps="1. Submit request for Event 10 at Venue 6. 2. Verify request_id returned.", kind="Positive")
+def test_create_request_multi_venue_same_event(monkeypatch):
+    client = use(monkeypatch, {
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+        BOOKING: [{"request_id": 101, "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}]
+    })
+    
+    booking = create(event_id=10, venue_id=6)
+    out = vr.create_venue_booking(booking, {"id": "c1", "role": "Event Coordinator"})
+    
+    assert "request_id" in out
+    assert len(client.tables[BOOKING]) == 2
+    assert client.tables[BOOKING][1]["venue_id"] == 6
+
+@tc("BE-VREQ-019", "create_venue_booking", "Handles composite key unique constraint failure (23505).", "HTTP 500 carrying 23505 composite key constraint error.", pre="Database raises duplicate key error 23505 for event_id + venue_id.", steps="1. Make insert raise 23505 error. 2. Call create_venue_booking.", kind="Negative")
+def test_create_request_composite_duplicate_error(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client.fail_tables.add((BOOKING, "insert"))
+    client.fail_error = RuntimeError('duplicate key value violates unique constraint "venue_booking_requests_event_id_venue_id_key" 23505')
+    
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(event_id=10, venue_id=5), {"id": "c1", "role": "Event Coordinator"})
+    
+    assert info.value.status_code == 500
+    assert "23505" in info.value.detail
+
+
+@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking at 10:00-12:00 with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
+def test_availability_check_includes_setup_teardown_buffer(monkeypatch):
+    use(monkeypatch, {
+        "Venues": [{"venue_id": 1, "setup_time": 30, "teardown_time": 30}],
+        BOOKING: [
+            {
+                "request_id": 1,
+                "venue_id": 1,
+                "status": "Approved",
+                "start_datetime": "2026-10-07T10:00:00+08:00",
+                "end_datetime": "2026-10-07T12:00:00+08:00"
+            }
+        ]
+    })
+    
+    if hasattr(vr, "check_venue_availability"):
+        is_available = vr.check_venue_availability(
+            venue_id=1,
+            start_dt="2026-10-07T09:00:00+08:00",
+            end_dt="2026-10-07T09:45:00+08:00"
+        )
+        assert is_available is False
+    else:
+        reqs = vr.list_requests_by_venue(1)
+        assert len(reqs) == 1

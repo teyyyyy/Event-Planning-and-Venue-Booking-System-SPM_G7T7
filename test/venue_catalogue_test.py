@@ -18,7 +18,8 @@ from auth import current_user
 def record(id):
     return dict(venue_id=id, name=f'Hall {id}', location='Singapore', capacity=100,
                 operating_hours={day: dict(closed=False, opens='09:00', closes='18:00') for day in catalogue.DAYS},
-                facilities=['Wi-Fi'], accessible=1, accessibility_details='Step-free entrance', layouts=['Theatre'])
+                facilities=['Wi-Fi'], accessible=1, accessibility_details='Step-free entrance', layouts=['Theatre'],
+                setup_time=None, teardown_time=None)
 
 
 class Store:
@@ -75,7 +76,8 @@ class CatalogueTests(unittest.TestCase):
 
     def test_save_all_fields_persists_only_selected_record(self):
         other = copy.deepcopy(self.store.rows[1])
-        self.payload.update(facilities=[' Projector ', 'projector'], accessible=0, accessibility_details=' Stairs only ', layouts=['Banquet'])
+        self.payload.update(facilities=[' Projector ', 'projector'], accessible=0, accessibility_details=' Stairs only ',
+                            layouts=['Banquet'], setup_time=120, teardown_time=45)
         self.payload['operating_hours']['sunday'] = dict(closed=True, opens=None, closes=None)
         response = self.client.put('/api/venue-catalogue/1', json=self.payload)
         self.assertEqual(response.status_code, 200)
@@ -83,6 +85,8 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(response.json()['accessible'], 0)
         self.assertEqual(response.json()['accessibility_details'], 'Stairs only')
         self.assertEqual(response.json()['layouts'], ['Banquet'])
+        self.assertEqual(response.json()['setup_time'], 120)
+        self.assertEqual(response.json()['teardown_time'], 45)
         self.assertTrue(response.json()['operating_hours']['sunday']['closed'])
         self.assertEqual(self.store.rows[1], other)
         self.assertEqual(self.store.writes, 1)

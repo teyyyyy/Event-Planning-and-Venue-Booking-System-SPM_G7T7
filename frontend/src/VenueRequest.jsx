@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import VenueCalendar from "./components/VenueCalendar";
-import { authenticatedFetch as fetch } from './api';
+import { authenticatedFetch as fetch } from "./api";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {
@@ -222,46 +222,53 @@ export default function VenueRequest({ user }) {
 
     setSubmitting(true);
     try {
-      // 1. Fetch approved bookings for this venue to check availability
-      const checkResponse = await fetch(
-        `${API}/venue-booking-requests/venues/${selectedVenueId}`,
-      );
+      // 1. Fetch approved bookings and venue details to check availability & buffer constraints
+      const [checkResponse, venueResponse] = await Promise.all([
+        fetch(`${API}/venue-booking-requests/venues/${selectedVenueId}`),
+        fetch(`${API}/venue-catalogue/${selectedVenueId}`)
+      ]);
 
-      if (!checkResponse.ok) {
-        throw new Error("Unable to verify venue availability.");
+      if (!checkResponse.ok || !venueResponse.ok) {
+        throw new Error("Unable to verify venue availability or buffer constraints.");
       }
 
       const existingBookings = await checkResponse.json();
+      const venueDetails = await venueResponse.json();
 
-      // 2. Extract and format the requested dates directly from the selected event
+      const setupMins = parseInt(venueDetails.setup_time || 0, 10);
+      const teardownMins = parseInt(venueDetails.teardown_time || 0, 10);
+
+      // 2. Extract and format the requested dates directly from the selected event and expand with setup/teardown buffers
       const reqStartStr = selectedEvent.start_datetime
         .substring(0, 16)
         .replace(" ", "T");
       const reqEndStr = selectedEvent.end_datetime
         .substring(0, 16)
         .replace(" ", "T");
-      const reqStart = new Date(reqStartStr).getTime();
-      const reqEnd = new Date(reqEndStr).getTime();
+      
+      const reqStart = new Date(reqStartStr).getTime() - setupMins * 60000;
+      const reqEnd = new Date(reqEndStr).getTime() + teardownMins * 60000;
 
-      // 3. Check for time overlaps against existing bookings
+      // 3. Check for time overlaps against existing bookings including their buffers
       const hasOverlap = existingBookings.some((booking) => {
-        // Depending on your API, the dates might be top-level or nested in Event Details
+        if (booking.status !== "Approved") return false;
+
         const bStartStr = booking.start_datetime
           ? booking.start_datetime.substring(0, 16).replace(" ", "T")
           : booking["Event Details"]?.start_datetime
-              .substring(0, 16)
-              .replace(" ", "T");
+              ?.substring(0, 16)
+              ?.replace(" ", "T");
 
         const bEndStr = booking.end_datetime
           ? booking.end_datetime.substring(0, 16).replace(" ", "T")
           : booking["Event Details"]?.end_datetime
-              .substring(0, 16)
-              .replace(" ", "T");
+              ?.substring(0, 16)
+              ?.replace(" ", "T");
 
         if (!bStartStr || !bEndStr) return false;
 
-        const exStart = new Date(bStartStr).getTime();
-        const exEnd = new Date(bEndStr).getTime();
+        const exStart = new Date(bStartStr).getTime() - setupMins * 60000;
+        const exEnd = new Date(bEndStr).getTime() + teardownMins * 60000;
 
         return reqStart < exEnd && reqEnd > exStart;
       });
@@ -269,7 +276,7 @@ export default function VenueRequest({ user }) {
       if (hasOverlap) {
         setNotice({
           type: "error",
-          text: "This venue is already booked for the selected time period. Please choose a different venue.",
+          text: "This venue is already booked for the selected time period (including setup/teardown buffers). Please choose a different venue.",
         });
         setSubmitting(false);
         return;
@@ -305,15 +312,16 @@ export default function VenueRequest({ user }) {
       setSelectedVenueId(null);
       loadInitialData(); // Refresh submissions tab
     } catch (error) {
-      let errorMessage = error.message;
+      let errorMessage = error.message || "";
 
+      // 23505 is the PostgreSQL error code for unique_violation
       if (
-        errorMessage &&
-        (errorMessage.includes("23505") ||
-          errorMessage.includes("event_id_key"))
+        errorMessage.includes("23505") ||
+        errorMessage.includes("event_id") ||
+        errorMessage.includes("venue_id")
       ) {
         errorMessage =
-          "A venue booking request has already been submitted for this event.";
+          "A booking request for this specific venue has already been submitted for this event.";
       } else {
         errorMessage = errorMessage || "Venue request could not be submitted.";
       }

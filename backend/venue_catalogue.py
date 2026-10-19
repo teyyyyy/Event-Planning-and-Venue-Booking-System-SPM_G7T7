@@ -47,6 +47,8 @@ class VenueUpdate(BaseModel):
     accessible: Literal[0, 1]
     accessibility_details: str = Field(max_length=1000)
     layouts: list[str] = Field(max_length=30)
+    setup_time: int | None = Field(default=None, ge=0, le=2_147_483_647, strict=True)
+    teardown_time: int | None = Field(default=None, ge=0, le=2_147_483_647, strict=True)
 
     @field_validator("operating_hours")
     @classmethod
@@ -100,7 +102,7 @@ def venue_detail(venue_id: int, user=Depends(require_reader)):
 @router.put("/{venue_id}")
 def update_venue(venue_id: int, update: VenueUpdate, user=Depends(require_venue_staff)):
     try:
-        rows = db().table("Venues").update(update.model_dump()).eq("venue_id", venue_id).execute().data or []
+        rows = db().table("Venues").update(update.model_dump(exclude_unset=True)).eq("venue_id", venue_id).execute().data or []
     except (APIError, httpx.HTTPError) as error:
         raise unavailable(error) from error
     if not rows:
