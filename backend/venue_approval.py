@@ -107,6 +107,38 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
     booking = owned_booking(client, request_id, staff)
     if booking["status"] != PENDING:
         raise HTTPException(409, f"This request has already been {booking['status'].lower()}.")
+
+    # Prevent approvals if event logic overlaps (including setup/teardown buffers)
+    if changes.get("status") == APPROVED:
+        venue = client.table(VENUE_TABLE).select("*").eq("venue_id", booking["venue_id"]).maybe_single().execute().data or {}
+        setup_mins = int(venue.get("setup_time") or venue.get("setup_minutes") or 0)
+        teardown_mins = int(venue.get("teardown_time") or venue.get("turnaround_time") or venue.get("teardown_minutes") or 0)
+        
+        req_start_str, req_end_str = booking.get("start_datetime"), booking.get("end_datetime")
+        
+        if req_start_str and req_end_str:
+            r_start = datetime.fromisoformat(req_start_str)
+            r_end = datetime.fromisoformat(req_end_str)
+            r_eff_start = r_start - timedelta(minutes=setup_mins)
+            r_eff_end = r_end + timedelta(minutes=teardown_mins)
+            
+            # Fetch all existing approved bookings for this venue
+            approved_bookings = client.table(BOOKING_TABLE).select("*").eq("venue_id", booking["venue_id"]).eq("status", APPROVED).execute().data or []
+            
+            for ab in approved_bookings:
+                if ab.get("request_id") == request_id:
+                    continue
+                ab_s_str, ab_e_str = ab.get("start_datetime"), ab.get("end_datetime")
+                
+                if ab_s_str and ab_e_str:
+                    a_start = datetime.fromisoformat(ab_s_str)
+                    a_end = datetime.fromisoformat(ab_e_str)
+                    a_eff_start = a_start - timedelta(minutes=setup_mins)
+                    a_eff_end = a_end + timedelta(minutes=teardown_mins)
+                    
+                    if r_eff_start < a_eff_end and r_eff_end > a_eff_start:
+                        raise HTTPException(409, "Cannot approve: Venue is already booked during this time (including setup/teardown buffers).")
+
     # Guard on status so two staff deciding at once can't overwrite each other.
     updated = (
         client.table(BOOKING_TABLE)

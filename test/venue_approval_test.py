@@ -21,24 +21,39 @@ BOOKING = {
 
 class FakeQuery:
     def __init__(self, rows):
-        self.rows, self.patch = rows, None
+        self.rows = [r.copy() for r in rows] if rows else []
+        self.patch = None
+        self.single = False
 
     def select(self, *_): return self
     def eq(self, key, value): self.rows = [r for r in self.rows if r.get(key) == value]; return self
-    def maybe_single(self): return self
+    def neq(self, key, value): self.rows = [r for r in self.rows if r.get(key) != value]; return self
+    def in_(self, key, values): self.rows = [r for r in self.rows if r.get(key) in values]; return self
+    def maybe_single(self): self.single = True; return self
     def update(self, patch): self.patch = patch; return self
 
     def execute(self):
         if self.patch is not None:
             for row in self.rows:
                 row.update(self.patch)
-            return mock.Mock(data=self.rows)
-        return mock.Mock(data=self.rows[0] if self.rows else None)
+            return mock.Mock(data=self.rows[0] if (self.single and self.rows) else self.rows)
+        if self.single:
+            return mock.Mock(data=self.rows[0] if self.rows else None)
+        return mock.Mock(data=self.rows)
 
 
 class FakeClient:
-    def __init__(self, bookings): self.bookings = bookings
-    def table(self, name): return FakeQuery(self.bookings)
+    def __init__(self, bookings=None, venues=None): 
+        self.bookings = bookings or []
+        self.venues = venues or []
+        
+    def table(self, name): 
+        # Case-insensitive match to handle both "venues" and "Venues"
+        if name.lower() == "venues":
+            return FakeQuery(self.venues)
+            
+        # Otherwise, fall back to returning bookings.
+        return FakeQuery(self.bookings)
 
 
 class ViewTests(unittest.TestCase):
@@ -75,8 +90,11 @@ class ViewTests(unittest.TestCase):
 
 
 class DecisionTests(unittest.TestCase):
-    def run_decide(self, booking, staff, changes):
-        client = FakeClient([booking])
+    def run_decide(self, booking, staff, changes, existing_bookings=None, venues=None):
+        existing = existing_bookings or []
+        v = venues or [{"venue_id": booking.get("venue_id", 1), "setup_time": 0, "teardown_time": 0}]
+        
+        client = FakeClient(bookings=[booking] + existing, venues=v)
         with mock.patch.object(venue_approval, "db", return_value=client), mock.patch.object(venue_approval, "enrich", side_effect=lambda c, rows: rows):
             return venue_approval.decide(1, staff, changes)
 
@@ -105,6 +123,51 @@ class DecisionTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as ctx:
             self.run_decide(dict(BOOKING), {"id": "someone-else"}, {"status": "Approved"})
         self.assertEqual(ctx.exception.status_code, 403)
+
+    # --- Overlap Buffer AC Tests ---
+
+    def test_approve_fails_on_core_overlap(self):
+        existing = {**BOOKING, "request_id": 2, "status": "Approved", 
+                    "start_datetime": "2026-10-03T11:00:00+00:00", "end_datetime": "2026-10-03T13:00:00+00:00"}
+        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        
+        with self.assertRaises(HTTPException) as ctx:
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing])
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_approve_fails_on_setup_buffer_overlap(self):
+        # Target: 10:00 to 12:00.
+        # Existing: 12:30 to 14:00, but has 60 mins setup time -> effective start 11:30. Overlaps target's end (12:00).
+        existing = {**BOOKING, "request_id": 2, "status": "Approved",
+                    "start_datetime": "2026-10-03T12:30:00+00:00", "end_datetime": "2026-10-03T14:00:00+00:00"}
+        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        venues = [{"venue_id": 1, "setup_time": 60, "teardown_time": 0}]
+        
+        with self.assertRaises(HTTPException) as ctx:
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_approve_fails_on_teardown_buffer_overlap(self):
+        # Target: 10:00 to 12:00.
+        # Existing: 08:00 to 09:30, but has 60 mins teardown time -> effective end 10:30. Overlaps target's start (10:00).
+        existing = {**BOOKING, "request_id": 2, "status": "Approved",
+                    "start_datetime": "2026-10-03T08:00:00+00:00", "end_datetime": "2026-10-03T09:30:00+00:00"}
+        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        venues = [{"venue_id": 1, "setup_time": 0, "teardown_time": 60}]
+        
+        with self.assertRaises(HTTPException) as ctx:
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_reject_ignores_overlaps(self):
+        # Target: 10:00 to 12:00. Existing: 11:00 to 13:00. Exact same overlap as core overlap test.
+        existing = {**BOOKING, "request_id": 2, "status": "Approved", 
+                    "start_datetime": "2026-10-03T11:00:00+00:00", "end_datetime": "2026-10-03T13:00:00+00:00"}
+        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        
+        # Should not raise 409, because overlap checking is skipped on rejection
+        result = self.run_decide(target, STAFF, {"status": "Rejected"}, existing_bookings=[existing])
+        self.assertEqual(result["status"], "Rejected")
 
 
 if __name__ == "__main__":

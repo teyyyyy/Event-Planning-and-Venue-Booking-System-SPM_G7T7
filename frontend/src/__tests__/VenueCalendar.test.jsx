@@ -365,6 +365,37 @@ describe("VenueCalendar", () => {
       );
     },
   );
+
+  tc(
+    "FE-VCAL-012",
+    "VenueCalendar (short setup/teardown)",
+    "A venue has short setup and teardown durations (< 15 mins).",
+    "The blocks render without text labels when shorter than 15 minutes.",
+    {
+      pre: "Hall A has setup_time = 10, teardown_time = 5.",
+      steps: '1. Render with setup_time = 10, teardown_time = 5. 2. Select "Hall A".',
+    },
+    async () => {
+      const shortVenue = [
+        { venue_id: 1, name: "Hall A", setup_time: 10, teardown_time: 5 },
+      ];
+      request.mockResolvedValue([
+        {
+          request_id: 1,
+          status: "Approved",
+          start_datetime: "2026-10-07 10:00:00",
+          end_datetime: "2026-10-07 12:00:00",
+          "Event Details": { event_name: "Short Setup" },
+        },
+      ]);
+      render(<VenueCalendar venues={shortVenue} />);
+      pickVenue(1);
+
+      await waitFor(() => expect(screen.getByText("Short Setup")).toBeInTheDocument());
+      expect(screen.queryByText("Setup")).not.toBeInTheDocument();
+      expect(screen.queryByText("Teardown")).not.toBeInTheDocument();
+    },
+  );
 });
 
 describe("VenueStaffCalendar", () => {
