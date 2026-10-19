@@ -227,4 +227,40 @@ describe('EquipmentUpdate', () => {
       await openDetail();
       expect(screen.getByText(/Submitted by/)).toHaveTextContent('—');
     });
+
+  tc('FE-EQUPD-023', 'EquipmentUpdate (details)', 'Created-at timestamp is invalid.', 'The submitted line shows the raw invalid date string.', { kind: 'Edge', data: 'created_at = "invalid-date"', steps: '1. Open a detail with an invalid created_at string.' },
+    async () => {
+      backend({ detail: DETAIL([REQ({ created_at: 'invalid-date' })]) });
+      await openDetail();
+      expect(screen.getByText(/Submitted by/)).toHaveTextContent('invalid-date');
+    });
+
+  tc('FE-EQUPD-024', 'EquipmentUpdate (changes)', 'Staff adds a new row and clears its quantity.', 'Validation catches the empty quantity on the new item.', { kind: 'Negative', steps: '1. Add new row. 2. Choose equipment but leave quantity blank. 3. Click Confirm.' },
+    async () => {
+      backend();
+      await openDetail();
+      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.change(document.querySelector('select'), { target: { value: 'PRJ' } });
+      fireEvent.change(document.querySelectorAll('input[type=number]')[1], { target: { value: '' } });
+      fireEvent.click(confirm());
+      expect(await screen.findByText('Please enter a quantity for every equipment item in request #7.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-025', 'EquipmentUpdate (notice)', 'Staff closes the notice modal.', 'The notice dialog is dismissed and disappears from view.', { kind: 'State', steps: '1. Trigger an error notice. 2. Click Close on the notice.' },
+    async () => {
+      backend();
+      await openDetail();
+      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.click(confirm());
+      expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+  tc('FE-EQUPD-026', 'EquipmentUpdate (summary)', 'Summary list returns a non-array response payload.', 'Summaries default to an empty list without throwing an error.', { kind: 'Edge', steps: '1. Return a non-array JSON object from summary.' },
+    async () => {
+      backend({ summary: json({ error: 'invalid format' }) });
+      render(<EquipmentUpdate user={USER} />);
+      expect(await screen.findByText('There are currently no equipment requests.')).toBeInTheDocument();
+    });
 });
