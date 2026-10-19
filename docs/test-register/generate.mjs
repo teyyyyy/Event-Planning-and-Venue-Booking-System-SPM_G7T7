@@ -68,6 +68,9 @@ const SECTIONS = [
   { n: '6.14', title: 'Venue availability calendar (Event Coordinator, Venue Staff)', prefixes: ['FE-VCAL'],
     intro: 'Feature code: VCAL. A weekly, hour-by-hour calendar of a venue\'s Approved and Pending bookings, shown on the coordinator\'s Venue Request page and in the Venue Staff workspace. Pending bookings are shaded; bookings that run past midnight are split per day. The backend route it reads is covered by BE-VREQ cases.',
     fe: 'frontend/src/__tests__/VenueCalendar.test.jsx', be: 'none (uses the venue request routes)' },
+  { n: '6.15', title: 'Backend security and safety', prefixes: ['BE-SAFETY'],
+    intro: 'Feature code: SAFETY. Covers the operational feasibility check, including backend validation and safety checks used to determine whether an event can proceed operationally. ',
+    fe: 'frontend/src/__tests__/operational_feasibility_check.test.jsx', be: 'test/test_be_operational_feasibility_check.py' },
 ];
 
 // Listed in §4. A new feature code needs an entry here as well as a section above.
@@ -77,7 +80,7 @@ const CODES = {
   ROLE: 'role access matrix', ORG: 'event organiser', COORD: 'coordinator assignment', VENUE: 'venue approval', VREQ: 'venue request',
   VCAT: 'venue catalogue', EQREQ: 'equipment request', EQUPD: 'equipment update', EQAVAIL: 'equipment availability',
   EQRES: 'equipment reservation', VCAL: 'venue availability calendar', SP2: 'Sprint 2 attendee registration and notifications',
-  EVCHG: 'significant event changes and change-request processing',
+  EVCHG: 'significant event changes and change-request processing', SAFETY: 'operational feasibility check',
 };
 
 // ---- load + validate -------------------------------------------------------------------
