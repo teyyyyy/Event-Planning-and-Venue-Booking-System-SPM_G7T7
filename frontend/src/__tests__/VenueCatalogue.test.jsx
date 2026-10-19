@@ -249,4 +249,39 @@ describe('VenueCatalogue', () => {
       expect(form()).toBeNull();
       await waitFor(() => expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0));
     });
+
+  tc('FE-VCAT-021', 'VenueCatalogue (details)', 'A venue has a 1-minute setup and teardown duration.', 'The details show "1 minute" singular format.',
+    { data: 'setup_time = 1, teardown_time = 1', steps: '1. Open a venue with 1 minute setup/teardown.' },
+    async () => {
+      backend({ detail: { ...VENUE, setup_time: 1, teardown_time: 1 } });
+      await openDetail();
+      expect(screen.getAllByText('1 minute')).toHaveLength(2);
+    });
+
+  tc('FE-VCAT-022', 'VenueCatalogue (details)', 'A venue is marked as not accessible.', 'The details show "Not accessible".',
+    { data: 'accessible = 0', steps: '1. Open a venue with accessible = 0.' },
+    async () => {
+      backend({ detail: { ...VENUE, accessible: 0 } });
+      await openDetail();
+      expect(screen.getByText('Not accessible')).toBeInTheDocument();
+    });
+
+  tc('FE-VCAT-023', 'VenueCatalogue (edit)', 'Staff enters a setup time exceeding the maximum allowed value.', 'An error message appears and no PUT is sent.',
+    { kind: 'Negative', data: 'setup_time = 3000000000', steps: '1. Edit a venue. 2. Enter 3000000000 for setup time. 3. Save.' },
+    async () => {
+      backend();
+      await startEdit();
+      fireEvent.change(screen.getByLabelText('Setup time (minutes)'), { target: { value: '3000000000' } });
+      fireEvent.submit(form());
+      expect(await screen.findByText(/Setup time must be a whole number of minutes/)).toBeInTheDocument();
+      expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-VCAT-024', 'VenueCatalogue', 'Loading fails with an error having no message.', 'A default fallback error message is shown.',
+    { kind: 'Negative', data: 'Error with empty message', steps: '1. Reject load with new Error(). 2. Check error text.' },
+    async () => {
+      request.mockRejectedValueOnce(new Error(''));
+      render(<VenueCatalogue />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load venues.');
+    });
 });
