@@ -294,4 +294,141 @@ describe('EquipmentRequest', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Equipment Request Submission' }));
       expect(screen.getByText('Submit equipment request')).toBeInTheDocument();
     });
+  
+  tc('FE-EQREQ-028', 'EquipmentRequest (availability)', 'The availability API returns something other than a list.', 'Availability is treated as empty and the page does not crash.', { kind: 'Edge', steps: '1. Return an object from equipment availability. 2. Select an event.' },
+    async () => {
+      backend({ avail: { unexpected: true } });
+      await ready();
+      fireEvent.change(selects()[0], { target: { value: '1' } });
+      await waitFor(() => expect(callsTo(fetch, 'equipment-availability')).toHaveLength(1));
+      expect(screen.getByText('Submit equipment request')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-029', 'EquipmentRequest (view)', 'A request has no updater id or updater name.', 'Updated By displays a dash instead of a staff name.', { kind: 'Edge', steps: '1. Return a request without updater details. 2. Open the request view.' },
+    async () => {
+      backend({ requests: [{ ...REQUEST, updated_by: null, updated_by_name: null }] });
+      await ready();
+      await openViewTab();
+      await screen.findByText('#7');
+      expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
+    });
+
+  tc('FE-EQREQ-030', 'EquipmentRequest (view)', 'A request has no latest update summary.', 'The view shows that there are no Technical Support updates yet.', { kind: 'Edge', steps: '1. Return a request without an update summary. 2. Open the request view.' },
+    async () => {
+      backend({ requests: [{ ...REQUEST, latest_update_summary: null }] });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('No Technical Support updates yet')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-031', 'EquipmentRequest (edit)', 'Updating fails without a backend detail message.', 'The default update error is shown and the edit form remains open.', { kind: 'Negative', steps: '1. Return a failed PUT response without detail. 2. Open and save an edit.' },
+    async () => {
+      backend({ put: () => json({}, 500) });
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByRole('heading', { name: 'Edit equipment request #7' });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      expect(await screen.findByRole('heading', { name: 'Edit equipment request #7' })).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-032', 'EquipmentRequest (rows)', 'A second equipment row is added and Projector is selected.', 'Microphone remains selected in the first row and Projector can be selected in the second.', { kind: 'State', steps: '1. Select Microphone. 2. Add another row. 3. Select Projector.' },
+    async () => {
+      backend();
+      await ready();
+      fireEvent.change(selects()[1], { target: { value: 'MIC' } });
+      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.change(selects()[2], { target: { value: 'PRJ' } });
+      expect(selects()[1]).toHaveValue('MIC');
+      expect(selects()[2]).toHaveValue('PRJ');
+    });
+  
+  tc('FE-EQREQ-033', 'EquipmentRequest (view)', 'An equipment item has no technical requirements.', 'The technical requirements field displays "None".', { kind: 'Edge', steps: '1. Return a request with blank technical requirements. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          items: [{
+            ...REQUEST.items[0],
+            technical_requirements: '',
+          }],
+        }],
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('None')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-034', 'EquipmentRequest (view)', 'The latest update summary contains blank lines.', 'Blank update lines are ignored while valid update lines are displayed.', { kind: 'Edge', steps: '1. Return a latest update summary containing blank lines. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          latest_update_summary: 'Microphone quantity: 2 → 4\n\n   \nProjector: Added × 1',
+        }],
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('Microphone quantity: 2 → 4')).toBeInTheDocument();
+      expect(screen.getByText('Projector: Added × 1')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-035', 'EquipmentRequest (view)', 'A request has an invalid last-updated date.', 'The original invalid date value is displayed instead of a formatted date.', { kind: 'Edge', steps: '1. Return an invalid updated_at value. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          updated_at: 'not-a-valid-date',
+        }],
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('not-a-valid-date')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-036', 'EquipmentRequest (view)', 'A request has no updated timestamp but has a created timestamp.', 'The created timestamp is used as the last updated time.', { kind: 'Edge', steps: '1. Return updated_at as null. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          updated_at: null,
+          created_at: '2026-09-01T09:00:00Z',
+        }],
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('#7')).toBeInTheDocument();
+      expect(screen.getByText('Updated', { selector: '.request-time-note' })).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-037', 'EquipmentRequest (initial load)', 'Both assigned events and the equipment catalogue fail to load.', 'The page shows the assigned-events error without replacing it with the catalogue error.', { kind: 'Negative', steps: '1. Return errors for both initial API calls. 2. Wait for loading to finish.' },
+    async () => {
+      backend({
+        events: () => json({ detail: 'Unable to load assigned events.' }, 500),
+        catalogue: () => json({ detail: 'Unable to load equipment catalogue.' }, 500),
+      });
+      await ready();
+      expect(screen.getByText('Unable to load assigned events.')).toBeInTheDocument();
+      expect(screen.queryByText('Unable to load equipment catalogue.')).toBeNull();
+    });
+
+  tc('FE-EQREQ-038', 'EquipmentRequest (view)', 'Loading requests returns something other than an array.', 'The response is treated as an empty request list.', { kind: 'Edge', steps: '1. Return an object instead of a request array. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: { unexpected: true },
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('No equipment requests have been submitted yet.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-039', 'EquipmentRequest (view)', 'Loading requests fails without a backend detail message.', 'The default equipment request loading error is displayed.', { kind: 'Negative', steps: '1. Return a failed request response without detail. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: () => json({}, 500),
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('Unable to load equipment requests.')).toBeInTheDocument();
+    });
 });

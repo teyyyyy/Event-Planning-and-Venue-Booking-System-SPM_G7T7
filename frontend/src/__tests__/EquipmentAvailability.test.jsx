@@ -1,5 +1,5 @@
 import React from 'react';
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
@@ -133,4 +133,24 @@ describe('EquipmentAvailability', () => {
 
   tc('FE-EQAVAIL-014', 'EquipmentAvailability', 'An event has missing times.', 'The time cell shows "—" for each missing value.', { kind: 'Edge', data: 'start_time = null', steps: '1. Return an event without start time.' },
     async () => { backend({ list: [listEvent({ start_time: null })] }); render(<EquipmentAvailability user={USER} />); const cell = (await screen.findByText('Gala')).closest('tr'); expect(within(cell).getByText(/^—/)).toBeInTheDocument(); });
+  
+  tc('FE-EQAVAIL-015', 'EquipmentAvailability (workflow)', 'All requested equipment is available and staff clicks "Reserve Equipment".', 'onReserve is called with the selected event id.', { kind: 'State', steps: '1. Open an available event. 2. Click "Reserve Equipment".' },
+    async () => {
+      const onReserve = vi.fn();
+      backend();
+      render(<EquipmentAvailability user={USER} onReserve={onReserve} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Check Availability' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Reserve Equipment' }));
+      expect(onReserve).toHaveBeenCalledWith(1);
+    });
+
+  tc('FE-EQAVAIL-016', 'EquipmentAvailability (workflow)', 'Some requested equipment is unavailable and staff clicks "Update Equipment Request".', 'onUpdate is called with the selected event id.', { kind: 'State', steps: '1. Open an event with insufficient availability. 2. Click "Update Equipment Request".' },
+    async () => {
+      const onUpdate = vi.fn();
+      backend({ det: detail({ all_equipment_available: false, unavailable_equipment_count: 1, availability: [line({ availability_status: 'Insufficient', shortage_quantity: 1, available_quantity: 1 })] }) });
+      render(<EquipmentAvailability user={USER} onUpdate={onUpdate} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Check Availability' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Update Equipment Request' }));
+      expect(onUpdate).toHaveBeenCalledWith(1);
+    });
 });
