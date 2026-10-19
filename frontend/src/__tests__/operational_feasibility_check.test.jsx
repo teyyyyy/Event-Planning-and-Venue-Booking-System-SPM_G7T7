@@ -797,4 +797,37 @@ describe('OperationalFeasibilityCheck', () => {
       ).toBeInTheDocument();
     }
   );
+  
+  tc(
+    'FE-SAFETY-017',
+    'OperationalFeasibilityCheck',
+    'An event has a date value that cannot be parsed by the browser.',
+    'The original date value is displayed instead of causing the page to fail.',
+    {
+      kind: 'Edge',
+      data: 'event_date = "Date unavailable"',
+      steps:
+        '1. Return an event with an invalid date value. 2. Render the page.',
+    },
+    async () => {
+      backend({
+        events: [
+          {
+            ...EVENTS[0],
+            event_date: 'Date unavailable',
+          },
+        ],
+      });
+
+      render(<OperationalFeasibilityCheck />);
+
+      expect(
+        await screen.findByText('Date unavailable')
+      ).toBeInTheDocument();
+
+      expect(
+        screen.getByText('Gala')
+      ).toBeInTheDocument();
+    }
+  );
 });
