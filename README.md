@@ -296,3 +296,38 @@ After applying the migration, verify with Attendee, Event Organiser, Event
 Coordinator, Venue Staff, and Technical Support Staff accounts. Register for a
 future Confirmed event; try a duplicate and a full event; change its venue/time
 or cancel it; check recipient inboxes, record links, and read status after refresh.
+
+
+### Venue unavailability (25.1–25.3)
+
+Apply `backend/sql/venue_unavailability.sql` in the Supabase SQL Editor **after**
+`venue_approval.sql`, `sprint2_registration_notifications.sql`, and
+`significant_event_changes.sql`, before running this feature. The migration is
+safe to rerun. It adds venue availability/reason fields and a
+`replacement_required` flag on booking requests.
+
+Venue Staff can open a venue in the catalogue, enter an operational reason, and
+choose **Mark unavailable**. Coordinators see the reason and cannot select or
+submit requests for the venue. Database guards also protect direct writes and
+approvals when availability changes after a page has loaded.
+
+Blocking resets upcoming or ongoing Pending/Approved requests to Pending and
+notifies their event coordinators to request a replacement. Completed/cancelled
+events, past bookings, and rejected/superseded requests are unaffected. The reset
+and notifications commit together. Disrupted requests remain as history and are
+excluded from the active-request uniqueness constraint. **My Submissions →
+Request replacement venue** selects the same event for another booking.
+
+**Mark available** permits new requests again. It does not restore previous
+approvals or remove the replacement requirement from disrupted requests.
+
+Focused database verification uses an isolated PostgreSQL instance, without
+accessing the configured Supabase project:
+
+```bash
+npm install --prefix /tmp/venue-sql-check --no-package-lock --ignore-scripts @electric-sql/pglite
+PGLITE_MODULE=/tmp/venue-sql-check/node_modules/@electric-sql/pglite/dist/index.js node test/venue_unavailability_sql.mjs
+```
+
+API checks: `python -m pytest test/venue_unavailability_test.py`.
+The catalogue, request, and approval frontend suites cover the corresponding UI.

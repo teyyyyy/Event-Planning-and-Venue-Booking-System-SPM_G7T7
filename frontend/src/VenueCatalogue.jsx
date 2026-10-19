@@ -32,6 +32,7 @@ export default function VenueCatalogue({ canEdit = false }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [availabilityReason, setAvailabilityReason] = useState('');
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export default function VenueCatalogue({ canEdit = false }) {
     setVenue(null);
     setError('');
     setSuccess('');
+    setAvailabilityReason('');
     setSelectedId(id);
   }
 
@@ -106,6 +108,26 @@ export default function VenueCatalogue({ canEdit = false }) {
     } finally { setSaving(false); }
   }
 
+  async function changeAvailability(event) {
+    event.preventDefault();
+    if (!canEdit || saving) return;
+    setSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const updated = await request(`/venue-catalogue/${venue.venue_id}/availability`, {
+        method: 'PATCH', body: JSON.stringify({
+          is_available: venue.is_available === false,
+          unavailability_reason: availabilityReason.trim(),
+        }),
+      });
+      setVenue(updated);
+      setAvailabilityReason('');
+      setSuccess(`${updated.name} marked ${updated.is_available ? 'available' : 'unavailable'}.`);
+    } catch (err) { setError(err.message || 'Unable to update availability.'); }
+    finally { setSaving(false); }
+  }
+
   return <main className="equipment-page venue-catalogue">
     <header className="equipment-page-header"><div><p className="kicker">Gather / Venues</p><h1>Venue catalogue</h1></div></header>
     <p className="catalogue-intro">{canEdit ? 'View venues and keep their planning information up to date.' : 'Browse venue information for technical planning.'}</p>
@@ -116,7 +138,7 @@ export default function VenueCatalogue({ canEdit = false }) {
 
     {!loading && !error && selectedId === null && (venues.length ? <div className="catalogue-grid">
       {venues.map((item) => <article className="catalogue-card" key={item.venue_id}>
-        <h2>{item.name}</h2><p>{item.location}</p><p>Capacity: {item.capacity ?? 'Not specified'}</p>
+        <h2>{item.name}</h2><p><strong>{item.is_available === false ? 'Unavailable' : 'Available'}</strong>{item.is_available === false && ` — ${item.unavailability_reason}`}</p><p>{item.location}</p><p>Capacity: {item.capacity ?? 'Not specified'}</p>
         <p className="catalogue-muted">{showList(item.layouts)}</p>
         <button className="primary" aria-label={`View ${item.name}`} onClick={() => select(item.venue_id)}>View details</button>
       </article>)}
@@ -124,8 +146,20 @@ export default function VenueCatalogue({ canEdit = false }) {
 
     {!loading && venue && !draft && <article className="catalogue-panel">
       <div className="catalogue-heading"><div><h2>{venue.name}</h2><p>{venue.location} · Capacity: {venue.capacity ?? 'Not specified'}</p></div>
-        {canEdit && <button className="primary" onClick={() => { setDraft(draftFor(venue)); setError(''); setSuccess(''); }}>Edit venue</button>}
+        {canEdit && <button className="primary" disabled={saving} onClick={() => { setDraft(draftFor(venue)); setError(''); setSuccess(''); }}>Edit venue</button>}
       </div>
+      <section className="catalogue-availability">
+        <h3>{venue.is_available === false ? 'Unavailable' : 'Available'}</h3>
+        {venue.is_available === false && <p>{venue.unavailability_reason}</p>}
+        {canEdit && <form onSubmit={changeAvailability} aria-busy={saving}>
+          {venue.is_available !== false && <>
+            <label>Reason for unavailability<textarea required maxLength={1000} disabled={saving} value={availabilityReason} onChange={(event) => setAvailabilityReason(event.target.value)} placeholder="Maintenance, renovation, safety issue, internal activity, or another operational reason" /></label>
+            <p>Affected upcoming requests will return to Pending and coordinators will be notified to find a replacement venue.</p>
+          </>}
+          {venue.is_available === false && <p>Reopening allows new requests. Affected requests still need a replacement and will not be approved automatically.</p>}
+          <button className="secondary" disabled={saving || (venue.is_available !== false && !availabilityReason.trim())}>{saving ? 'Saving…' : venue.is_available === false ? 'Mark available' : 'Mark unavailable'}</button>
+        </form>}
+      </section>
       <div className="catalogue-details"><section><h3>Operating hours</h3><dl className="catalogue-hours">{DAYS.map((day) => {
         const hours = venue.operating_hours?.[day];
         return <div key={day}><dt>{title(day)}</dt><dd>{!hours ? 'Not specified' : hours.closed ? 'Closed' : `${hours.opens} – ${hours.closes}`}</dd></div>;

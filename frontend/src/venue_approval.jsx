@@ -45,7 +45,7 @@ function RequestDetail({
   // We can approve if there is no overlap, OR if the only overlap is with another pending request
   const canApprove =
     (overlapInfo?.type === "none" || overlapInfo?.type === "pending") &&
-    !overlapInfo?.loading;
+    !overlapInfo?.loading && !booking.replacement_required && booking.is_available !== false;
 
   let bannerStyle = {
     marginTop: "16px",
@@ -99,7 +99,7 @@ function RequestDetail({
       <dl className="detail-grid">
         <Detail label="Status">
           <span className={`pill status-${booking.status.toLowerCase()}`}>
-            {booking.status}
+            {booking.status}{booking.replacement_required ? " — replacement venue required" : ""}
           </span>
         </Detail>
         {booking.change_request_id && (

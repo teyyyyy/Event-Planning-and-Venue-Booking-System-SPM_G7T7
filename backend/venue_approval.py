@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from postgrest.exceptions import APIError
 
 from auth import require_venue_staff
 from coordinator_assignment import EVENT_TABLE, db
@@ -57,6 +58,9 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
     return {
         "request_id": booking["request_id"],
         "status": booking["status"],
+        "replacement_required": booking.get("replacement_required", False),
+        "is_available": venue.get("is_available", True),
+        "unavailability_reason": venue.get("unavailability_reason", ""),
         "created_at": booking.get("created_at"),
         "decided_at": booking.get("decided_at"),
         "venue_id": booking["venue_id"],
@@ -111,6 +115,8 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
     # Prevent approvals if event logic overlaps (including setup/teardown buffers)
     if changes.get("status") == APPROVED:
         venue = client.table(VENUE_TABLE).select("*").eq("venue_id", booking["venue_id"]).maybe_single().execute().data or {}
+        if booking.get("replacement_required") or venue.get("is_available") is False:
+            raise HTTPException(409, "This booking needs a replacement venue and cannot be approved.")
         setup_mins = int(venue.get("setup_time") or venue.get("setup_minutes") or 0)
         teardown_mins = int(venue.get("teardown_time") or venue.get("turnaround_time") or venue.get("teardown_minutes") or 0)
         
@@ -140,14 +146,19 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
                         raise HTTPException(409, "Cannot approve: Venue is already booked during this time (including setup/teardown buffers).")
 
     # Guard on status so two staff deciding at once can't overwrite each other.
-    updated = (
-        client.table(BOOKING_TABLE)
-        .update({**changes, "decided_at": datetime.now(timezone.utc).isoformat()})
-        .eq("request_id", request_id)
-        .eq("status", PENDING)
-        .execute()
-        .data
-    )
+    try:
+        updated = (
+            client.table(BOOKING_TABLE)
+            .update({**changes, "decided_at": datetime.now(timezone.utc).isoformat()})
+            .eq("request_id", request_id)
+            .eq("status", PENDING)
+            .execute()
+            .data
+        )
+    except APIError as error:
+        if error.code == "23514":
+            raise HTTPException(409, "Venue availability changed. Refresh this request before deciding.") from error
+        raise
     if not updated:
         raise HTTPException(409, "This request was just decided by someone else.")
     return enrich(client, updated)[0]

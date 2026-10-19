@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 from pydantic import BaseModel
 from supabase import Client
+from postgrest.exceptions import APIError
 from database import create_client
 from auth import require_coordinator_or_staff, require_coordinator_path
 import os
@@ -57,6 +58,12 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     if not event or str(event.get("coordinator_id")) != str(user["id"]):
         raise HTTPException(status_code=403, detail="You can only request venues for events assigned to you.")
     
+    venue = supabase.table(VENUES_TABLE).select("*").eq("venue_id", booking.venue_id).maybe_single().execute().data
+    if not venue:
+        raise HTTPException(404, "Venue not found.")
+    if venue.get("is_available") is False:
+        raise HTTPException(409, "This venue is unavailable. Please select another venue.")
+
     new_request = {
         "event_id": booking.event_id,
         "venue_id": booking.venue_id,
@@ -71,6 +78,12 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
             raise HTTPException(status_code=400, detail="Failed to create venue booking request.")
             
         return {"request_id": response.data[0].get("request_id")}
+    except HTTPException:
+        raise
+    except APIError as e:
+        if e.code in {"23514", "23505"}:
+            raise HTTPException(409, "The venue is unavailable or this event already has an active request. Refresh and select a replacement venue.") from e
+        raise HTTPException(503, "Unable to save venue request. Please try again.") from e
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
