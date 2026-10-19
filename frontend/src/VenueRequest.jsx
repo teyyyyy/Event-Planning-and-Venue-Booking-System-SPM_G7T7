@@ -222,46 +222,53 @@ export default function VenueRequest({ user }) {
 
     setSubmitting(true);
     try {
-      // 1. Fetch approved bookings for this venue to check availability
-      const checkResponse = await fetch(
-        `${API}/venue-booking-requests/venues/${selectedVenueId}`,
-      );
+      // 1. Fetch approved bookings and venue details to check availability & buffer constraints
+      const [checkResponse, venueResponse] = await Promise.all([
+        fetch(`${API}/venue-booking-requests/venues/${selectedVenueId}`),
+        fetch(`${API}/venue-catalogue/${selectedVenueId}`)
+      ]);
 
-      if (!checkResponse.ok) {
-        throw new Error("Unable to verify venue availability.");
+      if (!checkResponse.ok || !venueResponse.ok) {
+        throw new Error("Unable to verify venue availability or buffer constraints.");
       }
 
       const existingBookings = await checkResponse.json();
+      const venueDetails = await venueResponse.json();
 
-      // 2. Extract and format the requested dates directly from the selected event
+      const setupMins = parseInt(venueDetails.setup_time || 0, 10);
+      const teardownMins = parseInt(venueDetails.teardown_time || 0, 10);
+
+      // 2. Extract and format the requested dates directly from the selected event and expand with setup/teardown buffers
       const reqStartStr = selectedEvent.start_datetime
         .substring(0, 16)
         .replace(" ", "T");
       const reqEndStr = selectedEvent.end_datetime
         .substring(0, 16)
         .replace(" ", "T");
-      const reqStart = new Date(reqStartStr).getTime();
-      const reqEnd = new Date(reqEndStr).getTime();
+      
+      const reqStart = new Date(reqStartStr).getTime() - setupMins * 60000;
+      const reqEnd = new Date(reqEndStr).getTime() + teardownMins * 60000;
 
-      // 3. Check for time overlaps against existing bookings
+      // 3. Check for time overlaps against existing bookings including their buffers
       const hasOverlap = existingBookings.some((booking) => {
-        // Depending on your API, the dates might be top-level or nested in Event Details
+        if (booking.status !== "Approved") return false;
+
         const bStartStr = booking.start_datetime
           ? booking.start_datetime.substring(0, 16).replace(" ", "T")
           : booking["Event Details"]?.start_datetime
-              .substring(0, 16)
-              .replace(" ", "T");
+              ?.substring(0, 16)
+              ?.replace(" ", "T");
 
         const bEndStr = booking.end_datetime
           ? booking.end_datetime.substring(0, 16).replace(" ", "T")
           : booking["Event Details"]?.end_datetime
-              .substring(0, 16)
-              .replace(" ", "T");
+              ?.substring(0, 16)
+              ?.replace(" ", "T");
 
         if (!bStartStr || !bEndStr) return false;
 
-        const exStart = new Date(bStartStr).getTime();
-        const exEnd = new Date(bEndStr).getTime();
+        const exStart = new Date(bStartStr).getTime() - setupMins * 60000;
+        const exEnd = new Date(bEndStr).getTime() + teardownMins * 60000;
 
         return reqStart < exEnd && reqEnd > exStart;
       });
@@ -269,7 +276,7 @@ export default function VenueRequest({ user }) {
       if (hasOverlap) {
         setNotice({
           type: "error",
-          text: "This venue is already booked for the selected time period. Please choose a different venue.",
+          text: "This venue is already booked for the selected time period (including setup/teardown buffers). Please choose a different venue.",
         });
         setSubmitting(false);
         return;
