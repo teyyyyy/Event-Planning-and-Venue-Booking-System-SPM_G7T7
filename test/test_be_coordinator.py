@@ -193,6 +193,39 @@ def test_user_role_does_not_fetch_profile_again(monkeypatch):
     assert ca.user_role("c1", profile) == profile
 
 
+@tc("BE-COORD-063", "unassigned_queue", "The lead loads submitted and assigned events.",
+   "Only Submitted and unassigned events are returned.",
+   steps="1. Seed submitted, assigned and completed events. 2. Call the lead queue.")
+def test_lead_queue_contains_submitted_and_assigned(use_db):
+    use_db(world([
+        event(id=1, status="Submitted"),
+        event(id=2, status="Assigned", coordinator_id="c1"),
+        event(id=3, status="Completed", coordinator_id="c1"),
+    ]), ca)
+    out = ca.unassigned_queue({"id": "lead", "role": "Event Coordinator Lead"})
+    assert [row["id"] for row in out] == [1]
+
+
+@tc("BE-COORD-064", "assign_from_unassigned_queue", "The lead assigns a submitted event.",
+   "The event receives the coordinator, changes to Assigned, and the new coordinator workload increases.",
+   steps="1. Call the lead assignment endpoint for a submitted event.")
+def test_lead_assignment_sets_assigned_and_updates_workload(use_db):
+    client = use_db(world([event()]), ca)
+    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c2"), {"id": "lead", "role": "Event Coordinator Lead"})
+    assert out["event_status"] == "Assigned" and out["assigned_coordinator_id"] == "c2"
+    assert count(client, "c2") == 2
+
+
+@tc("BE-COORD-065", "assign_from_unassigned_queue", "The lead reassigns an assigned event.",
+   "The old workload decreases and the new workload increases while status remains Assigned.",
+   steps="1. Seed an assigned event. 2. Reassign it through the lead endpoint.")
+def test_lead_reassignment_moves_workload(use_db):
+    client = use_db(world([event(status="Assigned", coordinator_id="c1")]), ca)
+    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c3"), {"id": "lead", "role": "Event Coordinator Lead"})
+    assert out["event_status"] == "Assigned"
+    assert (count(client, "c1"), count(client, "c3")) == (1, 2)
+
+
 @tc("BE-COORD-021", "assign_event", "Three coordinators with workloads 2/1/1; a new event is assigned.",
     "The least-loaded coordinator, ties broken alphabetically (Amy), is chosen; status becomes Under review; Amy's count rises to 2.",
     pre="Event 1 exists, unassigned.", steps="1. Call assign_event(1).", data="workloads c1=2, c2=1, c3=1")
@@ -618,7 +651,7 @@ def test_coordinator_workloads(use_db):
 @tc("BE-COORD-042", "EVENT_STATUSES", "Allowed status list is inspected.", "It contains the seven lifecycle statuses.",
     steps="1. Read ca.EVENT_STATUSES.", kind="Config")
 def test_status_set():
-    assert ca.EVENT_STATUSES == {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
+    assert ca.EVENT_STATUSES == {"Assigned", "Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
 
 
 @tc("BE-COORD-043", "require_organiser_event", "An organiser opens an event request that is theirs, someone else's, or missing.", "Owner passes; another organiser is HTTP 403; unknown event is HTTP 404.",

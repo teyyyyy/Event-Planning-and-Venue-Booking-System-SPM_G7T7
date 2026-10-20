@@ -7,7 +7,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
 from dotenv import load_dotenv
-from auth import require_coordinator, require_organiser, require_path_user, require_self
+from auth import require_coordinator, require_coordinator_lead, require_organiser, require_path_user, require_self
 from event_changes import change_impact, live_arrangements
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +31,7 @@ class CoordinatorFeedbackRequest(BaseModel):
     coordinator_comments: str = ""
     amendments: str = ""
 
-EVENT_STATUSES = {"Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
+EVENT_STATUSES = {"Assigned", "Under review", "Approved", "Planning", "Confirmed", "Completed", "Cancelled", "Rejected"}
 EVENT_TABLE = "Event Details"
 INACTIVE_STATUSES = {"draft", "complete", "completed", "cancelled", "rejected"}
 
@@ -165,6 +165,61 @@ def health_check(): return {"status": "ok", "service": "event-coordinator-assign
 def user_role(user_id: str, user: dict[str, Any] = Depends(require_path_user)):
     return user
 
+@router.get("/api/event-coordinator-lead/unassigned-queue")
+def unassigned_queue(user: dict[str, Any] = Depends(require_coordinator_lead)):
+    client = db()
+    users = client.table("users").select("id,name,role,email").execute().data or []
+    events = (
+        client.table(EVENT_TABLE).select("*")
+        .eq("status", "Submitted")
+        .order("event_date")
+        .execute().data or []
+    )
+    # Keep the application-level guard as well as the database filter so stale
+    # or non-null assignment values can never leak into the lead queue.
+    return [
+        view(item, {"coordinator_id": item.get("coordinator_id")} if item.get("coordinator_id") else None, {str(record["id"]): record for record in users})
+        for item in events
+        if str(item.get("status", "")).strip().lower() == "submitted" and not item.get("coordinator_id")
+    ]
+
+@router.patch("/api/event-coordinator-lead/events/{event_id}/coordinator")
+def assign_from_unassigned_queue(event_id: str, assignment: CoordinatorAssignment, user: dict[str, Any] = Depends(require_coordinator_lead)):
+    client = db()
+    event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
+    if not event or str(event.get("status", "")).strip().lower() not in {"submitted", "assigned"}:
+        raise HTTPException(409, "This event is no longer available in the assignment queue.")
+    coordinator = next((item for item in coordinator_records(client) if str(item["id"]) == str(assignment.coordinator_id)), None)
+    if not coordinator:
+        raise HTTPException(400, "Select an available event coordinator.")
+    previous_id = event.get("coordinator_id")
+    response = client.table(EVENT_TABLE).update({"coordinator_id": coordinator["id"], "status": "Assigned"}).eq("id", event_id).in_("status", ["Submitted", "Assigned"]).execute()
+    if not response.data:
+        raise HTTPException(409, "This event is no longer available in the assignment queue.")
+    if str(previous_id or "") != str(coordinator["id"]):
+        if previous_id:
+            adjust_workload(client, str(previous_id), -1)
+        adjust_workload(client, str(coordinator["id"]), 1)
+    return view(response.data[0], response.data[0], {str(coordinator["id"]): coordinator})
+
+# Retained for compatibility with existing organiser-side clients. New event
+# submissions do not call this helper; Lead assignment uses the endpoint above.
+def assign_event(event_id: str):
+    client = db()
+    request = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
+    if not request:
+        raise HTTPException(404, "Event request not found.")
+    coordinators = coordinator_records(client)
+    if len(coordinators) != 3:
+        raise HTTPException(500, "Exactly 3 event coordinators are required.")
+    workloads = active_workloads(client, coordinators)
+    selected = min(coordinators, key=lambda item: (workloads[item["id"]], item["name"]))
+    response = client.table(EVENT_TABLE).update({"coordinator_id": selected["id"], "status": "Under review"}).eq("id", event_id).execute()
+    updated = response.data[0]
+    if not request.get("coordinator_id"):
+        adjust_workload(client, selected["id"], 1)
+    return view(updated, {"coordinator_id": selected["id"]}, {str(item["id"]): item for item in coordinators})
+
 @router.post("/api/events/{event_id}/assign-coordinator", dependencies=[Depends(require_organiser_event)])
 def assign_coordinator_endpoint(event_id: str):
     return assign_event(event_id)
@@ -210,25 +265,6 @@ def update_event_status(event_id: str, status_update: EventStatusUpdate):
     updated = response.data[0]
     users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
     return view(updated, updated if updated.get("coordinator_id") else None, {str(user["id"]): user for user in users})
-
-def assign_event(event_id: str):
-    client = db()
-    request = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
-    if not request: raise HTTPException(404, "Event request not found.")
-    coordinators = coordinator_records(client)
-    if len(coordinators) != 3: raise HTTPException(500, "Exactly 3 event coordinators are required.")
-    workloads = active_workloads(client, coordinators)
-    selected = min(coordinators, key=lambda item: (workloads[item["id"]], item["name"]))
-    response = (
-        client.table(EVENT_TABLE)
-        .update({"coordinator_id": selected["id"], "status": "Under review"})
-        .eq("id", event_id)
-        .execute()
-    )
-    updated = response.data[0]
-    if not request.get("coordinator_id") and is_active_status("Under review"):
-        adjust_workload(client, selected["id"], 1)
-    return view(updated, {"coordinator_id": selected["id"]}, {str(item["id"]): item for item in coordinators})
 
 @router.get("/api/event-organisers/{organiser_id}/requests", dependencies=[Depends(require_organiser_path)])
 def organiser_events(organiser_id: str):

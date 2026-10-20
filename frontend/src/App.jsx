@@ -281,6 +281,7 @@ function TechnicalSupportWorkspace({ user, logout }) {
 
 // Event Coordinator workspace
 function CoordinatorWorkspace({ user, logout }) {
+  const isCoordinatorLead = user?.role?.trim().toLowerCase() === "event coordinator lead";
   const [activeSection, setActiveSection] = useState("events");
   const [editingEvent, setEditingEvent] = useState(null);
   const [eventMode, setEventMode] = useState("management");
@@ -327,10 +328,10 @@ function CoordinatorWorkspace({ user, logout }) {
               }
               onClick={openEventManagement}
             >
-              Event Management
+              {isCoordinatorLead ? "Unassigned Events" : "Event Management"}
             </button>
 
-            <button
+            {!isCoordinatorLead && <button
               type="button"
               className={
                 activeSection === "equipment"
@@ -340,9 +341,9 @@ function CoordinatorWorkspace({ user, logout }) {
               onClick={openEquipmentRequest}
             >
               Equipment Request
-            </button>
+            </button>}
 
-            <button
+            {!isCoordinatorLead && <button
               type="button"
               className={
                 activeSection === "venue"
@@ -352,7 +353,7 @@ function CoordinatorWorkspace({ user, logout }) {
               onClick={openVenueRequest}
             >
               Venue Request
-            </button>
+            </button>}
           </nav>
         </div>
 

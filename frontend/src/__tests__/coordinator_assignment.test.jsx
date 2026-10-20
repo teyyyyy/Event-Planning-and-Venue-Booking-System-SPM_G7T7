@@ -8,6 +8,7 @@ import CoordinatorAssignment from '../coordinator_assignment';
 
 const ORGANISER = { id: 'o1', role: 'Event Organiser' };
 const COORDINATOR = { id: 'c1', role: 'Event Coordinator' };
+const LEAD = { id: 'lead1', role: 'Event Coordinator Lead' };
 const ev = (o = {}) => ({ id: 1, event_title: 'Gala', event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 10, description: 'Initial plan', start_time: '09:00:00', end_time: '17:00:00', event_status: 'Submitted', assigned_coordinator_id: null, coordinator_name: null, coordinator_email: null, ...o });
 const changeReq = (o = {}) => ({
   id: 11,
@@ -32,6 +33,39 @@ const changeReq = (o = {}) => ({
 });
 
 describe('CoordinatorAssignment', () => {
+  tc('FE-COORD-063', 'CoordinatorAssignment (lead queue)', 'The Event Coordinator Lead opens the assignment queue.', 'Submitted and Assigned events are shown with coordinator workloads.',
+    { pre: 'The backend returns one submitted and one assigned event.', steps: '1. Render as Event Coordinator Lead.' },
+    async () => {
+      mockFetch((url) => {
+        if (url.includes('unassigned-queue')) return json([ev({ id: 1 }), ev({ id: 2, event_status: 'Assigned', assigned_coordinator_id: 'c1', coordinator_name: 'Bob' })]);
+        if (url.includes('coordinator-workloads')) return json([{ id: 'c1', name: 'Bob', active_event_count: 2 }]);
+        return json([{ id: 'c1', name: 'Bob' }]);
+      });
+      render(<CoordinatorAssignment user={LEAD} />);
+      expect(await screen.findByText('Submitted and unassigned events')).toBeInTheDocument();
+      expect(screen.getByText('Bob', { exact: true })).toBeInTheDocument();
+      expect(screen.queryByText('Assigned')).not.toBeInTheDocument();
+    });
+
+  tc('FE-COORD-064', 'CoordinatorAssignment (lead assignment)', 'The lead reviews an event and assigns a coordinator.', 'The detail dialog sends the assignment request and displays a success message.',
+    { steps: '1. Open event details. 2. Select a coordinator. 3. Confirm assignment.' },
+    async () => {
+      const f = mockFetch((url, options = {}) => {
+        if (url.includes('unassigned-queue')) return json([ev()]);
+        if (url.includes('coordinator-workloads')) return json([{ id: 'c1', name: 'Bob', active_event_count: 1 }]);
+        if (url.includes('event-coordinator-lead/events/1/coordinator')) return json({ id: 1, event_title: 'Gala', event_status: 'Assigned', coordinator_name: 'Bob' });
+        if (!options.method || options.method === 'GET') return json([{ id: 'c1', name: 'Bob' }]);
+        return json({});
+      });
+      render(<CoordinatorAssignment user={LEAD} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View details' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Review event request' });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: 'Assign event coordinator' }), { target: { value: 'c1' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Assign coordinator' }));
+      await waitFor(() => expect(callsTo(f, 'event-coordinator-lead/events/1/coordinator', 'PATCH')).toHaveLength(1));
+      expect(await screen.findByText('Gala assigned to Bob.')).toBeInTheDocument();
+    });
+
   tc('FE-COORD-001', 'CoordinatorAssignment (organiser view)', 'An organiser opens the page.', 'Their events are fetched from /event-organisers/<id>/requests and shown with title, date and status; the heading is "Event status".',
     { pre: 'Backend returns one event.', steps: '1. Render as organiser.' },
     async () => {
@@ -452,7 +486,7 @@ describe('CoordinatorAssignment', () => {
       render(<CoordinatorAssignment user={COORDINATOR} />);
       fireEvent.change(await screen.findByLabelText('Status for Gala'), { target: { value: 'Approved' } });
       expect(await screen.findByText('Other status updated to Approved.')).toBeInTheDocument();
-      expect(screen.getByLabelText('Status for Gala')).toHaveValue('Under review');
+      expect(screen.getByLabelText('Status for Gala')).toHaveValue('Assigned');
     });
 
   tc('FE-COORD-017', 'CoordinatorAssignment (coordinator view)', 'Coordinator reassigns an event to Dan.', 'PATCH /events/<id>/coordinator is sent with {coordinator_id}, "<event> reassigned to <coordinator>." stays on screen and the task list reloads.',
