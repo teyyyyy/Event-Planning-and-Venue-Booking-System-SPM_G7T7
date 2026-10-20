@@ -10,7 +10,6 @@ from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
 from auth import require_organiser, require_self
-from coordinator_assignment import assign_event
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
@@ -111,7 +110,7 @@ def create_submitted_event_request(organiser_id: str, request: EventRequest):
     created = client.table(EVENT_TABLE).insert(payload).execute().data
     if not created:
         raise HTTPException(500, "Event request could not be submitted.")
-    return assign_event(created[0]["id"])
+    return created[0]
 
 
 @router.put("/api/event-organisers/{organiser_id}/requests/{event_id}")

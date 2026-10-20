@@ -187,13 +187,12 @@ def test_create_draft_insert_fails(use_db):
     assert err(eo.create_event_request, "o1", make()) == (500, "Event request could not be created.")
 
 
-@tc("BE-ORG-023", "create_submitted_event_request", "Valid request is submitted.", "Row inserted as Submitted then handed to assign_event; its view is returned.",
-    pre="assign_event is stubbed.", steps="1. Call create_submitted_event_request(\"o1\", make()).")
-def test_create_submitted(use_db, monkeypatch):
+@tc("BE-ORG-023", "create_submitted_event_request", "Valid request is submitted.", "Row is inserted as Submitted without automatic coordinator assignment.",
+    steps="1. Call create_submitted_event_request(\"o1\", make()).")
+def test_create_submitted(use_db):
     client = setup(use_db)
-    monkeypatch.setattr(eo, "assign_event", lambda event_id: {"assigned": event_id})
     out = eo.create_submitted_event_request("o1", make())
-    assert client.tables["Event Details"][0]["status"] == "Submitted" and out == {"assigned": client.tables["Event Details"][0]["id"]}
+    assert client.tables["Event Details"][0]["status"] == "Submitted" and out["status"] == "Submitted" and out.get("coordinator_id") is None
 
 
 @tc("BE-ORG-024", "create_submitted_event_request", "Submitted request has a past date.", "HTTP 400 and no row is inserted.", data=f"event_date = {PAST}",
