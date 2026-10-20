@@ -33,7 +33,7 @@ const changeReq = (o = {}) => ({
 });
 
 describe('CoordinatorAssignment', () => {
-  tc('FE-COORD-060', 'CoordinatorAssignment (lead queue)', 'The Event Coordinator Lead opens the assignment queue.', 'Submitted and Assigned events are shown with coordinator workloads.',
+  tc('FE-COORD-063', 'CoordinatorAssignment (lead queue)', 'The Event Coordinator Lead opens the assignment queue.', 'Submitted and Assigned events are shown with coordinator workloads.',
     { pre: 'The backend returns one submitted and one assigned event.', steps: '1. Render as Event Coordinator Lead.' },
     async () => {
       mockFetch((url) => {
@@ -47,7 +47,7 @@ describe('CoordinatorAssignment', () => {
       expect(screen.queryByText('Assigned')).not.toBeInTheDocument();
     });
 
-  tc('FE-COORD-061', 'CoordinatorAssignment (lead assignment)', 'The lead reviews an event and assigns a coordinator.', 'The detail dialog sends the assignment request and displays a success message.',
+  tc('FE-COORD-064', 'CoordinatorAssignment (lead assignment)', 'The lead reviews an event and assigns a coordinator.', 'The detail dialog sends the assignment request and displays a success message.',
     { steps: '1. Open event details. 2. Select a coordinator. 3. Confirm assignment.' },
     async () => {
       const f = mockFetch((url, options = {}) => {

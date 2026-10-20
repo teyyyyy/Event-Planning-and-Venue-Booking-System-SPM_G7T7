@@ -193,11 +193,11 @@ def test_user_role_does_not_fetch_profile_again(monkeypatch):
     assert ca.user_role("c1", profile) == profile
 
 
-@tc("BE-COORD-060", "unassigned_queue", "The lead loads submitted and assigned events.",
+@tc("BE-COORD-063", "unassigned_queue", "The lead loads submitted and assigned events.",
    "Only Submitted and unassigned events are returned.",
    steps="1. Seed submitted, assigned and completed events. 2. Call the lead queue.")
 def test_lead_queue_contains_submitted_and_assigned(use_db):
-    client = use_db(world([
+    use_db(world([
         event(id=1, status="Submitted"),
         event(id=2, status="Assigned", coordinator_id="c1"),
         event(id=3, status="Completed", coordinator_id="c1"),
@@ -206,7 +206,7 @@ def test_lead_queue_contains_submitted_and_assigned(use_db):
     assert [row["id"] for row in out] == [1]
 
 
-@tc("BE-COORD-061", "assign_from_unassigned_queue", "The lead assigns a submitted event.",
+@tc("BE-COORD-064", "assign_from_unassigned_queue", "The lead assigns a submitted event.",
    "The event receives the coordinator, changes to Assigned, and the new coordinator workload increases.",
    steps="1. Call the lead assignment endpoint for a submitted event.")
 def test_lead_assignment_sets_assigned_and_updates_workload(use_db):
@@ -216,7 +216,7 @@ def test_lead_assignment_sets_assigned_and_updates_workload(use_db):
     assert count(client, "c2") == 2
 
 
-@tc("BE-COORD-062", "assign_from_unassigned_queue", "The lead reassigns an assigned event.",
+@tc("BE-COORD-065", "assign_from_unassigned_queue", "The lead reassigns an assigned event.",
    "The old workload decreases and the new workload increases while status remains Assigned.",
    steps="1. Seed an assigned event. 2. Reassign it through the lead endpoint.")
 def test_lead_reassignment_moves_workload(use_db):
