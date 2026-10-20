@@ -428,3 +428,25 @@ describe('VenueRequest', () => {
       expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
     });
 });
+
+tc('FE-VREQ-034', 'Venue unavailability', 'A blocked venue appears in the catalogue.', 'The reason is visible and selection is disabled.', { steps: 'Select an event and inspect the blocked venue.' }, async () => {
+  backend({ venues: [{ ...HALL_A, is_available: false, unavailability_reason: 'Renovation' }] });
+  await ready(); pickEvent(1);
+  expect(await screen.findByText('Unavailable — Renovation')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Select Venue' })).toBeDisabled();
+});
+
+tc('FE-VREQ-035', 'Venue unavailability', 'A request requires replacement.', 'The replacement action opens the same event for a new request.', { steps: 'Open submissions and click Request replacement venue.' }, async () => {
+  backend({ submitted: [{ ...SUBMISSION, status: 'Pending', replacement_required: true }] });
+  await ready(); fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Request replacement venue' }));
+  expect(eventSelect()).toHaveValue('1');
+  expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
+});
+
+tc('FE-VREQ-036', 'Venue unavailability', 'The venue is blocked after selection.', 'Submission stops with a clear error before posting.', { steps: 'Select venue, block in the server response, submit.' }, async () => {
+  const f = backend({ catalogue: { ...HALL_A, is_available: false } });
+  await ready(); pickEvent(1); await chooseVenue(); fireEvent.click(submitBtn());
+  expect(await screen.findByText('This venue is unavailable. Please select another venue.')).toBeInTheDocument();
+  expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+});

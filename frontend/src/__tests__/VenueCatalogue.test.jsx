@@ -285,3 +285,18 @@ describe('VenueCatalogue', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load venues.');
     });
 });
+
+
+tc('FE-VCAT-025', 'Venue unavailability', 'Staff block and reopen a venue.', 'The reason is saved and availability is updated.', { steps: 'Open venue, enter reason, block, reopen.' }, async () => {
+  backend();
+  request.mockImplementation(async (path, options = {}) => options.method === 'PATCH'
+    ? { ...VENUE, ...JSON.parse(options.body) } : path === '/venue-catalogue' ? [VENUE] : VENUE);
+  await openDetail({ canEdit: true });
+  expect(screen.getByRole('button', { name: 'Mark unavailable' })).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Reason for unavailability'), { target: { value: 'Maintenance' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Mark unavailable' }));
+  expect(await screen.findByRole('heading', { name: 'Unavailable' })).toBeInTheDocument();
+  expect(screen.getByText('Maintenance')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Mark available' }));
+  expect(await screen.findByRole('heading', { name: 'Available' })).toBeInTheDocument();
+});

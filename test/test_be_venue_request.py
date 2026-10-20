@@ -12,7 +12,7 @@ BOOKING = "Venue Booking Requests"
 
 
 def use(monkeypatch, tables=None):
-    client = FakeClient({BOOKING: [], "Venues": [], **(tables or {})})
+    client = FakeClient({BOOKING: [], "Venues": [{"venue_id": 5}, {"venue_id": 6}], **(tables or {})})
     monkeypatch.setattr(vr, "get_supabase", lambda: client)
     return client
 
@@ -73,8 +73,7 @@ def test_create_db_error(monkeypatch):
     assert info.value.status_code == 500 and "23505" in info.value.detail
 
 
-@tc("BE-VREQ-007", "create_venue_booking", "The insert succeeds but returns no row.", "HTTP 400 \"Failed to create venue booking request.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call create_venue_booking.", kind="Negative",
-    defect="the 400 raised inside the try block is caught by the broad `except Exception` and re-raised as HTTP 500 with detail \"400: Failed to create venue booking request.\" (venue_request.py).")
+@tc("BE-VREQ-007", "create_venue_booking", "The insert succeeds but returns no row.", "HTTP 400 \"Failed to create venue booking request.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call create_venue_booking.", kind="Negative")
 def test_create_empty_insert(monkeypatch):
     use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]}).empty_inserts = True
     with pytest.raises(HTTPException) as info:

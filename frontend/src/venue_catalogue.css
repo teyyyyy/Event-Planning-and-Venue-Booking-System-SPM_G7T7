@@ -23,3 +23,6 @@
 .catalogue-empty{text-align:center;padding:60px 20px;background:white;border:1px solid #dfe5ee;border-radius:10px}
 .venue-catalogue input:focus-visible,.venue-catalogue textarea:focus-visible,.venue-catalogue button:focus-visible{outline:3px solid #789ed3;outline-offset:2px}
 @media(max-width:950px){.catalogue-details{grid-template-columns:1fr;gap:10px}.catalogue-hours-row{grid-template-columns:1fr 1fr}.catalogue-heading{flex-wrap:wrap}}
+.catalogue-availability{margin-top:24px;padding:18px;background:#f8fbff;border:1px solid #dfe5ee;border-radius:8px}
+.catalogue-availability h3{margin-top:0}.catalogue-availability label{display:flex;flex-direction:column;gap:8px;font-size:14px}
+.catalogue-availability textarea{width:100%;min-height:80px;box-sizing:border-box;padding:10px;border:1px solid #ccd5e2;border-radius:5px;font:inherit;resize:vertical}

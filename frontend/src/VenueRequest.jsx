@@ -198,7 +198,7 @@ export default function VenueRequest({ user }) {
   }, [user?.id]);
 
   function formIsValid() {
-    return eventId && selectedVenueId;
+    return eventId && selectedVenueId && selectedVenue?.is_available !== false;
   }
 
   async function submitRequest(e) {
@@ -234,6 +234,11 @@ export default function VenueRequest({ user }) {
 
       const existingBookings = await checkResponse.json();
       const venueDetails = await venueResponse.json();
+      if (venueDetails.is_available === false) {
+        setVenues((current) => current.map((item) => item.venue_id === venueDetails.venue_id ? venueDetails : item));
+        setSelectedVenueId(null);
+        throw new Error('This venue is unavailable. Please select another venue.');
+      }
 
       const setupMins = parseInt(venueDetails.setup_time || 0, 10);
       const teardownMins = parseInt(venueDetails.teardown_time || 0, 10);
@@ -749,6 +754,7 @@ export default function VenueRequest({ user }) {
                         <tr key={item.venue_id}>
                           <td>
                             <strong>{item.name}</strong>
+                            {item.is_available === false && <p>Unavailable — {item.unavailability_reason}</p>}
                           </td>
                           <td>{item.location}</td>
                           <td>{item.capacity}</td>
@@ -771,6 +777,7 @@ export default function VenueRequest({ user }) {
                             <button
                               type="button"
                               className="primary"
+                              disabled={item.is_available === false}
                               onClick={() => setSelectedVenueId(item.venue_id)}
                             >
                               Select Venue
@@ -921,6 +928,12 @@ export default function VenueRequest({ user }) {
                           >
                             {req.status || "Pending"}
                           </span>
+                          {req.replacement_required && <div>
+                            <p>Replacement venue required</p>
+                            <button type="button" className="secondary" onClick={(event) => {
+                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
+                            }}>Request replacement venue</button>
+                          </div>}
                         </td>
                       </tr>
                     );
@@ -984,6 +997,7 @@ export default function VenueRequest({ user }) {
                   <strong>Status:</strong> {selectedSubmission.status}
                 </p>
 
+                {selectedSubmission.replacement_required && <p>The original venue became unavailable. Please submit a request for a replacement venue for this event.</p>}
                 {selectedSubmission.status === "Rejected" &&
                   selectedSubmission.rejection_reason && (
                     <p>

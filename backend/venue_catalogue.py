@@ -108,3 +108,31 @@ def update_venue(venue_id: int, update: VenueUpdate, user=Depends(require_venue_
     if not rows:
         raise HTTPException(404, "Venue not found. Changes were not saved.")
     return rows[0]
+
+
+class VenueAvailability(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    is_available: bool
+    unavailability_reason: str = Field(default="", max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_reason(self):
+        self.unavailability_reason = self.unavailability_reason.strip()
+        if not self.is_available and not self.unavailability_reason:
+            raise ValueError("Enter a reason for venue unavailability.")
+        if self.is_available:
+            self.unavailability_reason = ""
+        return self
+
+
+@router.patch("/{venue_id}/availability")
+def update_availability(venue_id: int, update: VenueAvailability, user=Depends(require_venue_staff)):
+    # The database trigger resets affected bookings and emits notifications in
+    # this same transaction, so a failure cannot leave a partially blocked venue.
+    try:
+        rows = db().table("Venues").update(update.model_dump()).eq("venue_id", venue_id).execute().data or []
+    except (APIError, httpx.HTTPError) as error:
+        raise unavailable(error) from error
+    if not rows:
+        raise HTTPException(404, "Venue not found. Changes were not saved.")
+    return rows[0]
