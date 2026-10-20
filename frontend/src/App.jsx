@@ -16,6 +16,7 @@ import VenueCatalogue from "./VenueCatalogue";
 import EquipmentReservation from "./EquipmentReservation";
 import AttendeeWorkspace from "./AttendeeWorkspace";
 import Notifications from "./Notifications";
+import OperationalFeasibilityCheck from "./operational_feasibility_check";
 
 function AuthedApp() {
   const { user, logout } = useAuth();
@@ -87,8 +88,7 @@ function SafetyOfficerWorkspace({ user, logout }) {
 
       <div className="coordinator-main">
         <div className="embedded-existing-page">
-          <h2>Operational Safety Check</h2>
-          <p>Safety check requests are not available yet.</p>
+          <OperationalFeasibilityCheck />
         </div>
       </div>
     </div>

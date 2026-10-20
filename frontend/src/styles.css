@@ -301,6 +301,77 @@
 .calendar-table tr:hover td {
   background-color: #fafcff;
 }
+
 /* Pending change-request actions */
 .change-request-actions{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:10px}
 .change-request-actions .assign{margin-left:0;padding:0 0 4px}
+
+/* --- Operational Safety Check --- */
+
+.safety-intro {
+  margin: 22px 0 8px;
+  color: #68758a;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.safety-section-title {
+  margin: 28px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #edf0f5;
+  color: #1c2940;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.safety-decision-form {
+  display: grid;
+  gap: 18px;
+  max-width: 600px;
+  margin-top: 18px;
+}
+
+.safety-decision-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #68758a;
+  font-size: 13px;
+}
+
+.safety-decision-form select,
+.safety-decision-form textarea {
+  width: 100%;
+  border: 1px solid #ccd5e2;
+  border-radius: 5px;
+  background: #fbfcff;
+  padding: 10px 12px;
+  color: #1c2940;
+  font: inherit;
+}
+
+.safety-decision-form textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+.safety-decision-form select:focus,
+.safety-decision-form textarea:focus {
+  outline: none;
+  border-color: #8fb2e0;
+}
+
+.safety-required {
+  color: #b23b3b;
+}
+
+.pill.status-changes-requested {
+  background: #fff4dc;
+  color: #8a6225;
+}
+
+@media (max-width: 700px) {
+  .safety-decision-form {
+    max-width: 100%;
+  }
+}
