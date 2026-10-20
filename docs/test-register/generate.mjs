@@ -68,7 +68,7 @@ const SECTIONS = [
   { n: '6.14', title: 'Venue availability calendar (Event Coordinator, Venue Staff)', prefixes: ['FE-VCAL'],
     intro: 'Feature code: VCAL. A weekly, hour-by-hour calendar of a venue\'s Approved and Pending bookings, shown on the coordinator\'s Venue Request page and in the Venue Staff workspace. Pending bookings are shaded; bookings that run past midnight are split per day. The backend route it reads is covered by BE-VREQ cases.',
     fe: 'frontend/src/__tests__/VenueCalendar.test.jsx', be: 'none (uses the venue request routes)' },
-  { n: '6.15', title: 'Backend security and safety', prefixes: ['BE-SAFETY'],
+  { n: '6.15', title: 'Operational Feasibility Check', prefixes: ['BE-SAFETY'],
     intro: 'Feature code: SAFETY. Covers the operational feasibility check, including backend validation and safety checks used to determine whether an event can proceed operationally. ',
     fe: 'frontend/src/__tests__/operational_feasibility_check.test.jsx', be: 'test/test_be_operational_feasibility_check.py' },
 ];
