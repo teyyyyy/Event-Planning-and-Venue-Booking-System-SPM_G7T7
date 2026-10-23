@@ -10,6 +10,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PY="$ROOT/backend/.venv/bin/python"; [ -x "$PY" ] || PY=python3
 status=0
 
+echo "== Repository guardrails"
+"$ROOT/scripts/check-guardrails.sh" || status=1
+
 echo "== Backend lint (ruff)"
 (cd "$ROOT" && "$PY" -m ruff check .) || status=1
 
