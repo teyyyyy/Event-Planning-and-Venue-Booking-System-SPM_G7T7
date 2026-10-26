@@ -62,6 +62,14 @@ def test_db(monkeypatch):
     assert rs.db() == ("https://p.supabase.co", "k")
 
 
+@tc("BE-EQRES-042", "db", "The service-role key is not configured.", "HTTP 500 \"Backend Supabase credentials are not configured.\"",
+    pre="SUPABASE_SERVICE_ROLE_KEY is unset.", steps="1. Unset the key. 2. Call db().", kind="Config")
+def test_db_missing(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://p.supabase.co")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert err(rs.db) == (500, "Backend Supabase credentials are not configured.")
+
+
 @tc("BE-EQRES-002", "ReservationItemInput", "A reserved quantity of 0 or a negative quantity is supplied.", "0 is accepted (drop the item); a negative quantity is a validation error.",
     data="reserved_quantity = 0, -1", steps="1. Instantiate the item with 0. 2. Instantiate it with -1.", kind="Edge")
 def test_item_quantity_bounds():
@@ -458,3 +466,23 @@ def test_http_own_staff_id(monkeypatch, use_db):
     assert (listed.json()[0]["reservation_id"], viewed.json()["mode"]) == (50, "existing")
     assert (updated.json()["status"], cancelled.json()["status"]) == ("Modified", "Cancelled")
     assert created.json()["reserved_by"] == client.tables["Equipment Reservation"][-1]["reserved_by"] == "t1"
+
+
+MULTI_DAY = {**EVENT, "event_end_date": "2026-10-03"}
+
+
+@tc("BE-EQRES-040", "event_datetimes", "The event spans several days, or runs overnight.", "The window ends on event_end_date, so overnight times are valid.",
+    data="2026-10-01 09:00 to 2026-10-03 17:00; 2026-10-01 18:00 to 2026-10-02 10:00", steps="1. Call event_datetimes for each multi-day event.", kind="Edge")
+def test_datetimes_multi_day():
+    start, end = rs.event_datetimes(MULTI_DAY)
+    assert (start.isoformat(), end.isoformat()) == ("2026-10-01T09:00:00", "2026-10-03T17:00:00")
+    overnight = {**EVENT, "event_end_date": "2026-10-02", "start_time": "18:00:00", "end_time": "10:00:00"}
+    assert rs.event_datetimes(overnight)[1].isoformat() == "2026-10-02T10:00:00"
+
+
+@tc("BE-EQRES-041", "overlapping_reserved_quantities", "Another reservation falls on the second day of a multi-day event.",
+    "It counts against the event, so the equipment cannot be double-booked.", pre="MIC: 4 Reserved on 2026-10-02.",
+    data="Event 2026-10-01 to 2026-10-03", steps="1. Call overlapping_reserved_quantities(client, MULTI_DAY).", kind="Edge")
+def test_overlap_multi_day():
+    client = w([header(5, "Reserved")], [line(5, "MIC", 4, start="2026-10-02T09:00:00", end="2026-10-02T17:00:00")])
+    assert rs.overlapping_reserved_quantities(client, dict(MULTI_DAY)) == {"MIC": 4}

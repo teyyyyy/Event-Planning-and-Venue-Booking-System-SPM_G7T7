@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from supabase import Client
 
@@ -10,6 +10,8 @@ from reservation_service import ReservationService
 def db() -> Client:
     SUPABASE_URL = (os.environ.get('SUPABASE_URL') or os.environ.get('VITE_SUPABASE_URL', '')).rstrip('/').removesuffix('/rest/v1')
     SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        raise HTTPException(status_code=500, detail='Backend Supabase credentials are not configured.')
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
 router = APIRouter(

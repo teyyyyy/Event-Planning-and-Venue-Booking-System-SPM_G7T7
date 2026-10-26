@@ -157,13 +157,16 @@ class ReservationService:
                 ),
             )
 
+        # A blank event_end_date means a single-day event.
+        event_end_date = event.get("event_end_date") or event_date
+
         try:
             start_datetime = datetime.fromisoformat(
                 f"{event_date}T{start_time}"
             )
 
             end_datetime = datetime.fromisoformat(
-                f"{event_date}T{end_time}"
+                f"{event_end_date}T{end_time}"
             )
 
         except ValueError as error:

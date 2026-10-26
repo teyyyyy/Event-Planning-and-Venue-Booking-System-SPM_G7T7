@@ -48,6 +48,13 @@ def test_get_supabase(monkeypatch):
     assert vr.get_supabase() == ("u", "k")
 
 
+@tc("BE-VREQ-021", "module settings", "The backend reads its Supabase settings.", "Venue requests use the same normalised URL and key as the other routers.",
+    steps="1. Compare venue_request's settings with coordinator_assignment's.", kind="Config")
+def test_shared_settings():
+    import coordinator_assignment as ca
+    assert (vr.SUPABASE_URL, vr.SUPABASE_KEY) == (ca.SUPABASE_URL, ca.SUPABASE_SERVICE_ROLE_KEY)
+
+
 @tc("BE-VREQ-004", "get_all_venues", "The catalogue is requested.", "All venue rows are returned.", pre="Two venues.", steps="1. Call get_all_venues().")
 def test_all_venues(monkeypatch):
     use(monkeypatch, {"Venues": [{"venue_id": 1, "name": "A"}, {"venue_id": 2, "name": "B"}]})
@@ -63,14 +70,14 @@ def test_create_ok(monkeypatch):
     assert saved == {"request_id": saved["request_id"], "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}
 
 
-@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event/venue combination).", "HTTP 500 carrying the database error text.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
+@tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event/venue combination).", "HTTP 503 with a generic message; the database error text is not exposed.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
 def test_create_db_error(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     client.fail_tables.add((BOOKING, "insert"))
     client.fail_error = RuntimeError("23505 duplicate key")
     with pytest.raises(HTTPException) as info:
         vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
-    assert info.value.status_code == 500 and "23505" in info.value.detail
+    assert info.value.status_code == 503 and "23505" not in info.value.detail
 
 
 @tc("BE-VREQ-007", "create_venue_booking", "The insert succeeds but returns no row.", "HTTP 400 \"Failed to create venue booking request.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call create_venue_booking.", kind="Negative")
@@ -115,14 +122,14 @@ def test_by_venue_include_pending(monkeypatch):
     assert sorted(r["request_id"] for r in vr.list_requests_by_venue(5, include_pending=True)) == [1, 2]
 
 
-@tc("BE-VREQ-015", "list_requests_by_venue", "The database query fails.", "HTTP 500 carrying the database error text.", pre="Select raises.", data="\"connection reset\"", steps="1. Make the select raise. 2. Call list_requests_by_venue(5).", kind="Negative")
+@tc("BE-VREQ-015", "list_requests_by_venue", "The database query fails.", "HTTP 503 with a generic message; the database error text is not exposed.", pre="Select raises.", data="\"connection reset\"", steps="1. Make the select raise. 2. Call list_requests_by_venue(5).", kind="Negative")
 def test_by_venue_db_error(monkeypatch):
     client = use(monkeypatch)
     client.fail_tables.add(BOOKING)
     client.fail_error = RuntimeError("connection reset")
     with pytest.raises(HTTPException) as info:
         vr.list_requests_by_venue(5)
-    assert (info.value.status_code, info.value.detail) == (500, "connection reset")
+    assert (info.value.status_code, info.value.detail) == (503, "Venue bookings could not be loaded. Please try again.")
 
 
 @tc("BE-VREQ-010", "list_requests_by_coordinator", "A coordinator views their submissions.", "All of that coordinator's bookings are returned, whatever their status, and nobody else's.", pre="c1 has Pending and Approved bookings; c2 has one.", steps="1. Call list_requests_by_coordinator(\"c1\").")
@@ -176,7 +183,7 @@ def test_create_request_multi_venue_same_event(monkeypatch):
     assert len(client.tables[BOOKING]) == 2
     assert client.tables[BOOKING][1]["venue_id"] == 6
 
-@tc("BE-VREQ-019", "create_venue_booking", "Handles composite key unique constraint failure (23505).", "HTTP 500 carrying 23505 composite key constraint error.", pre="Database raises duplicate key error 23505 for event_id + venue_id.", steps="1. Make insert raise 23505 error. 2. Call create_venue_booking.", kind="Negative")
+@tc("BE-VREQ-019", "create_venue_booking", "Handles composite key unique constraint failure (23505).", "HTTP 503 with a generic message; the constraint error text is not exposed.", pre="Database raises duplicate key error 23505 for event_id + venue_id.", steps="1. Make insert raise 23505 error. 2. Call create_venue_booking.", kind="Negative")
 def test_create_request_composite_duplicate_error(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
     client.fail_tables.add((BOOKING, "insert"))
@@ -185,8 +192,8 @@ def test_create_request_composite_duplicate_error(monkeypatch):
     with pytest.raises(HTTPException) as info:
         vr.create_venue_booking(create(event_id=10, venue_id=5), {"id": "c1", "role": "Event Coordinator"})
     
-    assert info.value.status_code == 500
-    assert "23505" in info.value.detail
+    assert info.value.status_code == 503
+    assert info.value.detail == "Unable to save venue request. Please try again."
 
 
 @tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking at 10:00-12:00 with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")

@@ -13,3 +13,6 @@ __pycache__/
 # Test coverage output
 .coverage
 coverage/
+
+# macOS Finder metadata
+.DS_Store

@@ -4,7 +4,7 @@ import { capacityOptions, eventTypes, timeOptions } from './event_organiser';
 import EventChangeHistory from './EventChangeHistory';
 import { arrangementLabel, classifyChange, fieldLabels } from './eventChanges';
 
-const API = 'http://127.0.0.1:8000/api';
+const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 const EVENT_STATUSES = ['Assigned', 'Under review', 'Approved', 'Planning', 'Confirmed', 'Completed', 'Cancelled', 'Rejected'];
 const EMPTY_PROPOSAL = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
 

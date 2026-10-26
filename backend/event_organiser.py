@@ -149,6 +149,8 @@ def submit_event_request(organiser_id: str, event_id: str):
         .execute()
     )
     updated = response.data
+    if not updated:
+        raise HTTPException(500, "Event request could not be submitted.")
     return updated[0]
 
 

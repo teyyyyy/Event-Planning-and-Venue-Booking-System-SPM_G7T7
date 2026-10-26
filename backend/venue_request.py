@@ -5,10 +5,8 @@ from supabase import Client
 from postgrest.exceptions import APIError
 from database import create_client
 from auth import require_coordinator_or_staff, require_coordinator_path
-import os
-
-SUPABASE_URL = os.environ.get('SUPABASE_URL')
-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+# Shared, normalised settings: accepts VITE_SUPABASE_URL and strips a /rest/v1 suffix.
+from coordinator_assignment import SUPABASE_SERVICE_ROLE_KEY as SUPABASE_KEY, SUPABASE_URL
 
 router = APIRouter()
 
@@ -85,7 +83,7 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
             raise HTTPException(409, "The venue is unavailable or this event already has an active request. Refresh and select a replacement venue.") from e
         raise HTTPException(503, "Unable to save venue request. Please try again.") from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(503, "Unable to save venue request. Please try again.") from e
 
 @router.get("/api/venue-booking-requests/venues/{venue_id}", dependencies=[Depends(require_coordinator_or_staff)])
 def list_requests_by_venue(venue_id: int, include_pending: bool = False):
@@ -102,7 +100,7 @@ def list_requests_by_venue(venue_id: int, include_pending: bool = False):
         return response.data
     
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(503, "Venue bookings could not be loaded. Please try again.") from e
 
 @router.get("/api/venue-booking-requests/coordinators/{coordinator_id}", dependencies=[Depends(require_coordinator_path)])
 def list_requests_by_coordinator(coordinator_id: str):

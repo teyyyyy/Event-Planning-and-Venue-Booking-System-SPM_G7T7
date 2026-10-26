@@ -1019,4 +1019,17 @@ describe('CoordinatorAssignment', () => {
       expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['Pending request', 'Newer rejected', 'Older approved']);
     });
 
+  tc('FE-COORD-065', 'CoordinatorAssignment (API base URL)', 'VITE_API_URL points at a deployed backend.', 'Requests go to the configured backend instead of localhost.',
+    { data: 'VITE_API_URL = https://api.example.test/api', steps: '1. Set VITE_API_URL and reload the module. 2. Render as Event Coordinator.' },
+    async () => {
+      vi.stubEnv('VITE_API_URL', 'https://api.example.test/api');
+      vi.resetModules();
+      const { default: Configured } = await import('../coordinator_assignment');
+      const fetchMock = mockFetch(() => json([]));
+      render(<Configured user={COORDINATOR} />);
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      expect(fetchMock.mock.calls.every(([url]) => url.startsWith('https://api.example.test/api/'))).toBe(true);
+      vi.unstubAllEnvs();
+    });
+
 });
