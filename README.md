@@ -124,7 +124,8 @@ restart the backend. Both are transactional and rerunnable. Always run
   marks the affected live venue booking and equipment requests *Superseded* and
   creates new Pending requests for the updated schedule. These are linked to
   the event and the change request through `change_request_id`, and equipment
-  items are copied. Venue staff and technical support are notified of the new
+  items are copied. A new venue booking takes its schedule and requirements
+  from `Event Details`, as venue approval does. Venue staff and technical support are notified of the new
   requests, the organiser is told the request was processed, and the request
   becomes *Processed* with a summary. A failure rolls the whole step back.
 - The full `UNIQUE(event_id)` constraint on `Venue Booking Requests` is replaced

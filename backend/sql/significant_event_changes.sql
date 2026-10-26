@@ -219,8 +219,6 @@ declare
   event_row public."Event Details"%rowtype;
   previous record;
   owner_id uuid;
-  starts_at timestamptz;
-  ends_at timestamptz;
   new_id bigint;
   venue_requests jsonb := '[]';
   equipment_requests jsonb := '[]';
@@ -264,9 +262,6 @@ begin
 
   -- New requests belong to whoever coordinates the event now.
   owner_id := coalesce(event_row.coordinator_id, p_coordinator_id);
-  -- The venue request form stores the event's wall-clock time as UTC; keep that convention.
-  starts_at := (event_row.event_date + event_row.start_time) at time zone 'UTC';
-  ends_at := (coalesce(event_row.event_end_date, event_row.event_date) + event_row.end_time) at time zone 'UTC';
 
   if change_request.affects_venue then
     for previous in
@@ -275,14 +270,13 @@ begin
         and lower(trim(coalesce(status, ''))) not in ('cancelled', 'rejected', 'superseded')
       returning *
     loop
+      -- Bookings hold no schedule or requirements of their own: venue approval reads the
+      -- approved times, layout, facilities and accessibility from "Event Details".
       insert into public."Venue Booking Requests" (
-        event_id, venue_id, coordinator_id, venue_staff_id, start_datetime, end_datetime,
-        accessibility_required, layout_required, facilities_required, status, change_request_id
+        event_id, venue_id, coordinator_id, venue_staff_id, status, change_request_id
       )
       values (
-        event_row.id, previous.venue_id, owner_id, previous.venue_staff_id, starts_at, ends_at,
-        previous.accessibility_required, previous.layout_required, previous.facilities_required,
-        'Pending', change_request.id
+        event_row.id, previous.venue_id, owner_id, previous.venue_staff_id, 'Pending', change_request.id
       )
       returning request_id into new_id;
       venue_requests := venue_requests || jsonb_build_object(

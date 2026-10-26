@@ -14,11 +14,10 @@ create table users(id uuid primary key, name text, role text);
 create table "Event Details"(id bigint primary key, event_name text, event_type text, description text,
   event_date date, event_end_date date, start_time time, end_time time, event_capacity integer, status text,
   organiser_id uuid, coordinator_id uuid, layout_required text, facilities_required text[], accessibility_required bigint);
+-- Matches the live table: schedule, layout, facilities and accessibility live on "Event Details".
 create table "Venue Booking Requests"(request_id bigint generated always as identity primary key,
   created_at timestamptz not null default now(), event_id bigint unique, venue_id bigint not null,
   venue_staff_id uuid, coordinator_id uuid not null, status text not null,
-  start_datetime timestamptz not null, end_datetime timestamptz not null,
-  accessibility_required bigint not null default 0, layout_required text, facilities_required text[],
   rejection_reason text, alternative_venue text, decided_at timestamptz);
 create table "Equipment Request"(request_id bigint generated always as identity primary key, event_id bigint not null,
   status text default 'Draft', created_by uuid, updated_by uuid, created_at timestamptz default now(),
@@ -74,9 +73,8 @@ const addEvent = (id, status, extra = '') => q(`insert into "Event Details"(id,e
   start_time,end_time,event_capacity,status,organiser_id,coordinator_id${extra ? ',layout_required' : ''})
   values($1,'Gala','Workshop','Plan','2099-03-01','2099-03-01','10:00','12:00',50,$2,$3,$4${extra ? ',$5' : ''})`,
   extra ? [id, status, ids.o, ids.c, extra] : [id, status, ids.o, ids.c]);
-const addBooking = (eventId, status) => one(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status,
-  start_datetime,end_datetime,accessibility_required,layout_required,facilities_required)
-  values($1,7,$2,$3,$4,'2099-03-01 10:00+00','2099-03-01 12:00+00',1,'Theatre','{Projector}') returning request_id`,
+const addBooking = (eventId, status) => one(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
+  values($1,7,$2,$3,$4) returning request_id`,
   [eventId, ids.v, ids.c, status]).then((r) => r.request_id);
 const addEquipment = async (eventId, status) => {
   const { request_id } = await one('insert into "Equipment Request"(event_id,status,created_by) values($1,$2,$3) returning request_id', [eventId, status, ids.c]);
@@ -126,8 +124,8 @@ assert.equal((await log(1)).length, 0, 'Draft edits are not change-tracked');
 await addEvent(2, 'Confirmed');
 const booking2 = await addBooking(2, 'Approved');
 const equipment2 = await addEquipment(2, 'Approved');
-await blocked(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status,start_datetime,end_datetime)
-  values(2,8,$1,'Pending',now(),now())`, [ids.c], '23505');
+await blocked(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status)
+  values(2,8,$1,'Pending')`, [ids.c], '23505');
 await actor('c');
 await clear();
 await q(`update "Event Details" set event_name='Gala Night', description='New plan' where id=2`);
@@ -240,11 +238,8 @@ assert.equal(Number(newBooking.change_request_id), Number(significantRequest.id)
 assert.equal(Number(newBooking.venue_id), 7);
 assert.equal(newBooking.venue_staff_id, ids.v);
 assert.equal(newBooking.coordinator_id, ids.c);
-assert.equal(newBooking.layout_required, 'Theatre');
-assert.deepEqual(newBooking.facilities_required, ['Projector']);
-assert.equal(Number(newBooking.accessibility_required), 1);
-assert.equal(newBooking.start_datetime.toISOString(), '2099-03-01T14:00:00.000Z', 'The new booking uses the approved schedule');
-assert.equal(newBooking.end_datetime.toISOString(), '2099-03-01T17:00:00.000Z');
+// The booking carries no schedule of its own; venue approval reads the approved times from the event.
+assert.ok(!('start_datetime' in newBooking) && !('layout_required' in newBooking));
 
 assert.equal(await equipmentStatus(equipment10), 'Superseded');
 const newEquipment = await one('select * from "Equipment Request" where request_id=$1', [newEquipmentId]);
