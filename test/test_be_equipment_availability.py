@@ -228,3 +228,18 @@ def test_superseded_request_ignored(use_db):
     assert [(row["request_id"], row["request_status"]) for row in ea.availability_events("t1")] == [(8, "Pending")]
     out = ea.event_availability("t1", 1)
     assert out["request_id"] == 8 and out["availability"][0]["requested_quantity"] == 4
+
+
+@tc("BE-EQAVAIL-035", "event_datetimes", "The event runs overnight into the next day.", "The window ends on event_end_date instead of being rejected.",
+    data="2026-10-01 18:00 to 2026-10-02 10:00", steps="1. Call event_datetimes for the overnight event.", kind="Edge")
+def test_datetimes_multi_day():
+    start, end = ea.event_datetimes({**EVENT, "event_end_date": "2026-10-02", "start_time": "18:00:00", "end_time": "10:00:00"})
+    assert (start.isoformat(), end.isoformat()) == ("2026-10-01T18:00:00", "2026-10-02T10:00:00")
+
+
+@tc("BE-EQAVAIL-036", "get_overlapping_reservations", "Another reservation falls on the second day of a multi-day event.",
+    "It is counted as overlapping.", pre="MIC reserved 3 on 2026-10-02.", data="Event 2026-10-01 to 2026-10-03",
+    steps="1. Call get_overlapping_reservations for the multi-day event.", kind="Edge")
+def test_overlap_multi_day():
+    client = world(**reservation(start="2026-10-02T10:00:00", end="2026-10-02T12:00:00"))
+    assert ea.get_overlapping_reservations(client, {**EVENT, "event_end_date": "2026-10-03"}) == {"MIC": 3}

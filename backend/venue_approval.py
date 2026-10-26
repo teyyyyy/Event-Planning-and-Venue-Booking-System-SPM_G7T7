@@ -44,6 +44,14 @@ def event_datetime(event: dict[str, Any], date_key: str, time_key: str) -> str |
     return None
 
 
+def booking_window(booking: dict[str, Any], event: dict[str, Any] | None) -> tuple[datetime, datetime] | None:
+    """The booked period; event times take priority over the booking row's copies, as in view()."""
+    event = event or {}
+    start = event_datetime(event, "event_date", "start_time") or booking.get("start_datetime")
+    end = event_datetime(event, "event_end_date", "end_time") or booking.get("end_datetime")
+    return (datetime.fromisoformat(start), datetime.fromisoformat(end)) if start and end else None
+
+
 def event_accessibility(event: dict[str, Any]) -> Any:
     return next((event[key] for key in EVENT_ACCESSIBILITY_COLUMNS if event.get(key) is not None), None)
 
@@ -120,25 +128,24 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
         setup_mins = int(venue.get("setup_time") or venue.get("setup_minutes") or 0)
         teardown_mins = int(venue.get("teardown_time") or venue.get("turnaround_time") or venue.get("teardown_minutes") or 0)
         
-        req_start_str, req_end_str = booking.get("start_datetime"), booking.get("end_datetime")
-        
-        if req_start_str and req_end_str:
-            r_start = datetime.fromisoformat(req_start_str)
-            r_end = datetime.fromisoformat(req_end_str)
+        # Fetch all existing approved bookings for this venue, and the events that give their times
+        approved_bookings = client.table(BOOKING_TABLE).select("*").eq("venue_id", booking["venue_id"]).eq("status", APPROVED).execute().data or []
+        event_ids = list({b["event_id"] for b in [booking, *approved_bookings]})
+        events = {e["id"]: e for e in client.table(EVENT_TABLE).select("*").in_("id", event_ids).execute().data or []}
+        requested = booking_window(booking, events.get(booking["event_id"]))
+
+        if requested:
+            r_start, r_end = requested
             r_eff_start = r_start - timedelta(minutes=setup_mins)
             r_eff_end = r_end + timedelta(minutes=teardown_mins)
-            
-            # Fetch all existing approved bookings for this venue
-            approved_bookings = client.table(BOOKING_TABLE).select("*").eq("venue_id", booking["venue_id"]).eq("status", APPROVED).execute().data or []
-            
+
             for ab in approved_bookings:
                 if ab.get("request_id") == request_id:
                     continue
-                ab_s_str, ab_e_str = ab.get("start_datetime"), ab.get("end_datetime")
-                
-                if ab_s_str and ab_e_str:
-                    a_start = datetime.fromisoformat(ab_s_str)
-                    a_end = datetime.fromisoformat(ab_e_str)
+                existing = booking_window(ab, events.get(ab["event_id"]))
+
+                if existing:
+                    a_start, a_end = existing
                     a_eff_start = a_start - timedelta(minutes=setup_mins)
                     a_eff_end = a_end + timedelta(minutes=teardown_mins)
                     

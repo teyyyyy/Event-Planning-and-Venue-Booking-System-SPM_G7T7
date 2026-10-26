@@ -277,6 +277,13 @@ def test_submit_wrong_owner(use_db):
     assert err(eo.submit_event_request, "o2", 1)[0] == 400 and client.tables["Event Details"][0]["status"] == "Draft"
 
 
+@tc("BE-ORG-057", "submit_event_request", "Update returns no row (e.g. the event changed concurrently).", "HTTP 500 \"Event request could not be submitted.\" instead of an unhandled error.",
+    pre="Draft event 1 owned by o1; update returns empty data.", steps="1. Simulate empty update. 2. Call submit_event_request.", kind="Negative")
+def test_submit_returns_nothing(use_db):
+    setup(use_db, [row()]).empty_updates = True
+    assert err(eo.submit_event_request, "o1", 1) == (500, "Event request could not be submitted.")
+
+
 @tc("BE-ORG-039", "create_event_change_request", "Owner requests changes to a confirmed event assigned to a coordinator.",
     "The request is stored with its organiser, event and assigned coordinator; that coordinator receives an event notification.",
     pre="Confirmed event 1 belongs to o1 and is assigned to c1.",

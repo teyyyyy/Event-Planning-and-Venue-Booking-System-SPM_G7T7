@@ -43,14 +43,17 @@ class FakeQuery:
 
 
 class FakeClient:
-    def __init__(self, bookings=None, venues=None): 
+    def __init__(self, bookings=None, venues=None, events=None): 
         self.bookings = bookings or []
         self.venues = venues or []
+        self.events = events or []
         
     def table(self, name): 
         # Case-insensitive match to handle both "venues" and "Venues"
         if name.lower() == "venues":
             return FakeQuery(self.venues)
+        if name == "Event Details":
+            return FakeQuery(self.events)
             
         # Otherwise, fall back to returning bookings.
         return FakeQuery(self.bookings)
@@ -90,11 +93,11 @@ class ViewTests(unittest.TestCase):
 
 
 class DecisionTests(unittest.TestCase):
-    def run_decide(self, booking, staff, changes, existing_bookings=None, venues=None):
+    def run_decide(self, booking, staff, changes, existing_bookings=None, venues=None, events=None):
         existing = existing_bookings or []
         v = venues or [{"venue_id": booking.get("venue_id", 1), "setup_time": 0, "teardown_time": 0}]
         
-        client = FakeClient(bookings=[booking] + existing, venues=v)
+        client = FakeClient(bookings=[booking] + existing, venues=v, events=events)
         with mock.patch.object(venue_approval, "db", return_value=client), mock.patch.object(venue_approval, "enrich", side_effect=lambda c, rows: rows):
             return venue_approval.decide(1, staff, changes)
 
@@ -168,6 +171,41 @@ class DecisionTests(unittest.TestCase):
         # Should not raise 409, because overlap checking is skipped on rejection
         result = self.run_decide(target, STAFF, {"status": "Rejected"}, existing_bookings=[existing])
         self.assertEqual(result["status"], "Rejected")
+
+    # --- Times from Event Details (the live booking table has no start/end columns) ---
+
+    @staticmethod
+    def event_booking(request_id, event_id, status):
+        return {"request_id": request_id, "venue_id": 1, "event_id": event_id, "status": status,
+                "venue_staff_id": "staff-1", "coordinator_id": "c1"}
+
+    @staticmethod
+    def event(event_id, day, start, end, end_day=None):
+        return {"id": event_id, "event_date": day, "event_end_date": end_day, "start_time": start, "end_time": end}
+
+    def test_approve_fails_on_overlap_from_event_times(self):
+        target = self.event_booking(1, 10, "Pending")
+        existing = self.event_booking(2, 20, "Approved")
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "11:00:00", "13:00:00")]
+        with self.assertRaises(HTTPException) as ctx:
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], events=events)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_approve_fails_on_second_day_of_multi_day_event(self):
+        target = self.event_booking(1, 10, "Pending")
+        existing = self.event_booking(2, 20, "Approved")
+        events = [self.event(10, "2026-10-04", "10:00:00", "12:00:00"),
+                  self.event(20, "2026-10-03", "09:00:00", "17:00:00", end_day="2026-10-05")]
+        with self.assertRaises(HTTPException) as ctx:
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], events=events)
+        self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_approve_allows_separate_event_times(self):
+        target = self.event_booking(1, 10, "Pending")
+        existing = self.event_booking(2, 20, "Approved")
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "13:00:00", "15:00:00")]
+        result = self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], events=events)
+        self.assertEqual(result["status"], "Approved")
 
 
 if __name__ == "__main__":
