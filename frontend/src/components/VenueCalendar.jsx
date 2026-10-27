@@ -126,6 +126,16 @@ export default function VenueCalendar({ venues }) {
         </div>
       </div>
 
+      {calendarVenueId && (
+        <p className="calendar-legend">
+          <span className="legend-confirmed">Confirmed</span>
+          <span className="legend-on-hold">On Hold (until expiry)</span>
+          <span className="legend-pending">Pending</span>
+          <span className="legend-expired">Expired hold</span>
+          <span>Empty slots are available.</span>
+        </p>
+      )}
+
       {/* Calendar Grid */}
       {calendarVenueId ? (
         <div
@@ -308,6 +318,20 @@ export default function VenueCalendar({ venues }) {
                           );
 
                           const isPending = booking.status === "Pending";
+                          const isHeld = booking.status === "On Hold";
+                          const isExpired = booking.status === "Expired";
+                          // Pending requests and expired holds do not occupy the venue, so both are drawn as outlines.
+                          const tentative = isPending || isExpired;
+                          const holdTime = booking.hold_expires_at
+                            ? `${booking.hold_expires_at.replace("T", " ").slice(0, 16)} SGT`
+                            : "";
+                          const label = isPending
+                            ? "(Pending)"
+                            : isHeld
+                              ? `(On Hold until ${holdTime})`
+                              : isExpired
+                                ? "(Expired hold)"
+                                : "";
 
                           return (
                             <div
@@ -321,14 +345,14 @@ export default function VenueCalendar({ venues }) {
                                 flexDirection: "column",
                                 zIndex: 5,
                               }}
-                              title={`${eventName} (Req ID: ${booking.request_id}) - ${booking.status}\nBooking (incl. setup & teardown): ${overallStartStr} - ${overallEndStr}`}
+                              title={`${eventName} (Req ID: ${booking.request_id}) - ${booking.status}${isHeld ? ` until ${holdTime}` : isExpired ? `, expired ${holdTime}` : ""}\nBooking (incl. setup & teardown): ${overallStartStr} - ${overallEndStr}`}
                             >
                               {/* --- Setup Block --- */}
                               {visibleSetup > 0 && (
                                 <div
                                   style={{
                                     height: `${visibleSetup}px`,
-                                    background: isPending
+                                    background: tentative
                                       ? "repeating-linear-gradient(45deg, #f8faff, #f8faff 4px, #ffffff 4px, #ffffff 8px)"
                                       : "#f1f5f9",
                                     color: "#64748b",
@@ -337,7 +361,7 @@ export default function VenueCalendar({ venues }) {
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    border: isPending
+                                    border: tentative
                                       ? "1px dashed #cbd5e1"
                                       : "1px solid #e2e8f0",
                                     borderBottom:
@@ -361,12 +385,17 @@ export default function VenueCalendar({ venues }) {
                                 <div
                                   style={{
                                     height: `${visibleEvent}px`,
-                                    background: isPending
-                                      ? "repeating-linear-gradient(45deg, #f5f7fb, #f5f7fb 8px, #ffffff 8px, #ffffff 16px)"
-                                      : "#192541",
-                                    border: isPending
-                                      ? "1px dashed #8b98ab"
-                                      : "1px solid #0d1424",
+                                    background: isHeld
+                                      ? "#ede7f6"
+                                      : tentative
+                                        ? "repeating-linear-gradient(45deg, #f5f7fb, #f5f7fb 8px, #ffffff 8px, #ffffff 16px)"
+                                        : "#192541",
+                                    border: isHeld
+                                      ? "1px solid #8e6ccf"
+                                      : tentative
+                                        ? "1px dashed #8b98ab"
+                                        : "1px solid #0d1424",
+                                    opacity: isExpired ? 0.6 : 1,
                                     borderRadius:
                                       visibleSetup === 0 &&
                                       visibleTeardown === 0
@@ -376,10 +405,10 @@ export default function VenueCalendar({ venues }) {
                                           : visibleTeardown === 0
                                             ? "0 0 4px 4px"
                                             : "0",
-                                    boxShadow: isPending
+                                    boxShadow: tentative || isHeld
                                       ? "none"
                                       : "0 2px 5px rgba(25, 37, 65, 0.2)",
-                                    color: isPending ? "#53647d" : "white",
+                                    color: isHeld ? "#5b3f99" : tentative ? "#53647d" : "white",
                                     fontSize: "11px",
                                     padding: "4px 6px",
                                     boxSizing: "border-box",
@@ -395,7 +424,7 @@ export default function VenueCalendar({ venues }) {
                                       textOverflow: "ellipsis",
                                     }}
                                   >
-                                    {eventName} {isPending ? "(Pending)" : ""}
+                                    {eventName} {label}
                                   </strong>
                                   <span
                                     style={{
@@ -405,7 +434,7 @@ export default function VenueCalendar({ venues }) {
                                       whiteSpace: "nowrap",
                                       overflow: "hidden",
                                       textOverflow: "ellipsis",
-                                      color: isPending ? "#68758a" : "inherit",
+                                      color: tentative ? "#68758a" : "inherit",
                                     }}
                                   >
                                     {format12HourTime(
@@ -424,7 +453,7 @@ export default function VenueCalendar({ venues }) {
                                 <div
                                   style={{
                                     height: `${visibleTeardown}px`,
-                                    background: isPending
+                                    background: tentative
                                       ? "repeating-linear-gradient(45deg, #f8faff, #f8faff 4px, #ffffff 4px, #ffffff 8px)"
                                       : "#f1f5f9",
                                     color: "#64748b",
@@ -433,7 +462,7 @@ export default function VenueCalendar({ venues }) {
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    border: isPending
+                                    border: tentative
                                       ? "1px dashed #cbd5e1"
                                       : "1px solid #e2e8f0",
                                     borderTop:

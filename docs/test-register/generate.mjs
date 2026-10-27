@@ -66,11 +66,14 @@ const SECTIONS = [
     intro: 'Feature code: EQRES. Technical support reserves the requested equipment for an event\'s time window, adjusts or cancels the reservation, and rechecks it when the request changes. Reserved, Modified and Needs Recheck reservations count against availability; Cancelled ones do not.',
     fe: 'frontend/src/__tests__/EquipmentReservation.test.jsx', be: 'test/test_be_equipment_reservation.py' },
   { n: '6.14', title: 'Venue availability calendar (Event Coordinator, Venue Staff)', prefixes: ['FE-VCAL'],
-    intro: 'Feature code: VCAL. A weekly, hour-by-hour calendar of a venue\'s Approved and Pending bookings, shown on the coordinator\'s Venue Request page and in the Venue Staff workspace. Pending bookings are shaded; bookings that run past midnight are split per day. The backend route it reads is covered by BE-VREQ cases.',
+    intro: 'Feature code: VCAL. A weekly, hour-by-hour calendar of a venue\'s Approved and Pending bookings and its venue holds (see 6.16), shown on the coordinator\'s Venue Request page and in the Venue Staff workspace. Pending bookings are shaded; bookings that run past midnight are split per day. The backend route it reads is covered by BE-VREQ cases.',
     fe: 'frontend/src/__tests__/VenueCalendar.test.jsx', be: 'none (uses the venue request routes)' },
   { n: '6.15', title: 'Operational Feasibility Check', prefixes: ['FE-SAFETY','BE-SAFETY'],
     intro: 'Feature code: SAFETY. Covers the operational feasibility check, including backend validation and safety checks used to determine whether an event can proceed operationally. ',
     fe: 'frontend/src/__tests__/operational_feasibility_check.test.jsx', be: 'test/test_be_operational_feasibility_check.py' },
+  { n: '6.16', title: 'Tentative venue holds (Venue Staff, Event Coordinator)', prefixes: ['FE-VHOLD', 'BE-VHOLD'],
+    intro: 'Stories 22.1 and 22.2. Feature code: VHOLD. Venue staff place a hold with a future expiry on a pending venue request and can remove it; approval converts the hold into the confirmed booking and rejection releases it. An unexpired hold makes the venue unavailable for overlapping times (including setup and teardown) in approval checks, new requests, the calendar and the coordinator\'s venue list, which shows each venue as Confirmed, On Hold (with expiry), Expired or Available. A hold past its expiry is treated as Expired at once and never as a booking; the coordinator must submit a new request. Placing, removing, reminding (24 hours before expiry) and expiring holds, with their notifications, are verified separately by test/venue_holds_sql.mjs.',
+    fe: 'frontend/src/__tests__/VenueHolds.test.jsx', be: 'test/test_be_venue_holds.py' },
 ];
 
 // Listed in §4. A new feature code needs an entry here as well as a section above.
@@ -81,6 +84,7 @@ const CODES = {
   VCAT: 'venue catalogue', EQREQ: 'equipment request', EQUPD: 'equipment update', EQAVAIL: 'equipment availability',
   EQRES: 'equipment reservation', VCAL: 'venue availability calendar', SP2: 'Sprint 2 attendee registration and notifications',
   EVCHG: 'significant event changes and change-request processing', SAFETY: 'operational feasibility check',
+  VHOLD: 'tentative venue holds',
 };
 
 // ---- load + validate -------------------------------------------------------------------
@@ -206,7 +210,7 @@ const intro = [
   bullet('reviewers and markers can see test coverage without reading the test code;'),
   bullet('the team shares one vocabulary for test IDs and outcomes;'),
   bullet('new tests are added in a consistent shape as the product grows.'),
-  para(`Scope: automated unit tests only — individual functions, hooks and components tested in isolation with their dependencies (Supabase, the network, child components) replaced by test doubles. ${fe.length} frontend and ${be.length} backend test cases are registered, covering every module in frontend/src and backend/. Integration tests, end-to-end (browser) tests, the PostgreSQL migration suites (test/sprint2_sql.mjs, test/significant_event_changes_sql.mjs) and the seed script test/coordinator_assignment_test.py (which needs a live database) are out of scope. The older unittest-style files in test/ (event_validation_test.py, venue_approval_test.py, venue_catalogue_test.py) still run under pytest but are not registered here; their scenarios are covered by the BE-ORG, BE-VENUE and BE-VCAT cases.`),
+  para(`Scope: automated unit tests only — individual functions, hooks and components tested in isolation with their dependencies (Supabase, the network, child components) replaced by test doubles. ${fe.length} frontend and ${be.length} backend test cases are registered, covering every module in frontend/src and backend/. Integration tests, end-to-end (browser) tests, the PostgreSQL migration suites (test/sprint2_sql.mjs, test/significant_event_changes_sql.mjs, test/venue_holds_sql.mjs) and the seed script test/coordinator_assignment_test.py (which needs a live database) are out of scope. The older unittest-style files in test/ (event_validation_test.py, venue_approval_test.py, venue_catalogue_test.py) still run under pytest but are not registered here; their scenarios are covered by the BE-ORG, BE-VENUE and BE-VCAT cases.`),
 
   h1('2. How to run the tests and read the results'),
   h2('2.1 Frontend (Vitest)'),

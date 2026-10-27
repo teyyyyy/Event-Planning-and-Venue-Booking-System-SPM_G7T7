@@ -12,6 +12,41 @@ function format12HourTime(time24) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+// The API returns SGT (+08:00) timestamps, so slicing the string keeps them in SGT.
+const formatSgt = (value) =>
+  value ? `${value.replace("T", " ").slice(0, 16)} SGT` : "";
+
+// Venue statuses that make a venue unavailable for the selected event's time.
+const BLOCKING_STATUSES = ["Confirmed", "On Hold"];
+
+// [background, text] colours for each submission status; anything else is shown as pending.
+const SUBMISSION_COLOURS = {
+  Approved: ["#d4edda", "#155724"],
+  Rejected: ["#f8d7da", "#721c24"],
+  "On Hold": ["#ede7f6", "#5b3f99"],
+  Expired: ["#eef0f3", "#7b8494"],
+};
+
+function VenueStatus({ status }) {
+  if (!status) return "—";
+  const className = `pill status-${status.status.toLowerCase().replace(/\s+/g, "-")}`;
+  return (
+    <>
+      <span className={className}>
+        {status.status === "On Hold"
+          ? `On Hold until ${formatSgt(status.hold_expires_at)}`
+          : status.status}
+      </span>
+      {status.status === "Expired" && (
+        <small style={{ display: "block" }}>Hold lapsed — venue available</small>
+      )}
+      {status.own_event && status.status !== "Expired" && (
+        <small style={{ display: "block" }}>Your request</small>
+      )}
+    </>
+  );
+}
+
 function VenueDetail({ venue, onClose }) {
   return (
     <div className="equipment-item-card" style={{ marginBottom: "24px" }}>
@@ -53,6 +88,8 @@ export default function VenueRequest({ user }) {
   const [venues, setVenues] = useState([]);
   const [events, setEvents] = useState([]);
   const [submittedRequests, setSubmittedRequests] = useState([]);
+  // venue_id -> status of that venue for the selected event's time.
+  const [venueStatuses, setVenueStatuses] = useState({});
 
   // 2. Form State
   const [eventId, setEventId] = useState("");
@@ -197,6 +234,27 @@ export default function VenueRequest({ user }) {
     loadInitialData();
   }, [user?.id]);
 
+  // Each venue's status for the selected event: Confirmed, On Hold, Expired or Available.
+  useEffect(() => {
+    let active = true;
+    setVenueStatuses({});
+    if (!eventId) return undefined;
+    (async () => {
+      try {
+        const res = await fetch(`${API}/venue-availability?event_id=${eventId}`);
+        const data = await res.json();
+        if (active && res.ok && Array.isArray(data)) {
+          setVenueStatuses(Object.fromEntries(data.map((row) => [row.venue_id, row])));
+        }
+      } catch {
+        // Statuses are a guide only; the venue is checked again when the request is submitted.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [eventId]);
+
   function formIsValid() {
     return eventId && selectedVenueId && selectedVenue?.is_available !== false;
   }
@@ -254,9 +312,9 @@ export default function VenueRequest({ user }) {
       const reqStart = new Date(reqStartStr).getTime() - setupMins * 60000;
       const reqEnd = new Date(reqEndStr).getTime() + teardownMins * 60000;
 
-      // 3. Check for time overlaps against existing bookings including their buffers
-      const hasOverlap = existingBookings.some((booking) => {
-        if (booking.status !== "Approved") return false;
+      // 3. Check for time overlaps against existing bookings and active holds, including their buffers
+      const clash = existingBookings.find((booking) => {
+        if (!["Approved", "On Hold"].includes(booking.status)) return false;
 
         const bStartStr = booking.start_datetime
           ? booking.start_datetime.substring(0, 16).replace(" ", "T")
@@ -278,10 +336,13 @@ export default function VenueRequest({ user }) {
         return reqStart < exEnd && reqEnd > exStart;
       });
 
-      if (hasOverlap) {
+      if (clash) {
         setNotice({
           type: "error",
-          text: "This venue is already booked for the selected time period (including setup/teardown buffers). Please choose a different venue.",
+          text:
+            clash.status === "On Hold"
+              ? `This venue is on hold for another event until ${formatSgt(clash.hold_expires_at)} (including setup/teardown buffers). Please choose a different venue.`
+              : "This venue is already booked for the selected time period (including setup/teardown buffers). Please choose a different venue.",
         });
         setSubmitting(false);
         return;
@@ -396,7 +457,7 @@ export default function VenueRequest({ user }) {
           <div className="form-heading">
             <div>
               <h2>Venue Availability Calendar</h2>
-              <p>Select a venue to view confirmed and pending bookings.</p>
+              <p>Select a venue to view confirmed bookings, holds and pending requests.</p>
             </div>
           </div>
           <VenueCalendar venues={venues} events={events} apiBaseUrl={API} />
@@ -745,6 +806,7 @@ export default function VenueRequest({ user }) {
                       <th style={{ textAlign: "left" }}>Supported Layouts</th>
                       <th style={{ textAlign: "left" }}>Facilities</th>
                       <th style={{ textAlign: "left" }}>Accessibility</th>
+                      <th style={{ textAlign: "left" }}>Status</th>
                       <th style={{ textAlign: "left" }}>Action</th>
                     </tr>
                   </thead>
@@ -774,10 +836,16 @@ export default function VenueRequest({ user }) {
                           </td>
                           <td>{item.accessible === 1 ? "Yes" : "No"}</td>
                           <td>
+                            <VenueStatus status={venueStatuses[item.venue_id]} />
+                          </td>
+                          <td>
                             <button
                               type="button"
                               className="primary"
-                              disabled={item.is_available === false}
+                              disabled={
+                                item.is_available === false ||
+                                BLOCKING_STATUSES.includes(venueStatuses[item.venue_id]?.status)
+                              }
                               onClick={() => setSelectedVenueId(item.venue_id)}
                             >
                               Select Venue
@@ -789,7 +857,7 @@ export default function VenueRequest({ user }) {
                       <tr>
                         <td
                           className="empty"
-                          colSpan={7}
+                          colSpan={8}
                           style={{ textAlign: "center" }}
                         >
                           No venues match your current filters.
@@ -852,6 +920,8 @@ export default function VenueRequest({ user }) {
                 </thead>
                 <tbody>
                   {submittedRequests.map((req) => {
+                    const [statusBackground, statusColour] =
+                      SUBMISSION_COLOURS[req.status] || ["#fff3cd", "#856404"];
                     // Map IDs to names just in case the backend only sends IDs
                     const eventName =
                       events.find((e) => String(e.id) === String(req.event_id))
@@ -912,22 +982,23 @@ export default function VenueRequest({ user }) {
                               borderRadius: "12px",
                               fontSize: "0.85em",
                               fontWeight: "bold",
-                              backgroundColor:
-                                req.status === "Approved"
-                                  ? "#d4edda"
-                                  : req.status === "Rejected"
-                                    ? "#f8d7da"
-                                    : "#fff3cd",
-                              color:
-                                req.status === "Approved"
-                                  ? "#155724"
-                                  : req.status === "Rejected"
-                                    ? "#721c24"
-                                    : "#856404",
+                              backgroundColor: statusBackground,
+                              color: statusColour,
                             }}
                           >
                             {req.status || "Pending"}
                           </span>
+                          {req.status === "On Hold" && (
+                            <small style={{ display: "block" }}>
+                              Held until {formatSgt(req.hold_expires_at)}
+                            </small>
+                          )}
+                          {req.status === "Expired" && <div>
+                            <p>Hold expired — submit a new request to continue.</p>
+                            <button type="button" className="secondary" onClick={(event) => {
+                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
+                            }}>Submit new request</button>
+                          </div>}
                           {req.replacement_required && <div>
                             <p>Replacement venue required</p>
                             <button type="button" className="secondary" onClick={(event) => {
@@ -997,6 +1068,15 @@ export default function VenueRequest({ user }) {
                   <strong>Status:</strong> {selectedSubmission.status}
                 </p>
 
+                {["On Hold", "Expired"].includes(selectedSubmission.status) && (
+                  <p>
+                    <strong>{selectedSubmission.status === "On Hold" ? "Hold expires" : "Hold expired"}:</strong>{" "}
+                    {formatSgt(selectedSubmission.hold_expires_at)}
+                  </p>
+                )}
+                {selectedSubmission.status === "Expired" && (
+                  <p>The venue hold expired. Submit a new venue request for this event to continue.</p>
+                )}
                 {selectedSubmission.replacement_required && <p>The original venue became unavailable. Please submit a request for a replacement venue for this event.</p>}
                 {selectedSubmission.status === "Rejected" &&
                   selectedSubmission.rejection_reason && (

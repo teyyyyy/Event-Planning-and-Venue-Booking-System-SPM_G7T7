@@ -154,9 +154,11 @@ begin
 
   if cardinality(impact.venue_fields) > 0 then
     with reset as (
+      -- An active hold is released (Pending) because it was checked against the old schedule;
+      -- an expired hold stays expired, so the coordinator still has to submit a new request.
       update public."Venue Booking Requests" set status = 'Pending'
       where event_id = new.id
-        and lower(trim(coalesce(status, ''))) not in ('pending', 'cancelled', 'rejected', 'superseded')
+        and lower(trim(coalesce(status, ''))) not in ('pending', 'cancelled', 'rejected', 'superseded', 'expired')
       returning request_id
     )
     select coalesce(array_agg(request_id order by request_id), '{}') into venue_ids from reset;
@@ -267,7 +269,7 @@ begin
     for previous in
       update public."Venue Booking Requests" set status = 'Superseded'
       where event_id = event_row.id
-        and lower(trim(coalesce(status, ''))) not in ('cancelled', 'rejected', 'superseded')
+        and lower(trim(coalesce(status, ''))) not in ('cancelled', 'rejected', 'superseded', 'expired')
       returning *
     loop
       -- Bookings hold no schedule or requirements of their own: venue approval reads the

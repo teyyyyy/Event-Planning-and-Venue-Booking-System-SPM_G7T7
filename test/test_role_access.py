@@ -17,6 +17,7 @@ import event_organiser as eo
 import main
 import venue_approval as va
 import venue_catalogue as vc
+import venue_holds as vh
 import venue_request as vr
 from auth import current_user, require_attendee
 from fake_supabase import FakeClient
@@ -50,6 +51,7 @@ ROLE_PATHS = {
         "/api/venue-booking-requests/venues/1",
         "/api/venue-booking-requests/coordinators/{user_id}",
         "/api/venue-catalogue",
+        "/api/venue-availability?event_id=1",
     ),
     "Event Coordinator Lead": (
         "/api/events",
@@ -102,6 +104,8 @@ ROLE_ACTIONS = (
     ("Event Coordinator", "POST", "/api/events/1/clarification-requests",
      {"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."}, {200}),
     ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
+    ("Venue Staff", "POST", "/api/venue-booking-requests/1/hold", {"expires_at": "2099-01-01T09:00"}, {200}),
+    ("Venue Staff", "DELETE", "/api/venue-booking-requests/1/hold", None, {200}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
     ("Venue Staff", "PUT", "/api/venue-catalogue/1", {
         "operating_hours": {day: {"closed": False, "opens": "09:00", "closes": "18:00"} for day in (
@@ -172,7 +176,7 @@ def client_for_role(monkeypatch, role):
     })
     for module, attribute in (
         (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"), (rs, "db"),
-        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"),
+        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"), (vh, "db"),
     ):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
     fake.tables["notifications"] = [{"id": 1, "recipient_id": user_id, "record_type": "event", "record_id": "1", "is_read": False}]
@@ -193,6 +197,8 @@ def client_for_role(monkeypatch, role):
                 "proposed_event_capacity": 10, "proposed_description": "Updated details",
                 "proposed_start_time": "09:00", "proposed_end_time": "17:00",
             }
+        elif name in ("place_venue_hold", "remove_venue_hold"):
+            data = dict(fake.tables["Venue Booking Requests"][0])
         elif name == "process_event_change_request":
             data = {"change_request": {"id": params["p_request_id"], "processing_status": "Processed"},
                     "venue_requests": [], "equipment_requests": []}
@@ -293,7 +299,7 @@ def test_event_organiser_access(monkeypatch):
     assert_role_access(client, "Event Organiser", user_id)
 
 
-@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, change history, change-request processing, equipment, venue-planning (including the coordinator's own venue booking submissions) and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-002", "Role access matrix", "An Event Coordinator requests permitted and restricted route families.", "Coordinator event, change history, change-request processing, equipment, venue-planning (including the coordinator's own venue booking submissions and venue statuses for their own events) and profile routes are accessible; unrelated routes are denied.", steps="1. Authenticate as an Event Coordinator. 2. Request each route in the role matrix.", kind="Security")
 def test_event_coordinator_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Event Coordinator")
     assert_role_access(client, "Event Coordinator", user_id)
@@ -365,7 +371,7 @@ def test_coordinator_cannot_request_feedback_for_unassigned_event(monkeypatch):
     assert response.status_code == 403
 
 
-@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, venue catalogue and venue list reads, bookings per venue, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
+@tc("BE-ROLE-003", "Role access matrix", "A Venue Staff member requests permitted and restricted route families.", "Booking approvals, placing and removing venue holds, venue catalogue and venue list reads, bookings per venue, change history for events they review and the member's profile are accessible; unrelated routes are denied.", steps="1. Authenticate as Venue Staff. 2. Request each route in the role matrix.", kind="Security")
 def test_venue_staff_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Venue Staff")
     assert_role_access(client, "Venue Staff", user_id)

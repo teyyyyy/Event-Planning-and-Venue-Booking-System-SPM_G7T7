@@ -11,15 +11,16 @@ alter table public."Venue Booking Requests"
   add column if not exists replacement_required boolean not null default false;
 
 -- Disrupted requests stay Pending as history; they must not prevent a new
--- request for the same event. Preserve the existing one-live-request policy.
+-- request for the same event. Preserve the existing one-live-request policy
+-- (expired venue holds from venue_holds.sql are history too).
 drop index if exists public."Venue Booking Requests_live_event_id_key";
 do $$ begin
   if not exists (select 1 from public."Venue Booking Requests"
-    where status is distinct from 'Superseded' and not replacement_required
+    where status is distinct from 'Superseded' and status is distinct from 'Expired' and not replacement_required
     group by event_id having count(*) > 1) then
     create unique index "Venue Booking Requests_live_event_id_key"
       on public."Venue Booking Requests"(event_id)
-      where status is distinct from 'Superseded' and not replacement_required;
+      where status is distinct from 'Superseded' and status is distinct from 'Expired' and not replacement_required;
   end if;
 end $$;
 
@@ -52,7 +53,7 @@ begin
       set status = 'Pending', replacement_required = true, decided_at = null
       from public."Event Details" e
       where b.venue_id = new.venue_id and b.event_id = e.id
-        and b.status in ('Pending', 'Approved') and not b.replacement_required
+        and b.status in ('Pending', 'Approved', 'On Hold') and not b.replacement_required
         and lower(coalesce(e.status, '')) not in ('cancelled', 'completed')
         and coalesce(b.end_datetime,
           (coalesce(e.event_end_date, e.event_date)::date + e.end_time::time) at time zone 'Asia/Singapore',

@@ -39,6 +39,7 @@ from database import request_actor
 from attendee_registration import router as attendee_router
 from notifications import router as notifications_router
 from event_changes import router as event_changes_router
+from venue_holds import router as venue_holds_router
 
 @app.middleware("http")
 async def actor_context(request, call_next):
@@ -51,6 +52,7 @@ async def actor_context(request, call_next):
 app.include_router(attendee_router)
 app.include_router(notifications_router)
 app.include_router(event_changes_router)
+app.include_router(venue_holds_router)
 
 # Database objects created by migrations, mapped to the file that creates them.
 MIGRATION_OBJECTS = {

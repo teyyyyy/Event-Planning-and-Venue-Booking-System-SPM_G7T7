@@ -112,7 +112,8 @@ restart the backend. Both are transactional and rerunnable. Always run
 - A significant change returns the event's live venue booking (date, time,
   capacity or venue requirements) and equipment requests (date or time) to
   **Pending**, and the existing notification triggers alert venue staff and
-  technical support. Cancelled, rejected and superseded requests are left alone.
+  technical support. Cancelled, rejected, superseded and expired requests are
+  left alone; an active venue hold is released back to Pending.
 - Organisers see whether their proposed change is significant while filling in
   **Request changes**. Coordinators see the impact on each change request
   before approving it. The **History** button on the event tables, and **Show
@@ -137,6 +138,44 @@ The database behaviour is verified against PostgreSQL in isolation:
 
 ```bash
 PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/significant_event_changes_sql.mjs
+```
+
+## Tentative venue holds (22.1, 22.2)
+
+1. In Supabase, enable the **pg_cron** extension (Integrations → Cron, or
+   Database → Extensions).
+2. Rerun `backend/sql/significant_event_changes.sql`, then run
+   `backend/sql/venue_holds.sql` in the SQL Editor. Both are transactional and
+   rerunnable; rerun `venue_holds.sql` if you enable pg_cron later, so it can
+   schedule the `venue-hold-expiry` job (every minute).
+3. Restart the backend.
+
+- **Placing a hold (22.1):** on a Pending request, venue staff choose **Place
+  hold…** and an expiry (SGT) that is in the future and no later than the
+  event's start. The request becomes *On Hold* and the coordinator is notified.
+  While the hold is active, nobody else can hold, approve or request that venue
+  for an overlapping time, including setup and teardown; the database locks
+  the venue, so two overlapping holds cannot both succeed.
+- **Approve** converts the hold into the confirmed booking; **Reject** releases
+  it; **Remove hold** returns the request to Pending.
+- **Statuses:** the coordinator's venue list shows each venue as *Confirmed*,
+  *On Hold* (with its expiry), *Expired* or *Available* for the selected event;
+  confirmed and held venues cannot be selected. The venue calendar and the
+  venue staff list show holds with their expiry, and expired holds faded.
+- **Expiry (22.2):** the coordinator is notified 24 hours before a hold expires
+  (or once, when it is placed, if it is shorter than that) and again when it
+  expires. Each notice names the event, the venue and the expiry time. Change
+  the lead time in `venue_hold_reminder_lead()`.
+- An expired hold never counts as a booking: it does not block the venue, it
+  cannot be approved, and a significant event change does not revive it. The
+  coordinator submits a new request from **My Submissions → Submit new
+  request**. The app treats a hold as expired as soon as its time passes,
+  before the scheduled job marks it.
+
+The database behaviour is verified against PostgreSQL in isolation:
+
+```bash
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/venue_holds_sql.mjs
 ```
 
 ## Tests
