@@ -181,9 +181,11 @@ assert.match(sent[0].description, /^Gala: your hold on Hall A expired on .+ SGT\
 assert.deepEqual(await sweep(), { reminded: 0, expired: 0 }, 'A hold expires once');
 await rejects(hold(gala, await inDays(2)), '55000', /This request is expired/);
 
-// An expired hold is history: the coordinator can submit a new request for the event,
-// while a second live request is still refused.
+// An expired hold is history: the coordinator can submit a new request for the same venue,
+// while a second active one (Pending or On Hold) is still refused.
 const renewed = await addBooking(1, 2);
+await rejects(addBooking(1, 2), '23505');
+await q(`update "Venue Booking Requests" set status='On Hold', hold_expires_at=now() + interval '2 days' where request_id=$1`, [renewed]);
 await rejects(addBooking(1, 2), '23505');
 await q('delete from "Venue Booking Requests" where request_id=$1', [renewed]);
 

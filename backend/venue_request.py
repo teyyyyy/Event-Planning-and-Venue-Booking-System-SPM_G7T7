@@ -84,8 +84,11 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     except HTTPException:
         raise
     except APIError as e:
-        if e.code in {"23514", "23505"}:
-            raise HTTPException(409, "The venue is unavailable or this event already has an active request. Refresh and select a replacement venue.") from e
+        # An event may request several venues, but only one active request per venue (story 20.1).
+        if e.code == "23505":
+            raise HTTPException(409, "This event already has an active request for this venue. Please choose a different venue.") from e
+        if e.code == "23514":
+            raise HTTPException(409, "This venue is unavailable. Refresh and select a replacement venue.") from e
         raise HTTPException(503, "Unable to save venue request. Please try again.") from e
     except Exception as e:
         raise HTTPException(503, "Unable to save venue request. Please try again.") from e

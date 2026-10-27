@@ -6,9 +6,9 @@
 -- expiry as Expired, but no reminder or expiry notifications are sent.
 --
 -- Rollback: select cron.unschedule('venue-hold-expiry'); set any 'On Hold' or 'Expired' booking
--- back to 'Pending'; drop the functions created below; drop the hold_* columns; drop the index
--- "Venue Booking Requests_live_event_id_key"; then rerun significant_event_changes.sql to recreate
--- it without the Expired exclusion (that file only creates the index when it is missing).
+-- back to 'Pending'; drop the functions created below; drop the hold_* columns.
+-- An expired hold never stops the coordinator submitting a new request: the one-active-request-
+-- per-venue rule in significant_event_changes.sql counts only Pending, On Hold and Approved requests.
 begin;
 
 -- A hold lives on the booking request it reserves the venue for. Status 'On Hold' marks an active
@@ -20,33 +20,6 @@ alter table public."Venue Booking Requests"
   add column if not exists hold_reminder_sent_at timestamptz;
 create index if not exists venue_booking_active_holds
   on public."Venue Booking Requests"(hold_expires_at) where status = 'On Hold';
-
--- An expired hold is history: the coordinator must be able to submit a new request for the event,
--- so the one-live-booking-per-event index ignores Expired rows as well as Superseded ones.
-do $$
-declare
-  live text := 'status is distinct from ''Superseded'' and status is distinct from ''Expired''';
-  duplicates boolean;
-begin
-  -- venue_unavailability.sql also leaves out requests that need a replacement venue.
-  if exists (
-    select 1 from information_schema.columns
-    where table_schema = 'public' and table_name = 'Venue Booking Requests' and column_name = 'replacement_required'
-  ) then
-    live := live || ' and not replacement_required';
-  end if;
-  drop index if exists public."Venue Booking Requests_live_event_id_key";
-  execute format(
-    'select exists (select 1 from public."Venue Booking Requests" where %s group by event_id having count(*) > 1)', live
-  ) into duplicates;
-  if duplicates then
-    raise notice 'Some events already have several live venue bookings; one-live-booking index not created.';
-  else
-    execute format(
-      'create unique index "Venue Booking Requests_live_event_id_key" on public."Venue Booking Requests"(event_id) where %s', live
-    );
-  end if;
-end $$;
 
 -- The time an event occupies a venue, widened by the venue's setup and teardown minutes.
 -- Event dates and times are Singapore wall-clock values; a blank end date means a single-day event.

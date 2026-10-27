@@ -44,6 +44,8 @@ await db.exec(await sql('event_change_requests.sql')); // the review RPC keeps i
 await db.exec('create table "Venues" (venue_id bigint primary key, name text)');
 await db.exec(await sql('venue_unavailability.sql'));
 await db.exec(await sql('venue_unavailability.sql'));
+assert.match((await db.query(`select indexdef from pg_indexes where indexname='Venue Booking Requests_active_event_venue_key'`)).rows[0].indexdef,
+  /\(event_id, venue_id\) WHERE .*'approved'.*AND \(NOT replacement_required\)/, 'Requests needing a replacement venue do not count as active');
 const c = '00000000-0000-0000-0000-000000000001';
 await db.query("insert into users values ($1, 'Coordinator', 'Event Coordinator')", [c]);
 await db.exec(`insert into "Venues"(venue_id,name) values (1,'Hall A'),(2,'Hall B');`);

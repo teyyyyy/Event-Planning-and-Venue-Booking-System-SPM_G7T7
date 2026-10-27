@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi import HTTPException
+from postgrest.exceptions import APIError
 from pydantic import ValidationError
 
 import venue_request as vr
@@ -194,6 +195,28 @@ def test_create_request_composite_duplicate_error(monkeypatch):
     
     assert info.value.status_code == 503
     assert info.value.detail == "Unable to save venue request. Please try again."
+
+
+@tc("BE-VREQ-022", "create_venue_booking", "The database refuses a second active request for the same event and venue (23505).", "HTTP 409 asking for a different venue; the database text is not exposed.", pre="The event already has a Pending, On Hold or Approved request for venue 5.", steps="1. Make the insert raise APIError 23505. 2. Call create_venue_booking.", kind="Negative")
+def test_create_request_duplicate_venue(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client.fail_tables.add((BOOKING, "insert"))
+    client.fail_error = APIError({"code": "23505", "message": 'duplicate key value violates unique constraint "Venue Booking Requests_active_event_venue_key"', "details": None, "hint": None})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "This event already has an active request for this venue. Please choose a different venue."
+
+
+@tc("BE-VREQ-023", "create_venue_booking", "The database guard reports the venue became unavailable (23514).", "HTTP 409 asking for a replacement venue.", pre="Venue staff mark the venue unavailable after the form loaded.", steps="1. Make the insert raise APIError 23514. 2. Call create_venue_booking.", kind="Negative")
+def test_create_request_venue_became_unavailable(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client.fail_tables.add((BOOKING, "insert"))
+    client.fail_error = APIError({"code": "23514", "message": "Venue is unavailable or this request needs a replacement.", "details": None, "hint": None})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "This venue is unavailable. Refresh and select a replacement venue."
 
 
 @tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking at 10:00-12:00 with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")

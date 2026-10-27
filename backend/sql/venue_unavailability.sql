@@ -10,19 +10,10 @@ alter table public."Venues" add constraint venue_unavailability_reason
 alter table public."Venue Booking Requests"
   add column if not exists replacement_required boolean not null default false;
 
--- Disrupted requests stay Pending as history; they must not prevent a new
--- request for the same event. Preserve the existing one-live-request policy
--- (expired venue holds from venue_holds.sql are history too).
-drop index if exists public."Venue Booking Requests_live_event_id_key";
-do $$ begin
-  if not exists (select 1 from public."Venue Booking Requests"
-    where status is distinct from 'Superseded' and status is distinct from 'Expired' and not replacement_required
-    group by event_id having count(*) > 1) then
-    create unique index "Venue Booking Requests_live_event_id_key"
-      on public."Venue Booking Requests"(event_id)
-      where status is distinct from 'Superseded' and status is distinct from 'Expired' and not replacement_required;
-  end if;
-end $$;
+-- Disrupted requests stay Pending as history; they must not stop the coordinator requesting
+-- the venue again. Rebuild the one-active-request-per-venue rule from
+-- significant_event_changes.sql so it leaves them out now that replacement_required exists.
+select public.ensure_one_active_request_per_venue();
 
 create or replace function public.guard_venue_availability() returns trigger
 language plpgsql security definer set search_path = public, pg_temp as $$
