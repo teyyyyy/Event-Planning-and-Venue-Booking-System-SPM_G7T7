@@ -95,42 +95,70 @@ alter table public."Venue Booking Requests"
 alter table public."Equipment Request"
   add column if not exists change_request_id bigint references public.event_change_requests(id);
 
--- One live venue booking per event: a full UNIQUE(event_id) would also block the replacement
--- request that processing creates, so it is narrowed to rows that have not been superseded.
--- The index name keeps "event_id_key", which the venue request form maps to a friendly message.
-do $$
+-- One active request per event per venue (story 20.1): an event may need several venues, but not
+-- two active requests for the same one. Pending, On Hold and Approved requests are active, so a
+-- venue can be requested again after a rejection, an expired hold, or a change that superseded the
+-- request (processing creates its replacement for the same venue). Requests waiting for a
+-- replacement venue (replacement_required, from venue_unavailability.sql) don't count either.
+-- This replaces every earlier unique rule on event_id alone or on event_id and venue_id: the
+-- original UNIQUE(event_id), the one-live-booking-per-event index, and unique_event_venue (added
+-- directly in Supabase), which also counted rejected, expired and superseded requests. Each one's
+-- definition is printed as a notice before it is dropped. If an event already has several active
+-- requests for the same venue, nothing is changed and the notice names them.
+-- venue_unavailability.sql calls this again once replacement_required exists.
+create or replace function public.ensure_one_active_request_per_venue() returns text
+language plpgsql set search_path = public, pg_temp as $$
 declare
   item record;
-  event_column smallint := (
-    select attnum from pg_attribute
-    where attrelid = 'public."Venue Booking Requests"'::regclass and attname = 'event_id'
-  );
+  bookings regclass := 'public."Venue Booking Requests"'::regclass;
+  event_column smallint := (select attnum from pg_attribute where attrelid = bookings and attname = 'event_id');
+  venue_column smallint := (select attnum from pg_attribute where attrelid = bookings and attname = 'venue_id');
+  active text := 'lower(trim(coalesce(status, ''''))) in (''pending'', ''on hold'', ''approved'')';
+  duplicates text;
 begin
+  if exists (
+    select 1 from pg_attribute where attrelid = bookings and attname = 'replacement_required' and not attisdropped
+  ) then
+    active := active || ' and not replacement_required';
+  end if;
+  execute format(
+    'select string_agg(format(''event %%s at venue %%s'', event_id, venue_id), '', '' order by event_id, venue_id)
+     from (select event_id, venue_id from public."Venue Booking Requests" where %s
+           group by event_id, venue_id having count(*) > 1) d', active
+  ) into duplicates;
+  if duplicates is not null then
+    raise notice 'One-active-request-per-venue rule not created; earlier rules kept. Several active requests for %', duplicates;
+    return 'Not created: several active requests for ' || duplicates;
+  end if;
+
   for item in
-    select conname from pg_constraint
-    where conrelid = 'public."Venue Booking Requests"'::regclass and contype = 'u' and conkey = array[event_column]
+    select c.conname, pg_get_constraintdef(c.oid) as definition from pg_constraint c
+    where c.conrelid = bookings and c.contype = 'u'
+      and (select array_agg(k order by k) from unnest(c.conkey) k)
+          in (array[event_column], array[least(event_column, venue_column), greatest(event_column, venue_column)])
   loop
+    raise notice 'Dropping constraint %: %', item.conname, item.definition;
     execute format('alter table public."Venue Booking Requests" drop constraint %I', item.conname);
   end loop;
   for item in
-    select i.indexrelid::regclass::text as name from pg_index i
-    where i.indrelid = 'public."Venue Booking Requests"'::regclass
-      and i.indisunique and not i.indisprimary and i.indpred is null
-      and i.indnatts = 1 and i.indkey[0] = event_column
+    select i.indexrelid::regclass::text as name, pg_get_indexdef(i.indexrelid) as definition from pg_index i
+    where i.indrelid = bookings and i.indisunique and not i.indisprimary and i.indexprs is null
+      and (select array_agg(k order by k) from unnest(i.indkey::int2[]) k)
+          in (array[event_column], array[least(event_column, venue_column), greatest(event_column, venue_column)])
   loop
+    raise notice 'Dropping index: %', item.definition;
     execute format('drop index %s', item.name);
   end loop;
-  if exists (
-    select 1 from public."Venue Booking Requests"
-    where status is distinct from 'Superseded'
-    group by event_id having count(*) > 1
-  ) then
-    raise notice 'Some events already have several live venue bookings; one-live-booking index not created.';
-  else
-    create unique index if not exists "Venue Booking Requests_live_event_id_key"
-      on public."Venue Booking Requests"(event_id) where status is distinct from 'Superseded';
-  end if;
-end $$;
+
+  execute format(
+    'create unique index "Venue Booking Requests_active_event_venue_key"
+     on public."Venue Booking Requests"(event_id, venue_id) where %s', active
+  );
+  return 'Created: one active request per event per venue';
+end;
+$$;
+revoke all on function public.ensure_one_active_request_per_venue() from public, anon, authenticated, service_role;
+select public.ensure_one_active_request_per_venue();
 
 -- review_event_change_request sets app.event_change_request_id while it applies an approved
 -- proposal, so the change is linked to that request and its processing status is recorded.

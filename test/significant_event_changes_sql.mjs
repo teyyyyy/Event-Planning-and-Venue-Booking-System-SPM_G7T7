@@ -73,9 +73,12 @@ const addEvent = (id, status, extra = '') => q(`insert into "Event Details"(id,e
   start_time,end_time,event_capacity,status,organiser_id,coordinator_id${extra ? ',layout_required' : ''})
   values($1,'Gala','Workshop','Plan','2099-03-01','2099-03-01','10:00','12:00',50,$2,$3,$4${extra ? ',$5' : ''})`,
   extra ? [id, status, ids.o, ids.c, extra] : [id, status, ids.o, ids.c]);
-const addBooking = (eventId, status) => one(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
-  values($1,7,$2,$3,$4) returning request_id`,
-  [eventId, ids.v, ids.c, status]).then((r) => r.request_id);
+const addBooking = (eventId, status, venueId = 7) => one(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
+  values($1,$2,$3,$4,$5) returning request_id`,
+  [eventId, venueId, ids.v, ids.c, status]).then((r) => r.request_id);
+const uniqueRules = () => q(`select indexname, indexdef from pg_indexes where tablename='Venue Booking Requests'
+  and indexdef like 'CREATE UNIQUE%' and indexname not like '%pkey' order by indexname`).then((r) => r.rows);
+const ensureRule = () => one('select ensure_one_active_request_per_venue() as result').then((r) => r.result);
 const addEquipment = async (eventId, status) => {
   const { request_id } = await one('insert into "Equipment Request"(event_id,status,created_by) values($1,$2,$3) returning request_id', [eventId, status, ids.c]);
   await q(`insert into "Equipment Request Item"(request_id,equipment_id,requested_quantity,technical_requirements)
@@ -90,14 +93,34 @@ const proposalFrom = (overrides = {}) => ({
 // ---- schema -----------------------------------------------------------------------------
 assert.equal((await q(`select 1 from pg_constraint where conrelid='"Venue Booking Requests"'::regclass and contype='u'`)).rows.length, 0,
   'The full UNIQUE(event_id) constraint is replaced');
-assert.ok(await one(`select 1 as ok from pg_indexes where indexname='Venue Booking Requests_live_event_id_key'`),
-  'A partial one-live-booking-per-event index replaces it');
+let [rule] = await uniqueRules();
+assert.equal(rule.indexname, 'Venue Booking Requests_active_event_venue_key', 'One active request per event per venue (20.1)');
+assert.match(rule.indexdef, /\(event_id, venue_id\) WHERE .*'pending'.*'on hold'.*'approved'/);
+// unique_event_venue, added by hand in Supabase, also counted rejected and superseded requests.
+await q('alter table "Venue Booking Requests" add constraint unique_event_venue unique (event_id, venue_id)');
+assert.equal(await ensureRule(), 'Created: one active request per event per venue');
+assert.deepEqual((await uniqueRules()).map((r) => r.indexname), ['Venue Booking Requests_active_event_venue_key'],
+  'The hand-added rule is replaced');
+// Existing duplicates keep the earlier rules and are named; once resolved, the rule replaces them.
+await addEvent(99, 'Confirmed');
+await q('drop index "Venue Booking Requests_active_event_venue_key"');
+await q(`create unique index legacy_live_event on "Venue Booking Requests"(event_id) where status = 'Approved'`);
+await addBooking(99, 'Pending');
+await addBooking(99, 'Pending');
+assert.equal(await ensureRule(), 'Not created: several active requests for event 99 at venue 7');
+assert.deepEqual((await uniqueRules()).map((r) => r.indexname), ['legacy_live_event']);
+await q('delete from "Venue Booking Requests" where event_id=99');
+assert.equal(await ensureRule(), 'Created: one active request per event per venue');
+assert.deepEqual((await uniqueRules()).map((r) => r.indexname), ['Venue Booking Requests_active_event_venue_key'],
+  'A partial one-request-per-event index is replaced');
 assert.deepEqual(await one(`select has_table_privilege('authenticated','event_change_log','select') as read,
   has_function_privilege('authenticated','process_event_change_request(bigint,uuid)','execute') as process,
   has_function_privilege('service_role','process_event_change_request(bigint,uuid)','execute') as service,
   has_function_privilege('authenticated','submit_coordinator_feedback(bigint,uuid,text,text)','execute') as feedback,
-  has_function_privilege('service_role','submit_coordinator_feedback(bigint,uuid,text,text)','execute') as feedback_service`),
-{ read: false, process: false, service: true, feedback: false, feedback_service: true });
+  has_function_privilege('service_role','submit_coordinator_feedback(bigint,uuid,text,text)','execute') as feedback_service,
+  has_function_privilege('authenticated','ensure_one_active_request_per_venue()','execute') as rule,
+  has_function_privilege('service_role','ensure_one_active_request_per_venue()','execute') as rule_service`),
+{ read: false, process: false, service: true, feedback: false, feedback_service: true, rule: false, rule_service: false });
 
 // ---- coordinator clarification and amendment requests ----------------------------------
 await addEvent(20, 'Under review');
@@ -125,7 +148,7 @@ await addEvent(2, 'Confirmed');
 const booking2 = await addBooking(2, 'Approved');
 const equipment2 = await addEquipment(2, 'Approved');
 await blocked(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status)
-  values(2,8,$1,'Pending')`, [ids.c], '23505');
+  values(2,7,$1,'Pending')`, [ids.c], '23505'); // a second active request for the same venue
 await actor('c');
 await clear();
 await q(`update "Event Details" set event_name='Gala Night', description='New plan' where id=2`);
@@ -288,6 +311,29 @@ assert.deepEqual(bare.venue_requests, []);
 assert.deepEqual(bare.equipment_requests, []);
 assert.equal(bare.change_request.processing_summary, 'No active venue booking needed a new request.');
 
+// ---- 20.1: an event may book several venues, with one active request per venue ------------
+await addEvent(13, 'Confirmed');
+const hall13 = await addBooking(13, 'Approved');
+const annex13 = await addBooking(13, 'Pending', 8);
+await blocked(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status)
+  values(13,7,$1,'Pending')`, [ids.c], '23505');
+await q(`update "Venue Booking Requests" set status='Rejected' where request_id=$1`, [annex13]);
+const annexAgain13 = await addBooking(13, 'Pending', 8); // a rejected request no longer counts
+await actor('o');
+const multiRequest = await submitChange(13, 'Earlier start', proposalFrom({ start_time: '09:00', end_time: '12:00' }));
+await actor('c');
+await review(multiRequest.id, 'Approved');
+assert.equal(await venueStatus(hall13), 'Pending', 'Each active venue booking is reopened');
+const multi = await processChange(multiRequest.id, ids.c);
+const byNumber = (a, b) => a - b;
+assert.deepEqual(multi.venue_requests.map((r) => Number(r.venue_id)).sort(byNumber), [7, 8],
+  'Processing replaces every active venue booking, one per venue');
+assert.deepEqual(multi.venue_requests.map((r) => Number(r.previous_request_id)).sort(byNumber),
+  [Number(hall13), Number(annexAgain13)].sort(byNumber));
+assert.equal(await venueStatus(hall13), 'Superseded');
+assert.equal(await venueStatus(annexAgain13), 'Superseded');
+assert.equal(await venueStatus(annex13), 'Rejected', 'The rejected request is left alone');
+
 // A failure while processing rolls everything back.
 await addEvent(12, 'Confirmed');
 const booking12 = await addBooking(12, 'Approved');
@@ -310,5 +356,5 @@ assert.equal((await one('select processing_status from event_change_requests whe
 await db.exec('drop trigger fail_processed_notice on notifications; drop function fail_processed_notice();');
 assert.equal((await processChange(failingRequest.id, ids.c)).change_request.processing_status, 'Processed');
 
-console.log('PASS: significant-change classification, change log, arrangement reset, approval linkage, processing guards, linked replacement requests, notifications, rollback, permissions, rerunnable migration.');
+console.log('PASS: one active request per event per venue, significant-change classification, change log, arrangement reset, approval linkage, processing guards, linked replacement requests, notifications, rollback, permissions, rerunnable migration.');
 await db.close();

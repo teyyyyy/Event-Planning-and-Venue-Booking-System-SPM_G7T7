@@ -109,7 +109,7 @@ restart the backend. Both are transactional and rerunnable. Always run
   capacity, venue, layout, facilities and accessibility changes are
   *Significant*; name, type and description edits are *Ordinary*. Each change is
   logged with its old and new values in `event_change_log`.
-- A significant change returns the event's live venue booking (date, time,
+- A significant change returns the event's live venue bookings (date, time,
   capacity or venue requirements) and equipment requests (date or time) to
   **Pending**, and the existing notification triggers alert venue staff and
   technical support. Cancelled, rejected, superseded and expired requests are
@@ -122,17 +122,33 @@ restart the backend. Both are transactional and rerunnable. Always run
   requests.
 - **Processing (44.4):** approving a significant change request sets it to
   *Awaiting processing*. Ordinary ones are *Not required*. **Process change**
-  marks the affected live venue booking and equipment requests *Superseded* and
+  marks the affected live venue bookings and equipment requests *Superseded* and
   creates new Pending requests for the updated schedule. These are linked to
   the event and the change request through `change_request_id`, and equipment
   items are copied. A new venue booking takes its schedule and requirements
   from `Event Details`, as venue approval does. Venue staff and technical support are notified of the new
   requests, the organiser is told the request was processed, and the request
   becomes *Processed* with a summary. A failure rolls the whole step back.
-- The full `UNIQUE(event_id)` constraint on `Venue Booking Requests` is replaced
-  by a one-live-booking-per-event index that ignores superseded rows, so a
-  replacement booking can be created. Superseded equipment requests are hidden
-  from the coordinator and technical-support screens and can no longer be edited.
+- **One active request per event per venue (20.1):** an event may request
+  several venues, but only one *Pending*, *On Hold* or *Approved* request per
+  venue. Rejected, superseded and expired requests, and requests waiting for a
+  replacement venue, don't count, so the coordinator can request that venue
+  again and processing can create replacements. This rule
+  (`Venue Booking Requests_active_event_venue_key`) replaces the original
+  `UNIQUE(event_id)`, the one-live-booking-per-event index and
+  `unique_event_venue`; the migration prints each old definition before
+  dropping it. If an event already has two active requests for the same venue,
+  the old rules are kept and the notice names them. Check it with:
+
+  ```sql
+  select indexname, indexdef from pg_indexes
+  where tablename = 'Venue Booking Requests' and indexdef like 'CREATE UNIQUE%';
+  ```
+
+  To undo it, drop that index and recreate the old rules from the printed
+  definitions.
+- Superseded equipment requests are hidden from the coordinator and
+  technical-support screens and can no longer be edited.
 
 The database behaviour is verified against PostgreSQL in isolation:
 
