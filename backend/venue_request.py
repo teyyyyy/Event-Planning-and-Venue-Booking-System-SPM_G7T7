@@ -7,6 +7,7 @@ from database import create_client
 from auth import require_coordinator_or_staff, require_coordinator_path
 # Shared, normalised settings: accepts VITE_SUPABASE_URL and strips a /rest/v1 suffix.
 from coordinator_assignment import SUPABASE_SERVICE_ROLE_KEY as SUPABASE_KEY, SUPABASE_URL
+from venue_holds import APPROVED, EXPIRED, ON_HOLD, PENDING, booking_window, find_conflict, hold_fields
 
 router = APIRouter()
 
@@ -50,7 +51,7 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     if str(booking.coordinator_id) != str(user["id"]):
         raise HTTPException(status_code=403, detail="You can only request venues for your own events.")
     event = (
-        supabase.table(EVENTS_TABLE).select("id,coordinator_id").eq("id", booking.event_id)
+        supabase.table(EVENTS_TABLE).select("*").eq("id", booking.event_id)
         .maybe_single().execute().data
     )
     if not event or str(event.get("coordinator_id")) != str(user["id"]):
@@ -61,6 +62,10 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
         raise HTTPException(404, "Venue not found.")
     if venue.get("is_available") is False:
         raise HTTPException(409, "This venue is unavailable. Please select another venue.")
+    # A confirmed booking or an unexpired hold makes the venue unavailable for overlapping times.
+    window = booking_window({}, event)
+    if window and find_conflict(supabase, booking.venue_id, venue, window):
+        raise HTTPException(409, "This venue is already booked or on hold for this event's time. Please choose a different venue.")
 
     new_request = {
         "event_id": booking.event_id,
@@ -91,13 +96,10 @@ def list_requests_by_venue(venue_id: int, include_pending: bool = False):
     try:
         query = client.table(BOOKING_TABLE).select(f'*, "{EVENTS_TABLE}"(*)').eq("venue_id", venue_id)
         
-        if include_pending:
-            query = query.in_("status", ["Approved", "Pending"])
-        else:
-            query = query.eq("status", "Approved")
-        
-        response = query.execute()
-        return response.data
+        # Holds are always shown; pending requests and expired holds only on request.
+        statuses = [APPROVED, ON_HOLD, PENDING, EXPIRED] if include_pending else [APPROVED, ON_HOLD]
+        rows = [{**row, **hold_fields(row)} for row in query.in_("status", statuses).execute().data or []]
+        return rows if include_pending else [row for row in rows if row["status"] != EXPIRED]
     
     except Exception as e:
         raise HTTPException(503, "Venue bookings could not be loaded. Please try again.") from e
@@ -112,4 +114,4 @@ def list_requests_by_coordinator(coordinator_id: str):
         .execute()
         .data or []
     )
-    return bookings
+    return [{**booking, **hold_fields(booking)} for booking in bookings]

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,12 +7,13 @@ from postgrest.exceptions import APIError
 
 from auth import require_venue_staff
 from coordinator_assignment import EVENT_TABLE, db
+from venue_holds import (
+    APPROVED, BOOKING_TABLE, EXPIRED, ON_HOLD, PENDING, SGT, VENUE_TABLE,
+    booking_window, effective_status, event_datetime, find_conflict, to_sgt,
+)
 
 router = APIRouter()
-BOOKING_TABLE = "Venue Booking Requests"
-VENUE_TABLE = "Venues"
-PENDING, APPROVED, REJECTED = "Pending", "Approved", "Rejected"
-SGT = timezone(timedelta(hours=8))  # Singapore has no DST, so a fixed offset is exact
+REJECTED = "Rejected"
 
 # Event Details columns that may hold accessibility once the booking-request
 # feature writes it there; the first one present wins over the booking row.
@@ -24,32 +25,12 @@ class RejectionDetails(BaseModel):
     alternative_venue: str | None = None
 
 
+class HoldDetails(BaseModel):
+    expires_at: datetime  # without an offset it is read as SGT
+
+
 def clean(text: str | None) -> str | None:
     return (text or "").strip() or None
-
-
-def to_sgt(timestamp: str | None) -> str | None:
-    """Booking timestamps are stored in UTC; show them in SGT."""
-    return datetime.fromisoformat(timestamp).astimezone(SGT).isoformat() if timestamp else None
-
-
-def event_datetime(event: dict[str, Any], date_key: str, time_key: str) -> str | None:
-    """Event Details dates/times are naive wall-clock values entered in SGT.
-
-    A missing event_end_date means a single-day event, so it falls back to event_date.
-    """
-    day = event.get(date_key) or event.get("event_date")
-    if day and event.get(time_key):
-        return datetime.fromisoformat(f"{day}T{event[time_key]}").replace(tzinfo=SGT).isoformat()
-    return None
-
-
-def booking_window(booking: dict[str, Any], event: dict[str, Any] | None) -> tuple[datetime, datetime] | None:
-    """The booked period; event times take priority over the booking row's copies, as in view()."""
-    event = event or {}
-    start = event_datetime(event, "event_date", "start_time") or booking.get("start_datetime")
-    end = event_datetime(event, "event_end_date", "end_time") or booking.get("end_datetime")
-    return (datetime.fromisoformat(start), datetime.fromisoformat(end)) if start and end else None
 
 
 def event_accessibility(event: dict[str, Any]) -> Any:
@@ -65,7 +46,9 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
     coordinator = users.get(str(booking.get("coordinator_id"))) or {}
     return {
         "request_id": booking["request_id"],
-        "status": booking["status"],
+        "status": effective_status(booking),
+        "hold_expires_at": to_sgt(booking.get("hold_expires_at")),
+        "hold_placed_at": to_sgt(booking.get("hold_placed_at")),
         "replacement_required": booking.get("replacement_required", False),
         "is_available": venue.get("is_available", True),
         "unavailability_reason": venue.get("unavailability_reason", ""),
@@ -117,40 +100,25 @@ def owned_booking(client, request_id: int, staff: dict[str, Any]) -> dict[str, A
 def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     client = db()
     booking = owned_booking(client, request_id, staff)
-    if booking["status"] != PENDING:
-        raise HTTPException(409, f"This request has already been {booking['status'].lower()}.")
+    status = effective_status(booking)
+    if status == EXPIRED:
+        raise HTTPException(409, "This hold has expired. The event coordinator must submit a new venue request.")
+    if status not in (PENDING, ON_HOLD):
+        raise HTTPException(409, f"This request has already been {status.lower()}.")
 
-    # Prevent approvals if event logic overlaps (including setup/teardown buffers)
+    # Prevent approvals if event logic overlaps (including setup/teardown buffers).
+    # Approving a held request converts its hold into the confirmed booking.
     if changes.get("status") == APPROVED:
         venue = client.table(VENUE_TABLE).select("*").eq("venue_id", booking["venue_id"]).maybe_single().execute().data or {}
         if booking.get("replacement_required") or venue.get("is_available") is False:
             raise HTTPException(409, "This booking needs a replacement venue and cannot be approved.")
-        setup_mins = int(venue.get("setup_time") or venue.get("setup_minutes") or 0)
-        teardown_mins = int(venue.get("teardown_time") or venue.get("turnaround_time") or venue.get("teardown_minutes") or 0)
-        
-        # Fetch all existing approved bookings for this venue, and the events that give their times
-        approved_bookings = client.table(BOOKING_TABLE).select("*").eq("venue_id", booking["venue_id"]).eq("status", APPROVED).execute().data or []
-        event_ids = list({b["event_id"] for b in [booking, *approved_bookings]})
-        events = {e["id"]: e for e in client.table(EVENT_TABLE).select("*").in_("id", event_ids).execute().data or []}
-        requested = booking_window(booking, events.get(booking["event_id"]))
-
-        if requested:
-            r_start, r_end = requested
-            r_eff_start = r_start - timedelta(minutes=setup_mins)
-            r_eff_end = r_end + timedelta(minutes=teardown_mins)
-
-            for ab in approved_bookings:
-                if ab.get("request_id") == request_id:
-                    continue
-                existing = booking_window(ab, events.get(ab["event_id"]))
-
-                if existing:
-                    a_start, a_end = existing
-                    a_eff_start = a_start - timedelta(minutes=setup_mins)
-                    a_eff_end = a_end + timedelta(minutes=teardown_mins)
-                    
-                    if r_eff_start < a_eff_end and r_eff_end > a_eff_start:
-                        raise HTTPException(409, "Cannot approve: Venue is already booked during this time (including setup/teardown buffers).")
+        event = client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"]).maybe_single().execute().data
+        requested = booking_window(booking, event)
+        conflict = find_conflict(client, booking["venue_id"], venue, requested, request_id) if requested else None
+        if conflict and conflict.get("status") == ON_HOLD:
+            raise HTTPException(409, "Cannot approve: Venue is on hold for another event during this time (including setup/teardown buffers).")
+        if conflict:
+            raise HTTPException(409, "Cannot approve: Venue is already booked during this time (including setup/teardown buffers).")
 
     # Guard on status so two staff deciding at once can't overwrite each other.
     try:
@@ -158,7 +126,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
             client.table(BOOKING_TABLE)
             .update({**changes, "decided_at": datetime.now(timezone.utc).isoformat()})
             .eq("request_id", request_id)
-            .eq("status", PENDING)
+            .eq("status", booking["status"])
             .execute()
             .data
         )
@@ -199,3 +167,33 @@ def reject_request(request_id: int, details: RejectionDetails | None = None, sta
         staff,
         {"status": REJECTED, "rejection_reason": clean(details.reason), "alternative_venue": clean(details.alternative_venue)},
     )
+
+
+def hold_action(name: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Run a hold RPC; venue_holds.sql checks ownership, status, expiry and conflicts atomically."""
+    client = db()
+    try:
+        result = client.rpc(name, params).execute()
+    except APIError as error:
+        status = {"P0002": 404, "42501": 403, "22023": 400, "55000": 409, "23P01": 409}.get(error.code)
+        if status:
+            raise HTTPException(status, error.message) from error
+        raise
+    booking = result.data[0] if isinstance(result.data, list) and result.data else result.data
+    if not booking:
+        raise HTTPException(500, "The venue hold could not be saved.")
+    return enrich(client, [booking])[0]
+
+
+@router.post("/api/venue-booking-requests/{request_id}/hold")
+def place_hold(request_id: int, details: HoldDetails, staff: dict[str, Any] = Depends(require_venue_staff)):
+    expires_at = details.expires_at if details.expires_at.tzinfo else details.expires_at.replace(tzinfo=SGT)
+    return hold_action(
+        "place_venue_hold",
+        {"p_request_id": request_id, "p_staff_id": staff["id"], "p_expires_at": expires_at.isoformat()},
+    )
+
+
+@router.delete("/api/venue-booking-requests/{request_id}/hold")
+def remove_hold(request_id: int, staff: dict[str, Any] = Depends(require_venue_staff)):
+    return hold_action("remove_venue_hold", {"p_request_id": request_id, "p_staff_id": staff["id"]})

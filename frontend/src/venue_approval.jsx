@@ -19,6 +19,15 @@ const formatTime = (ms) => {
   return `${hours}:${minutes} ${ampm}`;
 };
 
+// "On Hold" -> "on-hold", for the status pill classes.
+const statusClass = (status) => status.toLowerCase().replace(/\s+/g, "-");
+
+// The current SGT time as a datetime-local value, the earliest a hold may expire.
+const sgtNowInput = () =>
+  new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 16);
+
+const eventLabel = (booking) => booking.event_name || `event #${booking.event_id}`;
+
 function Detail({ label, children }) {
   return (
     <div className="detail-item">
@@ -34,13 +43,21 @@ function RequestDetail({
   overlapInfo,
   onApprove,
   onReject,
+  onPlaceHold,
+  onRemoveHold,
   onClose,
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [alternativeVenue, setAlternativeVenue] = useState("");
+  const [placingHold, setPlacingHold] = useState(false);
+  const [holdUntil, setHoldUntil] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const pending = booking.status === "Pending";
+  const held = booking.status === "On Hold";
+  const expired = booking.status === "Expired";
+  // A held request is still awaiting a decision: approval confirms it, rejection releases it.
+  const decidable = pending || held;
 
   // We can approve if there is no overlap, OR if the only overlap is with another pending request
   const canApprove =
@@ -98,10 +115,15 @@ function RequestDetail({
       </div>
       <dl className="detail-grid">
         <Detail label="Status">
-          <span className={`pill status-${booking.status.toLowerCase()}`}>
+          <span className={`pill status-${statusClass(booking.status)}`}>
             {booking.status}{booking.replacement_required ? " — replacement venue required" : ""}
           </span>
         </Detail>
+        {(held || expired) && (
+          <Detail label={held ? "Hold expires" : "Hold expired"}>
+            {formatDateTime(booking.hold_expires_at)}
+          </Detail>
+        )}
         {booking.change_request_id && (
           <Detail label="Event change">
             New request for approved change request #{booking.change_request_id}
@@ -147,14 +169,21 @@ function RequestDetail({
       </button>
       {showHistory && <EventChangeHistory eventId={booking.event_id} />}
 
-      {pending && overlapInfo && (
+      {expired && (
+        <p className="message" role="note">
+          This hold expired before a decision was made. The event coordinator
+          must submit a new venue request.
+        </p>
+      )}
+
+      {decidable && overlapInfo && (
         <div style={bannerStyle}>
           <strong>Availability: </strong>{" "}
           {overlapInfo.loading ? "Checking..." : overlapInfo.message}
         </div>
       )}
 
-      {pending && !rejecting && (
+      {decidable && !rejecting && !placingHold && (
         <div className="decision-actions">
           <button
             className="btn-approve"
@@ -170,10 +199,67 @@ function RequestDetail({
           >
             Reject…
           </button>
+          {pending && (
+            <button
+              className="assign"
+              disabled={busy || !canApprove}
+              onClick={() => setPlacingHold(true)}
+            >
+              Place hold…
+            </button>
+          )}
+          {held && (
+            <button className="assign" disabled={busy} onClick={onRemoveHold}>
+              Remove hold
+            </button>
+          )}
         </div>
       )}
 
-      {pending && rejecting && (
+      {pending && placingHold && (
+        <form
+          className="reject-form"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (await onPlaceHold(holdUntil)) setPlacingHold(false);
+          }}
+        >
+          <label>
+            Hold until (SGT)
+            <input
+              type="datetime-local"
+              required
+              min={sgtNowInput()}
+              value={holdUntil}
+              onChange={(e) => setHoldUntil(e.target.value)}
+            />
+          </label>
+          <p className="hint">
+            The venue stays unavailable to other requests until the hold
+            expires. The event coordinator is reminded 24 hours before it
+            expires.
+          </p>
+          <div className="decision-actions">
+            <button
+              type="submit"
+              className="btn-approve"
+              disabled={busy || !holdUntil}
+            >
+              Confirm hold
+            </button>
+            <button
+              type="button"
+              className="assign"
+              disabled={busy}
+              onClick={() => setPlacingHold(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
+      {decidable && rejecting && (
         <form
           className="reject-form"
           onSubmit={(e) => {
@@ -256,7 +342,7 @@ export default function VenueApproval() {
     let isMounted = true;
 
     async function checkOverlap() {
-      if (!selected || selected.status !== "Pending") {
+      if (!selected || !["Pending", "On Hold"].includes(selected.status)) {
         if (isMounted)
           setOverlapInfo({ loading: false, type: "none", message: "" });
         return;
@@ -326,7 +412,8 @@ export default function VenueApproval() {
         for (const booking of bookings) {
           if (booking.request_id === selected.request_id) continue;
           if (booking.venue_id !== selected.venue_id) continue;
-          if (booking.status === "Rejected") continue; // Only check Approved and Pending
+          // Only Approved bookings, active holds and Pending requests compete for the venue.
+          if (["Rejected", "Expired"].includes(booking.status)) continue;
 
           const exTimes = getEventDates(booking);
           if (!exTimes) continue;
@@ -361,6 +448,10 @@ export default function VenueApproval() {
               overlapType = overlapsCore ? "core" : "buffer";
               approvedConflictMessage = `Unavailable. Venue is already booked by '${compName}' (${detailStr}).`;
               break; // Hard core collision found, stop checking
+            } else if (booking.status === "On Hold") {
+              overlapType = overlapsCore ? "core" : "buffer";
+              approvedConflictMessage = `Unavailable. Venue is on hold for '${compName}' until ${formatDateTime(booking.hold_expires_at)} (${detailStr}).`;
+              break; // An active hold blocks the venue like a booking
             } else if (booking.status === "Pending") {
               if (!competingEvents.some((c) => c.name === compName)) {
                 competingEvents.push({
@@ -426,28 +517,52 @@ export default function VenueApproval() {
       return;
     }
 
+    return act(
+      action,
+      { method: "POST", body: JSON.stringify(body || {}) },
+      (updated) => `Request for ${eventLabel(updated)} ${updated.status.toLowerCase()}.`,
+    );
+  }
+
+  // Runs a venue staff action on the selected request; resolves to whether it succeeded.
+  async function act(path, options, describe) {
     setBusy(true);
     try {
       const updated = await request(
-        `/venue-booking-requests/${selectedId}/${action}`,
-        { method: "POST", body: JSON.stringify(body || {}) },
+        `/venue-booking-requests/${selectedId}/${path}`,
+        options,
       );
       setBookings((current) =>
         current.map((item) =>
           item.request_id === updated.request_id ? updated : item,
         ),
       );
-      setMessage(
-        `Request for ${updated.event_name || `event #${updated.event_id}`} ${updated.status.toLowerCase()}.`,
-      );
+      setMessage(describe(updated));
       setOverlapInfo({ loading: false, type: "none", message: "" });
+      return true;
     } catch (error) {
       setMessage(error.message);
       await load(true);
+      return false;
     } finally {
       setBusy(false);
     }
   }
+
+  const placeHold = (until) =>
+    act(
+      "hold",
+      // The input is SGT wall-clock time; send the offset so the backend stores the right instant.
+      { method: "POST", body: JSON.stringify({ expires_at: `${until}:00+08:00` }) },
+      (updated) => `Venue held for ${eventLabel(updated)} until ${formatDateTime(updated.hold_expires_at)}.`,
+    );
+
+  const removeHold = () =>
+    act(
+      "hold",
+      { method: "DELETE" },
+      (updated) => `Hold removed for ${eventLabel(updated)}. The request is pending again.`,
+    );
 
   return (
     <main className="shell">
@@ -471,6 +586,8 @@ export default function VenueApproval() {
             overlapInfo={overlapInfo}
             onApprove={() => decide("approve")}
             onReject={(details) => decide("reject", details)}
+            onPlaceHold={placeHold}
+            onRemoveHold={removeHold}
             onClose={() => setSelectedId(null)}
           />
         )}
@@ -496,10 +613,15 @@ export default function VenueApproval() {
                     <td>{formatDateTime(item.end_datetime)}</td>
                     <td>
                       <span
-                        className={`pill status-${item.status.toLowerCase()}`}
+                        className={`pill status-${statusClass(item.status)}`}
                       >
                         {item.status}
                       </span>
+                      {item.status === "On Hold" && (
+                        <small className="hold-expiry">
+                          until {formatDateTime(item.hold_expires_at)}
+                        </small>
+                      )}
                     </td>
                     <td>
                       <button

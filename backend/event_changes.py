@@ -26,8 +26,9 @@ VENUE_FIELDS = (
 EQUIPMENT_FIELDS = ("event_date", "event_end_date", "start_time", "end_time")
 TRACKED_FIELDS = ("event_name", "event_type", "description", *VENUE_FIELDS)
 # Requests in these states are history, so a significant change neither reopens nor replaces them.
-CLOSED_VENUE_STATUSES = {"cancelled", "rejected", "superseded"}
-CLOSED_EQUIPMENT_STATUSES = CLOSED_VENUE_STATUSES | {"draft"}
+CLOSED_STATUSES = {"cancelled", "rejected", "superseded"}
+CLOSED_VENUE_STATUSES = CLOSED_STATUSES | {"expired"}  # an expired venue hold needs a new request
+CLOSED_EQUIPMENT_STATUSES = CLOSED_STATUSES | {"draft"}
 
 
 def db():
