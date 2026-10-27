@@ -17,8 +17,6 @@ create table "Event Details"(id bigint primary key, event_name text, event_type 
 create table "Venue Booking Requests"(request_id bigint generated always as identity primary key,
   created_at timestamptz not null default now(), event_id bigint unique, venue_id bigint not null,
   venue_staff_id uuid, coordinator_id uuid not null, status text not null,
-  start_datetime timestamptz not null, end_datetime timestamptz not null,
-  accessibility_required bigint not null default 0, layout_required text, facilities_required text[],
   rejection_reason text, alternative_venue text, decided_at timestamptz);
 create table "Equipment Request"(request_id bigint generated always as identity primary key, event_id bigint not null,
   status text default 'Draft', created_by uuid, updated_by uuid, created_at timestamptz default now(),
@@ -49,30 +47,35 @@ await db.exec(await sql('venue_unavailability.sql'));
 const c = '00000000-0000-0000-0000-000000000001';
 await db.query("insert into users values ($1, 'Coordinator', 'Event Coordinator')", [c]);
 await db.exec(`insert into "Venues"(venue_id,name) values (1,'Hall A'),(2,'Hall B');`);
-for (const [id, status, end] of [[1,'Approved','2099-01-01'],[2,'Pending','2099-01-01'],[3,'Rejected','2099-01-01'],[4,'Approved','2000-01-01']]) {
-  await db.query(`insert into "Event Details"(id,event_name,status,coordinator_id) values($1,'Meeting','Approved',$2)`, [id,c]);
-  await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status,start_datetime,end_datetime)
-    values($1,1,$2,$3,'2000-01-01',$4)`, [id,c,status,end]);
+// Like the live table, a booking has no times of its own: whether it is still upcoming comes from its event.
+for (const [id, status, day, endDay, endTime] of [
+  [1,'Approved','2099-01-01',null,'12:00'], [2,'Pending','2099-01-01',null,'12:00'], [3,'Rejected','2099-01-01',null,'12:00'],
+  [4,'Approved','2000-01-01',null,'12:00'], // already over, so left alone
+  [5,'On Hold',null,null,null], // no times yet, so treated as upcoming
+  [6,'Approved','2000-01-01','2099-01-02','12:00'], // multi-day event that has not ended
+]) {
+  await db.query(`insert into "Event Details"(id,event_name,status,coordinator_id,event_date,event_end_date,end_time)
+    values($1,'Meeting','Approved',$2,$3,$4,$5)`, [id,c,day,endDay,endTime]);
+  await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status) values($1,1,$2,$3)`, [id,c,status]);
 }
 await db.exec('delete from notifications');
 await db.exec(`update "Venues" set is_available=false, unavailability_reason='Safety inspection' where venue_id=1`);
 const rows = (await db.query('select * from "Venue Booking Requests" order by event_id')).rows;
-assert.deepEqual(rows.map(r => [r.status,r.replacement_required]), [['Pending',true],['Pending',true],['Rejected',false],['Approved',false]]);
+assert.deepEqual(rows.map(r => [r.status,r.replacement_required]),
+  [['Pending',true],['Pending',true],['Rejected',false],['Approved',false],['Pending',true],['Pending',true]]);
 const notices = (await db.query("select * from notifications where description like '%replacement venue%'")).rows;
-assert.equal(notices.length,2);
+assert.equal(notices.length,4);
 assert.ok(notices.every(n => n.recipient_id===c && n.description.includes('Safety inspection')));
-await assert.rejects(db.exec(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status,start_datetime,end_datetime)
-  values(1,1,'${c}','Pending',now(),now())`), /unavailable/);
-await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status,start_datetime,end_datetime)
-  values(1,2,$1,'Pending',now(),'2099-01-01')`, [c]);
+await assert.rejects(db.exec(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status)
+  values(1,1,'${c}','Pending')`), /unavailable/);
+await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status) values(1,2,$1,'Pending')`, [c]);
 assert.equal((await db.query('select count(*)::int as count from "Venue Booking Requests" where event_id=1')).rows[0].count,2);
 await db.exec(`update "Venues" set is_available=false where venue_id=1`);
-assert.equal((await db.query("select count(*)::int as count from notifications where description like '%replacement venue%'")).rows[0].count,2);
+assert.equal((await db.query("select count(*)::int as count from notifications where description like '%replacement venue%'")).rows[0].count,4);
 await db.exec(`update "Venues" set is_available=true,unavailability_reason='' where venue_id=1`);
 await assert.rejects(db.exec(`update "Venue Booking Requests" set status='Approved' where event_id=2`), /replacement/);
 await db.exec(`update "Venue Booking Requests" set status='Approved' where event_id=1 and venue_id=2`);
-await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status,start_datetime,end_datetime)
-  values(2,1,$1,'Pending',now(),'2099-01-01')`, [c]);
+await db.query(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status) values(2,1,$1,'Pending')`, [c]);
 await assert.rejects(db.exec(`update "Venues" set is_available=false,unavailability_reason=' ' where venue_id=2`), /constraint/);
 // A notification failure must roll back both the venue change and booking reset.
 await db.exec(`create function fail_notification() returns trigger language plpgsql as $$ begin raise exception 'notification failed'; end $$;

@@ -55,7 +55,8 @@ begin
       where b.venue_id = new.venue_id and b.event_id = e.id
         and b.status in ('Pending', 'Approved', 'On Hold') and not b.replacement_required
         and lower(coalesce(e.status, '')) not in ('cancelled', 'completed')
-        and coalesce(b.end_datetime,
+        -- Bookings have no times of their own; an event without an end time counts as upcoming.
+        and coalesce(
           (coalesce(e.event_end_date, e.event_date)::date + e.end_time::time) at time zone 'Asia/Singapore',
           'infinity'::timestamptz) > now()
       returning b.request_id, b.coordinator_id, e.coordinator_id as event_coordinator_id, e.event_name
