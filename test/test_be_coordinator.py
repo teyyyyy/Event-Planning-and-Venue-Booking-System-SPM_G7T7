@@ -206,24 +206,31 @@ def test_lead_queue_contains_submitted_and_assigned(use_db):
     assert [row["id"] for row in out] == [1]
 
 
-@tc("BE-COORD-064", "assign_from_unassigned_queue", "The lead assigns a submitted event.",
-   "The event receives the coordinator, changes to Assigned, and the new coordinator workload increases.",
-   steps="1. Call the lead assignment endpoint for a submitted event.")
-def test_lead_assignment_sets_assigned_and_updates_workload(use_db):
-    client = use_db(world([event()]), ca)
-    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c2"), {"id": "lead", "role": "Event Coordinator Lead"})
-    assert out["event_status"] == "Assigned" and out["assigned_coordinator_id"] == "c2"
-    assert count(client, "c2") == 2
+@tc("BE-COORD-064", "Lead assignment RPC", "The lead assigns a submitted event.",
+    "The verified actor and expected unassigned state reach the atomic RPC; its assigned event is returned.",
+    steps="1. Mock RPC response. 2. Assign as lead. Workloads and notifications are verified in coordinator_reassignment_sql.mjs.")
+def test_lead_assignment_calls_atomic_rpc(use_db, monkeypatch):
+    client = use_db(world(), ca)
+    def rpc(name, params):
+        assert name == "assign_event_coordinator"
+        assert params == {"p_event_id": 1, "p_coordinator_id": "c2", "p_expected_coordinator_id": None, "p_lead_id": "lead"}
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=event(status="Assigned", coordinator_id="c2")))
+    monkeypatch.setattr(client, "rpc", rpc)
+    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c2"), {"id": "lead"})
+    assert out["event_status"] == "Assigned" and out["coordinator_name"] == "Amy"
 
 
-@tc("BE-COORD-065", "assign_from_unassigned_queue", "The lead reassigns an assigned event.",
-   "The old workload decreases and the new workload increases while status remains Assigned.",
-   steps="1. Seed an assigned event. 2. Reassign it through the lead endpoint.")
-def test_lead_reassignment_moves_workload(use_db):
-    client = use_db(world([event(status="Assigned", coordinator_id="c1")]), ca)
-    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c3"), {"id": "lead", "role": "Event Coordinator Lead"})
-    assert out["event_status"] == "Assigned"
-    assert (count(client, "c1"), count(client, "c3")) == (1, 2)
+@tc("BE-COORD-065", "Lead reassignment RPC", "The lead reassigns a confirmed event.",
+    "The previous coordinator is supplied for conflict detection and the original status is preserved.",
+    steps="1. Return a confirmed event from the RPC. 2. Reassign c1 to c3. Database effects are verified in coordinator_reassignment_sql.mjs.")
+def test_lead_reassignment_preserves_status(use_db, monkeypatch):
+    client = use_db(world(), ca)
+    def rpc(name, params):
+        assert params["p_expected_coordinator_id"] == "c1"
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=[event(status="Confirmed", coordinator_id="c3")]))
+    monkeypatch.setattr(client, "rpc", rpc)
+    out = ca.assign_from_unassigned_queue(1, ca.CoordinatorAssignment(coordinator_id="c3", expected_coordinator_id="c1"), {"id": "lead"})
+    assert out["event_status"] == "Confirmed" and out["assigned_coordinator_id"] == "c3"
 
 
 @tc("BE-COORD-021", "assign_event", "Three coordinators with workloads 2/1/1; a new event is assigned.",
@@ -643,9 +650,18 @@ def test_coordinators_sorted(use_db):
 @tc("BE-COORD-041", "coordinator_workloads", "Workload summary is requested.", "One entry per coordinator with id, name, role and active_event_count.",
     steps="1. Call coordinator_workloads().")
 def test_coordinator_workloads(use_db):
-    use_db(world(), ca)
+    use_db(world([
+        event(id=1, status="Assigned", coordinator_id="c1"),
+        event(id=2, status="Confirmed", coordinator_id="c1"),
+        event(id=3, status="Completed", coordinator_id="c1"),
+        event(id=4, status="Cancelled", coordinator_id="c2"),
+        event(id=5, status="Draft", coordinator_id="c2"),
+        event(id=6, status="Rejected", coordinator_id="c2"),
+        event(id=7, status="Planning", coordinator_id="c3"),
+        event(id=8),
+    ]), ca)
     out = {w["id"]: w["active_event_count"] for w in ca.coordinator_workloads()}
-    assert out == {"c1": 2, "c2": 1, "c3": 1}
+    assert out == {"c1": 2, "c2": 0, "c3": 1}
 
 
 @tc("BE-COORD-042", "EVENT_STATUSES", "Allowed status list is inspected.", "It contains the seven lifecycle statuses.",
