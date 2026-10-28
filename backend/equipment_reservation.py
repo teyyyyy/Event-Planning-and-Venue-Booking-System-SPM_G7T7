@@ -210,6 +210,21 @@ def update_reservation(
         payload,
     )
 
+
+@router.put("/{staff_id}/{reservation_id}/confirm")
+def confirm_reservation(
+    staff_id: str,
+    reservation_id: int,
+):
+    client = db()
+    service = ReservationService(client)
+
+    return service.confirm_reservation(
+        staff_id,
+        reservation_id,
+    )
+
+
 @router.delete("/{staff_id}/{reservation_id}")
 def cancel_reservation(
     staff_id: str,

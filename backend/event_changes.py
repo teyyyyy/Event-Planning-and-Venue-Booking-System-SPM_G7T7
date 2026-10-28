@@ -24,7 +24,10 @@ VENUE_FIELDS = (
     "venue_id", "layout_required", "facilities_required", "accessibility_required",
 )
 EQUIPMENT_FIELDS = ("event_date", "event_end_date", "start_time", "end_time")
-TRACKED_FIELDS = ("event_name", "event_type", "description", *VENUE_FIELDS)
+TRACKED_FIELDS = (
+    "event_name", "event_type", "description", "equipment_placement", "crowd_movement",
+    *VENUE_FIELDS,
+)
 # Requests in these states are history, so a significant change neither reopens nor replaces them.
 CLOSED_STATUSES = {"cancelled", "rejected", "superseded"}
 CLOSED_VENUE_STATUSES = CLOSED_STATUSES | {"expired"}  # an expired venue hold needs a new request
@@ -53,12 +56,12 @@ def comparable(record: dict[str, Any], field: str) -> str | None:
 def classify_change(current: dict[str, Any], proposed: dict[str, Any]) -> dict[str, Any]:
     """Compare the proposed values with the current event and say what they would affect."""
     changed = [field for field in TRACKED_FIELDS if field in proposed and comparable(current, field) != comparable(proposed, field)]
-    # Every equipment field is also a venue field, so the venue fields are the significant ones.
-    significant = [field for field in changed if field in VENUE_FIELDS]
+    # Only fields tied to venue/equipment arrangements are significant.
+    significant = [field for field in changed if field in VENUE_FIELDS or field in EQUIPMENT_FIELDS]
     return {
         "change_type": "Significant" if significant else "Ordinary",
         "significant_fields": significant,
-        "affects_venue": bool(significant),
+        "affects_venue": any(field in VENUE_FIELDS for field in changed),
         "affects_equipment": any(field in EQUIPMENT_FIELDS for field in changed),
     }
 

@@ -1322,6 +1322,155 @@ class ReservationService:
             ),
         }
 
+    def confirm_reservation(
+        self,
+        staff_id: str,
+        reservation_id: int,
+    ):
+        self.require_technical_support(staff_id)
+
+        rows = (
+            self.client.table(RESERVATION_TABLE)
+            .select("*")
+            .eq(
+                "reservation_id",
+                reservation_id,
+            )
+            .execute()
+            .data or []
+        )
+
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Equipment reservation was not found."
+                ),
+            )
+
+        reservation = rows[0]
+
+        status = str(
+            reservation.get("status", "")
+        ).strip().lower()
+
+        if status not in {
+            "needs recheck",
+            "modified",
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Only a reservation that needs recheck "
+                    "or has been modified can be confirmed."
+                ),
+            )
+
+        event = self.get_event(
+            reservation["event_id"]
+        )
+
+        reservation_items = (
+            self.client.table(RESERVATION_ITEM_TABLE)
+            .select(
+                "equipment_id,reserved_quantity"
+            )
+            .eq(
+                "reservation_id",
+                reservation_id,
+            )
+            .execute()
+            .data or []
+        )
+
+        positive_items = [
+            SimpleNamespace(
+                equipment_id=item["equipment_id"],
+                reserved_quantity=int(
+                    item.get("reserved_quantity") or 0
+                ),
+            )
+            for item in reservation_items
+            if int(
+                item.get("reserved_quantity") or 0
+            ) > 0
+        ]
+
+        if not positive_items:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "At least one equipment item must remain "
+                    "reserved before this reservation can be confirmed."
+                ),
+            )
+
+        self.validate_request_items(
+            reservation["request_id"],
+            positive_items,
+        )
+
+        availability = self.availability_for_items(
+            event,
+            positive_items,
+            exclude_reservation_id=reservation_id,
+        )
+
+        for item in availability:
+            if (
+                item["requested_reservation_quantity"]
+                > item["available_quantity"]
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f'{item["equipment_name"]} only has '
+                        f'{item["available_quantity"]} '
+                        "available during this event period."
+                    ),
+                )
+
+        now = datetime.now(
+            timezone.utc
+        ).isoformat()
+
+        updated = (
+            self.client.table(RESERVATION_TABLE)
+            .update({
+                "status":
+                    "Reserved",
+                "updated_at":
+                    now,
+            })
+            .eq(
+                "reservation_id",
+                reservation_id,
+            )
+            .eq(
+                "status",
+                reservation["status"],
+            )
+            .execute()
+            .data
+        )
+
+        if not updated:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This reservation was changed by someone else. "
+                    "Refresh it before confirming."
+                ),
+            )
+
+        return {
+            "message":
+                "Equipment reservation confirmed successfully.",
+            **self.reservation_response(
+                updated[0]
+            ),
+        }
+
     def cancel_reservation(
         self,
         staff_id: str,
@@ -1407,3 +1556,4 @@ class ReservationService:
             "status":
                 "Cancelled",
         }
+

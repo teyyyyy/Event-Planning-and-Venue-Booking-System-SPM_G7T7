@@ -5,7 +5,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
@@ -32,8 +32,18 @@ class EventRequest(BaseModel):
     event_end_date: str | None = None  # blank = single-day event
     event_capacity: int
     description: str
+    equipment_placement: str
+    crowd_movement: str
     start_time: str
     end_time: str
+
+    @field_validator("equipment_placement", "crowd_movement")
+    @classmethod
+    def validate_safety_information(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("This field is required and cannot be blank.")
+        return value
 
 
 class EventRequestUpdate(EventRequest):
@@ -177,6 +187,8 @@ def create_event_change_request(organiser_id: str, event_id: int, request: Event
                 "p_event_end_date": proposal["event_end_date"],
                 "p_event_capacity": proposal["event_capacity"],
                 "p_description": proposal["description"],
+                "p_equipment_placement": proposal["equipment_placement"],
+                "p_crowd_movement": proposal["crowd_movement"],
                 "p_start_time": proposal["start_time"],
                 "p_end_time": proposal["end_time"],
             },
@@ -206,6 +218,7 @@ def update_event_change_request(organiser_id: str, request_id: int, request: Eve
             "p_event_name": request.event_name, "p_event_type": request.event_type,
             "p_event_date": request.event_date, "p_event_end_date": request.event_end_date or request.event_date,
             "p_event_capacity": request.event_capacity, "p_description": request.description,
+            "p_equipment_placement": request.equipment_placement, "p_crowd_movement": request.crowd_movement,
             "p_start_time": request.start_time, "p_end_time": request.end_time,
         }).execute()
     except APIError as error:
@@ -225,3 +238,4 @@ def cancel_event_change_request(organiser_id: str, request_id: int):
         raise
     if not result.data: raise HTTPException(500, "Event change request could not be cancelled.")
     return result.data[0] if isinstance(result.data, list) else result.data
+

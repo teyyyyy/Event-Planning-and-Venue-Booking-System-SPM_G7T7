@@ -14,6 +14,8 @@ create table if not exists public.event_change_requests (
   proposed_event_end_date date,
   proposed_event_capacity bigint,
   proposed_description text,
+  proposed_equipment_placement text,
+  proposed_crowd_movement text,
   proposed_start_time time without time zone,
   proposed_end_time time without time zone,
   review_status text not null default 'Pending',
@@ -30,6 +32,8 @@ alter table public.event_change_requests
   add column if not exists proposed_event_end_date date,
   add column if not exists proposed_event_capacity bigint,
   add column if not exists proposed_description text,
+  add column if not exists proposed_equipment_placement text,
+  add column if not exists proposed_crowd_movement text,
   add column if not exists proposed_start_time time without time zone,
   add column if not exists proposed_end_time time without time zone,
   add column if not exists review_status text not null default 'Pending',
@@ -64,8 +68,11 @@ grant all on public.event_change_requests to service_role;
 grant usage, select on sequence public.event_change_requests_id_seq to service_role;
 
 drop function if exists public.submit_event_change_request(bigint, uuid, text);
+drop function if exists public.submit_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone);
+drop function if exists public.submit_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, text, text, time without time zone, time without time zone);
 drop function if exists public.review_event_change_request(bigint, uuid, text, text);
 drop function if exists public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time);
+drop function if exists public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, text, text, time, time);
 drop function if exists public.cancel_event_change_request(bigint, uuid);
 
 create or replace function public.submit_event_change_request(
@@ -78,6 +85,8 @@ create or replace function public.submit_event_change_request(
   p_event_end_date date,
   p_event_capacity integer,
   p_description text,
+  p_equipment_placement text,
+  p_crowd_movement text,
   p_start_time time without time zone,
   p_end_time time without time zone
 )
@@ -136,6 +145,8 @@ begin
     or p_event_date is null or p_event_end_date is null
     or p_event_capacity is null or p_event_capacity <= 0
     or p_description is null or length(trim(p_description)) = 0
+    or p_equipment_placement is null or length(trim(p_equipment_placement)) = 0
+    or p_crowd_movement is null or length(trim(p_crowd_movement)) = 0
     or p_start_time is null or p_end_time is null then
     raise exception 'All proposed event fields are required.'
       using errcode = '22023';
@@ -156,12 +167,14 @@ begin
     event_id, organiser_id, coordinator_id, request_text,
     proposed_event_name, proposed_event_type, proposed_event_date,
     proposed_event_end_date, proposed_event_capacity, proposed_description,
+    proposed_equipment_placement, proposed_crowd_movement,
     proposed_start_time, proposed_end_time
   )
   values (
     p_event_id, p_organiser_id, event_row.coordinator_id, trim(p_request_text),
     trim(p_event_name), trim(p_event_type), p_event_date, p_event_end_date,
-    p_event_capacity, trim(p_description), p_start_time, p_end_time
+    p_event_capacity, trim(p_description), trim(p_equipment_placement), trim(p_crowd_movement),
+    p_start_time, p_end_time
   )
   returning * into change_request;
 
@@ -240,6 +253,8 @@ begin
         event_end_date = change_request.proposed_event_end_date,
         event_capacity = change_request.proposed_event_capacity,
         description = change_request.proposed_description,
+        equipment_placement = change_request.proposed_equipment_placement,
+        crowd_movement = change_request.proposed_crowd_movement,
         start_time = change_request.proposed_start_time,
         end_time = change_request.proposed_end_time
     where id = change_request.event_id;
@@ -273,7 +288,8 @@ $$;
 create or replace function public.update_event_change_request(
   p_request_id bigint, p_organiser_id uuid, p_request_text text,
   p_event_name text, p_event_type text, p_event_date date, p_event_end_date date,
-  p_event_capacity integer, p_description text, p_start_time time, p_end_time time
+  p_event_capacity integer, p_description text, p_equipment_placement text, p_crowd_movement text,
+  p_start_time time, p_end_time time
 )
 returns public.event_change_requests language plpgsql security definer set search_path = public, pg_temp
 as $$
@@ -282,11 +298,15 @@ begin
   if p_request_text is null or length(trim(p_request_text)) not between 1 and 5000 then
     raise exception 'Change requests must contain 1 to 5,000 characters.' using errcode = '22023';
   end if;
+  if p_equipment_placement is null or length(trim(p_equipment_placement)) = 0
+    or p_crowd_movement is null or length(trim(p_crowd_movement)) = 0 then
+    raise exception 'Equipment placement and crowd movement are required.' using errcode = '22023';
+  end if;
   select * into r from public.event_change_requests where id = p_request_id for update;
   if not found then raise exception 'Event change request not found.' using errcode = 'P0002'; end if;
   if r.organiser_id is distinct from p_organiser_id then raise exception 'You can only edit your own change requests.' using errcode = '42501'; end if;
   if r.review_status <> 'Pending' then raise exception 'Only pending change requests can be edited.' using errcode = '55000'; end if;
-  update public.event_change_requests set request_text=trim(p_request_text), proposed_event_name=trim(p_event_name), proposed_event_type=trim(p_event_type), proposed_event_date=p_event_date, proposed_event_end_date=p_event_end_date, proposed_event_capacity=p_event_capacity, proposed_description=trim(p_description), proposed_start_time=p_start_time, proposed_end_time=p_end_time where id=p_request_id returning * into r;
+  update public.event_change_requests set request_text=trim(p_request_text), proposed_event_name=trim(p_event_name), proposed_event_type=trim(p_event_type), proposed_event_date=p_event_date, proposed_event_end_date=p_event_end_date, proposed_event_capacity=p_event_capacity, proposed_description=trim(p_description), proposed_equipment_placement=trim(p_equipment_placement), proposed_crowd_movement=trim(p_crowd_movement), proposed_start_time=p_start_time, proposed_end_time=p_end_time where id=p_request_id returning * into r;
   perform public.emit_notifications(array[r.coordinator_id::text], format('Change request #%s was edited by the event organiser.', r.id), 'event', r.event_id::text);
   return r;
 end; $$;
@@ -306,10 +326,10 @@ begin
 end; $$;
 
 revoke all on function public.submit_event_change_request(
-  bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone
+  bigint, uuid, text, text, text, date, date, integer, text, text, text, time without time zone, time without time zone
 ) from public, anon, authenticated;
 grant execute on function public.submit_event_change_request(
-  bigint, uuid, text, text, text, date, date, integer, text, time without time zone, time without time zone
+  bigint, uuid, text, text, text, date, date, integer, text, text, text, time without time zone, time without time zone
 ) to service_role;
 
 revoke all on function public.review_event_change_request(bigint, uuid, text, text)
@@ -317,8 +337,8 @@ revoke all on function public.review_event_change_request(bigint, uuid, text, te
 grant execute on function public.review_event_change_request(bigint, uuid, text, text)
   to service_role;
 
-revoke all on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time) from public, anon, authenticated;
-grant execute on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, time, time) to service_role;
+revoke all on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, text, text, time, time) from public, anon, authenticated;
+grant execute on function public.update_event_change_request(bigint, uuid, text, text, text, date, date, integer, text, text, text, time, time) to service_role;
 revoke all on function public.cancel_event_change_request(bigint, uuid) from public, anon, authenticated;
 grant execute on function public.cancel_event_change_request(bigint, uuid) to service_role;
 

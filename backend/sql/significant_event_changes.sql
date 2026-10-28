@@ -18,15 +18,17 @@ language sql immutable set search_path = public, pg_temp as $$
     (1, 'event_name', false, false),
     (2, 'event_type', false, false),
     (3, 'description', false, false),
-    (4, 'event_date', true, true),
-    (5, 'event_end_date', true, true),
-    (6, 'start_time', true, true),
-    (7, 'end_time', true, true),
-    (8, 'event_capacity', true, false),
-    (9, 'venue_id', true, false),
-    (10, 'layout_required', true, false),
-    (11, 'facilities_required', true, false),
-    (12, 'accessibility_required', true, false)
+    (4, 'equipment_placement', false, false),
+    (5, 'crowd_movement', false, false),
+    (6, 'event_date', true, true),
+    (7, 'event_end_date', true, true),
+    (8, 'start_time', true, true),
+    (9, 'end_time', true, true),
+    (10, 'event_capacity', true, false),
+    (11, 'venue_id', true, false),
+    (12, 'layout_required', true, false),
+    (13, 'facilities_required', true, false),
+    (14, 'accessibility_required', true, false)
   ), changed as (
     select t.* from tracked t
     where case when t.field = 'event_end_date'
@@ -378,3 +380,4 @@ revoke all on function public.process_event_change_request(bigint, uuid) from pu
 grant execute on function public.process_event_change_request(bigint, uuid) to service_role;
 
 commit;
+

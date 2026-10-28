@@ -14,6 +14,7 @@ from venue_holds import (
 
 router = APIRouter()
 REJECTED = "Rejected"
+NEEDS_RECHECK = "Needs Recheck"
 
 # Event Details columns that may hold accessibility once the booking-request
 # feature writes it there; the first one present wins over the booking row.
@@ -103,7 +104,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
     status = effective_status(booking)
     if status == EXPIRED:
         raise HTTPException(409, "This hold has expired. The event coordinator must submit a new venue request.")
-    if status not in (PENDING, ON_HOLD):
+    if status not in (PENDING, ON_HOLD, NEEDS_RECHECK):
         raise HTTPException(409, f"This request has already been {status.lower()}.")
 
     # Prevent approvals if event logic overlaps (including setup/teardown buffers).
