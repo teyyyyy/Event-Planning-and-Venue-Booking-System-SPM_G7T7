@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import VenueCalendar from "./components/VenueCalendar";
 import { authenticatedFetch as fetch } from "./api";
+import { eventWindow } from "./eventTimes";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {
@@ -270,7 +271,8 @@ export default function VenueRequest({ user }) {
     }
 
     // The overlap check below needs the event's times, so don't submit without them
-    if (!selectedEvent.start_datetime || !selectedEvent.end_datetime) {
+    const requested = eventWindow(selectedEvent);
+    if (!requested) {
       setNotice({
         type: "error",
         text: "This event has no start or end time, so venue availability can't be checked. The event's timing must be set before a venue can be requested.",
@@ -301,37 +303,20 @@ export default function VenueRequest({ user }) {
       const setupMins = parseInt(venueDetails.setup_time || 0, 10);
       const teardownMins = parseInt(venueDetails.teardown_time || 0, 10);
 
-      // 2. Extract and format the requested dates directly from the selected event and expand with setup/teardown buffers
-      const reqStartStr = selectedEvent.start_datetime
-        .substring(0, 16)
-        .replace(" ", "T");
-      const reqEndStr = selectedEvent.end_datetime
-        .substring(0, 16)
-        .replace(" ", "T");
-      
-      const reqStart = new Date(reqStartStr).getTime() - setupMins * 60000;
-      const reqEnd = new Date(reqEndStr).getTime() + teardownMins * 60000;
+      // 2. Expand the selected event's times with setup/teardown buffers
+      const reqStart = requested.start.getTime() - setupMins * 60000;
+      const reqEnd = requested.end.getTime() + teardownMins * 60000;
 
-      // 3. Check for time overlaps against existing bookings and active holds, including their buffers
+      // 3. Check for time overlaps against existing bookings and active holds, including their buffers.
+      // Bookings have no times of their own; they come from the linked event.
       const clash = existingBookings.find((booking) => {
         if (!["Approved", "On Hold"].includes(booking.status)) return false;
 
-        const bStartStr = booking.start_datetime
-          ? booking.start_datetime.substring(0, 16).replace(" ", "T")
-          : booking["Event Details"]?.start_datetime
-              ?.substring(0, 16)
-              ?.replace(" ", "T");
+        const booked = eventWindow(booking["Event Details"]);
+        if (!booked) return false;
 
-        const bEndStr = booking.end_datetime
-          ? booking.end_datetime.substring(0, 16).replace(" ", "T")
-          : booking["Event Details"]?.end_datetime
-              ?.substring(0, 16)
-              ?.replace(" ", "T");
-
-        if (!bStartStr || !bEndStr) return false;
-
-        const exStart = new Date(bStartStr).getTime() - setupMins * 60000;
-        const exEnd = new Date(bEndStr).getTime() + teardownMins * 60000;
+        const exStart = booked.start.getTime() - setupMins * 60000;
+        const exEnd = booked.end.getTime() + teardownMins * 60000;
 
         return reqStart < exEnd && reqEnd > exStart;
       });
@@ -532,16 +517,12 @@ export default function VenueRequest({ user }) {
                       </td>
                       <td>{selectedEvent.event_date}</td>
                       <td>
-                        {selectedEvent.start_datetime &&
-                        selectedEvent.end_datetime ? (
+                        {selectedEvent.start_time &&
+                        selectedEvent.end_time ? (
                           <>
-                            {format12HourTime(
-                              selectedEvent.start_datetime.slice(11, 16),
-                            )}{" "}
+                            {format12HourTime(selectedEvent.start_time)}{" "}
                             -{" "}
-                            {format12HourTime(
-                              selectedEvent.end_datetime.slice(11, 16),
-                            )}
+                            {format12HourTime(selectedEvent.end_time)}
                           </>
                         ) : (
                           "—"
@@ -613,17 +594,9 @@ export default function VenueRequest({ user }) {
                   </p>
                   <p style={{ margin: "0" }}>
                     <strong>Time:</strong>{" "}
-                    {selectedEvent.start_datetime
-                      ? format12HourTime(
-                          selectedEvent.start_datetime.slice(11, 16),
-                        )
-                      : ""}
+                    {format12HourTime(selectedEvent.start_time)}
                     {" - "}
-                    {selectedEvent.end_datetime
-                      ? format12HourTime(
-                          selectedEvent.end_datetime.slice(11, 16),
-                        )
-                      : ""}
+                    {format12HourTime(selectedEvent.end_time)}
                   </p>
                 </div>
               </div>
@@ -944,35 +917,20 @@ export default function VenueRequest({ user }) {
                         </td>
                         <td>{venueName}</td>
                         <td>
-                          {req["Event Details"]?.start_datetime
-                            ? req["Event Details"].start_datetime.slice(0, 10)
-                            : ""}{" "}
+                          {req["Event Details"]?.event_date ?? ""}{" "}
                           <br />
                           <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req["Event Details"]?.start_datetime
-                              ? format12HourTime(
-                                  req["Event Details"].start_datetime.slice(
-                                    11,
-                                    16,
-                                  ),
-                                )
-                              : ""}
+                            {format12HourTime(req["Event Details"]?.start_time)}
                           </small>
                         </td>
                         <td>
-                          {req["Event Details"]?.end_datetime
-                            ? req["Event Details"].end_datetime.slice(0, 10)
-                            : ""}{" "}
+                          {/* A blank end date means a single-day event */}
+                          {req["Event Details"]?.event_end_date ||
+                            req["Event Details"]?.event_date ||
+                            ""}{" "}
                           <br />
                           <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req["Event Details"]?.end_datetime
-                              ? format12HourTime(
-                                  req["Event Details"].end_datetime.slice(
-                                    11,
-                                    16,
-                                  ),
-                                )
-                              : ""}
+                            {format12HourTime(req["Event Details"]?.end_time)}
                           </small>
                         </td>
                         <td>

@@ -102,7 +102,7 @@ def test_hold_fields_and_buffers():
     assert vh.hold_fields({"status": "On Hold", "hold_expires_at": "2099-03-01T02:00:00+00:00"}) == {
         "status": "On Hold", "hold_expires_at": "2099-03-01T10:00:00+08:00"}
     assert vh.hold_fields({"status": "Pending"}) == {"status": "Pending", "hold_expires_at": None}
-    window = vh.booking_window({}, event(1))
+    window = vh.booking_window(event(1))
     assert [t.strftime("%H:%M") for t in vh.buffered(window, {"setup_time": 60, "teardown_time": 30})] == ["09:00", "12:30"]
     assert [t.strftime("%H:%M") for t in vh.buffered(window, {"setup_minutes": 15, "turnaround_time": 5})] == ["09:45", "12:05"]
 
@@ -113,7 +113,7 @@ def test_hold_fields_and_buffers():
     steps="1. Call find_conflict with each competing booking.", kind="Edge")
 def test_find_conflict(monkeypatch):
     venue = {"venue_id": 1, "setup_time": 60, "teardown_time": 30}
-    window = vh.booking_window({}, event(1))
+    window = vh.booking_window(event(1))
     for competing, expected in (
         (booking(2, 2, "On Hold", hold_expires_at=at(days=1)), 2),
         (booking(2, 2, "Approved"), 2),
@@ -136,8 +136,8 @@ def test_find_conflict_multi_day(monkeypatch):
     retreat = {**event(9, day="2099-02-28", start="09:00:00", end="10:30:00"), "event_end_date": "2099-03-02"}
     client = world(monkeypatch, [retreat], [booking(9, 9, "On Hold", hold_expires_at=at(days=1))])
     venue = {"venue_id": 1}
-    assert vh.find_conflict(client, 1, venue, vh.booking_window({}, event(1)))["request_id"] == 9
-    assert vh.find_conflict(client, 1, venue, vh.booking_window({}, event(1, day="2099-03-05"))) is None
+    assert vh.find_conflict(client, 1, venue, vh.booking_window(event(1)))["request_id"] == 9
+    assert vh.find_conflict(client, 1, venue, vh.booking_window(event(1, day="2099-03-05"))) is None
 
 
 # ---- coordinator venue status ------------------------------------------------------------------

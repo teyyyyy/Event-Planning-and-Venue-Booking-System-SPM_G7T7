@@ -1,12 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { request } from "./api";
 import EventChangeHistory from "./EventChangeHistory";
+import { clockTime, eventWindow } from "./eventTimes";
 
 // The API returns SGT (+08:00) timestamps, so slicing the string keeps them in SGT.
 const formatDateTime = (value) =>
   typeof value === "string"
     ? `${value.replace("T", " ").slice(0, 16)} SGT`
     : "—";
+
+// Event dates and times are stored apart as SGT wall-clock values: "2026-10-03 09:00 SGT".
+const formatEventTime = (date, time) =>
+  date && time ? `${date} ${clockTime(time)} SGT` : "—";
 
 // Helper to format timestamps to 12-hour time (e.g., 10:30 AM)
 const formatTime = (ms) => {
@@ -130,8 +135,8 @@ function RequestDetail({
           </Detail>
         )}
         <Detail label="Venue">{booking.venue_name}</Detail>
-        <Detail label="Start">{formatDateTime(booking.start_datetime)}</Detail>
-        <Detail label="End">{formatDateTime(booking.end_datetime)}</Detail>
+        <Detail label="Start">{formatEventTime(booking.event_date, booking.start_time)}</Detail>
+        <Detail label="End">{formatEventTime(booking.event_end_date, booking.end_time)}</Detail>
         <Detail label="Accessibility required">
           {booking.accessibility_required ? "Yes" : "No"}
         </Detail>
@@ -370,20 +375,10 @@ export default function VenueApproval() {
           10,
         );
 
-        // Safe Date Extraction Helper to prevent undefined replace errors
+        // The event's start and end in milliseconds, or null when its times are missing or invalid
         const getEventDates = (item) => {
-          const startStr = item.start_datetime || item['Event Details']?.start_datetime;
-          const endStr = item.end_datetime || item['Event Details']?.end_datetime;
-          
-          if (!startStr || typeof startStr !== 'string' || !endStr || typeof endStr !== 'string') {
-            return null;
-          }
-          return {
-            // Replaced .substring(0, 16) with just .replace(' ', 'T')
-            // to preserve :00 seconds and +08:00 timezone for accurate parsing
-            start: new Date(startStr.replace(' ', 'T')).getTime(),
-            end: new Date(endStr.replace(' ', 'T')).getTime()
-          };
+          const times = eventWindow(item);
+          return times && { start: times.start.getTime(), end: times.end.getTime() };
         };
 
         const reqTimes = getEventDates(selected);
@@ -609,8 +604,8 @@ export default function VenueApproval() {
                   <tr key={item.request_id}>
                     <td>{item.event_name || `Event #${item.event_id}`}</td>
                     <td>{item.venue_name}</td>
-                    <td>{formatDateTime(item.start_datetime)}</td>
-                    <td>{formatDateTime(item.end_datetime)}</td>
+                    <td>{formatEventTime(item.event_date, item.start_time)}</td>
+                    <td>{formatEventTime(item.event_end_date, item.end_time)}</td>
                     <td>
                       <span
                         className={`pill status-${statusClass(item.status)}`}

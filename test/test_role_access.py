@@ -155,8 +155,6 @@ def client_for_role(monkeypatch, role):
             "coordinator_id": USER_IDS["Event Coordinator"],
             "venue_staff_id": USER_IDS["Venue Staff"], "status": "Pending",
             "created_at": "2026-09-01T00:00:00+00:00",
-            "start_datetime": "2026-10-10T09:00:00+00:00",
-            "end_datetime": "2026-10-10T17:00:00+00:00",
         }],
         "Venues": [{"venue_id": 1, "name": "Hall A"}],
         "Equipment Request": [{"request_id": 1, "event_id": 1, "status": "Submitted", "created_by": USER_IDS["Event Coordinator"]}],

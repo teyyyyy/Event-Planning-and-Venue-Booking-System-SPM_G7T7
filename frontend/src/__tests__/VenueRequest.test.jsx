@@ -9,9 +9,9 @@ import VenueRequest from '../VenueRequest';
 const USER = { id: 'c1' };
 const HALL_A = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 100, layouts: ['Theatre', 'Banquet'], facilities: ['Wi-Fi', 'Projector'], accessible: 1 };
 const HALL_B = { venue_id: 2, name: 'Hall B', location: 'Jurong', capacity: 30, layouts: ['Classroom'], facilities: ['Wi-Fi'], accessible: 0 };
-const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', start_datetime: '2026-10-01T09:00:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
-const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', start_datetime: '2026-10-02T10:00:00+08:00', end_datetime: '2026-10-02T12:00:00+08:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
-const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { start_datetime: '2026-10-01T09:30:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00' } };
+const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:00:00', end_time: '17:00:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
+const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', event_end_date: '2026-10-02', start_time: '10:00:00', end_time: '12:00:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
+const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:30:00', end_time: '17:00:00' } };
 
 function backend(o = {}) {
   const d = { venues: [HALL_A, HALL_B], events: [GALA, WORKSHOP], submitted: [], booked: [], catalogue: { setup_time: 0, teardown_time: 0 }, post: () => json({ request_id: 9 }), ...o };
@@ -180,7 +180,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-014', 'VenueRequest (submit)', 'The venue already has an approved booking overlapping the requested time.', 'An error dialog says the venue is already booked and no POST is sent.', { kind: 'Negative', pre: 'Approved booking 08:00-10:00 on the same day.', steps: '1. Choose event and venue. 2. Click "Submit Request".' },
     async () => {
-      const f = backend({ booked: [{ status: 'Approved', start_datetime: '2026-10-01 08:00:00+00', end_datetime: '2026-10-01 10:00:00+00' }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '08:00:00', end_time: '10:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -192,7 +192,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-015', 'VenueRequest (submit)', 'An approved booking ends exactly when the requested slot starts (back-to-back).', 'It is not treated as an overlap and the request is submitted.', { kind: 'Edge', pre: 'Approved booking ends 09:00; request starts 09:00.', steps: '1. Choose event and venue. 2. Submit.' },
     async () => {
-      const f = backend({ booked: [{ start_datetime: '2026-10-01 07:00:00+00', end_datetime: '2026-10-01 09:00:00+00' }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '07:00:00', end_time: '09:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -273,7 +273,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-022', 'VenueRequest (submissions)', 'Requests start just after midnight and just after noon.', 'Times render as "12:30 AM" and "12:05 PM".', { kind: 'Edge', data: '00:30 and 12:05', steps: '1. Open "My Submissions" with such times.' },
     async () => {
-      backend({ submitted: [{ ...SUBMISSION, 'Event Details': { start_datetime: '2026-10-01T00:30:00', end_datetime: '2026-10-01T12:05:00' } }] });
+      backend({ submitted: [{ ...SUBMISSION, 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '00:30:00', end_time: '12:05:00' } }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
       const row = (await screen.findByText('Gala')).closest('tr');
@@ -309,10 +309,10 @@ describe('VenueRequest', () => {
       expect(screen.queryByRole('alertdialog')).toBeNull();
     });
 
-  tc('FE-VREQ-026', 'VenueRequest (submit)', 'An existing booking only has its times on the linked event, and another booking has no times at all.',
+  tc('FE-VREQ-026', 'VenueRequest (submit)', 'One booking\'s linked event runs 16:00-18:00 and another booking has no linked event.',
     'Nested "Event Details" times are used for the overlap check; a booking without times is ignored.', { kind: 'Edge', pre: 'Pending booking whose event runs 16:00-18:00; a booking with no times.', steps: '1. Choose Gala (09:00-17:00) and Hall A. 2. Submit.' },
     async () => {
-      const f = backend({ booked: [{ status: 'Approved', 'Event Details': null }, { status: 'Approved', 'Event Details': { start_datetime: '2026-10-01 16:00:00+00', end_datetime: '2026-10-01 18:00:00+00' } }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': null }, { status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '16:00:00', end_time: '18:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -367,9 +367,9 @@ describe('VenueRequest', () => {
     async () => { backend({ submitted: () => json({}, 500) }); await ready(); expect(screen.getByText('Unable to load submitted requests.')).toBeInTheDocument(); });
 
   tc('FE-VREQ-031', 'VenueRequest (event details)', 'The coordinator selects an event that has no start or end time, picks a venue and submits.', 'The Event Details table renders with "—" as the timing; submitting shows an error that the event has no times, and neither the availability check nor the POST is sent.',
-    { kind: 'Edge', data: 'start_datetime = null, end_datetime = null', steps: '1. Select "Offsite". 2. Click "Select Venue" for Hall A. 3. Click "Submit Request".' },
+    { kind: 'Edge', data: 'start_time = null, end_time = null', steps: '1. Select "Offsite". 2. Click "Select Venue" for Hall A. 3. Click "Submit Request".' },
     async () => {
-      const f = backend({ events: [{ ...WORKSHOP, id: 3, event_name: 'Offsite', start_datetime: null, end_datetime: null }] });
+      const f = backend({ events: [{ ...WORKSHOP, id: 3, event_name: 'Offsite', start_time: null, end_time: null }] });
       await ready();
       pickEvent(3);
       const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
@@ -412,7 +412,7 @@ describe('VenueRequest', () => {
     async () => {
       const f = mockFetch((url, opts) => {
         if ((opts.method || 'GET') === 'POST') return json({ request_id: 9 });
-        if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', start_datetime: '2026-10-01 12:00:00+00', end_datetime: '2026-10-01 14:00:00+00' }]);
+        if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '12:00:00', end_time: '14:00:00' } }]);
         if (url.includes('/venue-catalogue/')) return json({ ...HALL_A, setup_time: 60, teardown_time: 60 });
         if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
         if (url.includes('/event-coordinators/')) return json([GALA]);

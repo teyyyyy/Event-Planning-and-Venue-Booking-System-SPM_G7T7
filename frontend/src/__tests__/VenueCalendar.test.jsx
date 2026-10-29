@@ -8,6 +8,7 @@ vi.mock("../api", () => ({ request }));
 
 import VenueCalendar from "../components/VenueCalendar";
 import VenueStaffCalendar from "../VenueStaffCalendar";
+import { clockTime, eventWindow } from "../eventTimes";
 
 const VENUES = [
   { venue_id: 1, name: "Hall A" },
@@ -121,10 +122,10 @@ describe("VenueCalendar", () => {
   tc(
     "FE-VCAL-004",
     "VenueCalendar",
-    "The venue has an approved booking, a pending booking and two incomplete records this week.",
-    'Each booking is drawn in its day column at its start hour, offset by its start minute and as tall as its duration; pending ones are labelled "(Pending)" and dashed; records without times are skipped and a missing event name shows "Unknown Event".',
+    "The venue has an approved booking, a pending booking and three incomplete records this week.",
+    'Each booking is drawn in its day column at its start hour, offset by its start minute and as tall as its duration; pending ones are labelled "(Pending)" and dashed; records without event times or without a linked event are skipped and a missing event name shows "Unknown Event".',
     {
-      pre: "Approved Gala Wed 09:30-11:00 (times on the booking); Pending Talk Thu 14:00-15:00 (times on the event); one booking with no times; one approved booking Fri 08:00-09:00 with no event details.",
+      pre: "Approved Gala Wed 09:30-11:00; Pending Talk Thu 14:00-15:00; one booking whose event has no times; one booking with no linked event; one approved booking Fri 08:00-09:00 whose event has no name.",
       steps: '1. Choose "Hall A".',
     },
     async () => {
@@ -132,17 +133,22 @@ describe("VenueCalendar", () => {
         {
           request_id: 1,
           status: "Approved",
-          start_datetime: "2026-10-07 09:30:00+00",
-          end_datetime: "2026-10-07 11:00:00+00",
-          "Event Details": { event_name: "Gala" },
+          "Event Details": {
+            event_name: "Gala",
+            event_date: "2026-10-07",
+            start_time: "09:30:00",
+            end_time: "11:00:00",
+          },
         },
         {
           request_id: 2,
           status: "Pending",
           "Event Details": {
             event_name: "Talk",
-            start_datetime: "2026-10-08 14:00:00",
-            end_datetime: "2026-10-08 15:00:00",
+            event_date: "2026-10-08",
+            event_end_date: "2026-10-08",
+            start_time: "14:00:00",
+            end_time: "15:00:00",
           },
         },
         {
@@ -153,9 +159,13 @@ describe("VenueCalendar", () => {
         {
           request_id: 4,
           status: "Approved",
-          start_datetime: "2026-10-09 08:00:00",
-          end_datetime: "2026-10-09 09:00:00",
+          "Event Details": {
+            event_date: "2026-10-09",
+            start_time: "08:00:00",
+            end_time: "09:00:00",
+          },
         },
+        { request_id: 7, status: "Approved", "Event Details": null },
       ]);
       render(<VenueCalendar venues={VENUES} />);
       pickVenue(1);
@@ -204,9 +214,13 @@ describe("VenueCalendar", () => {
         {
           request_id: 5,
           status: "Approved",
-          start_datetime: "2026-10-07 22:00:00",
-          end_datetime: "2026-10-08 02:00:00",
-          "Event Details": { event_name: "Night run" },
+          "Event Details": {
+            event_name: "Night run",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-08",
+            start_time: "22:00:00",
+            end_time: "02:00:00",
+          },
         },
       ]);
       render(<VenueCalendar venues={VENUES} />);
@@ -244,9 +258,12 @@ describe("VenueCalendar", () => {
         {
           request_id: 6,
           status: "Approved",
-          start_datetime: "2026-10-14 10:00:00",
-          end_datetime: "2026-10-14 11:00:00",
-          "Event Details": { event_name: "Next week" },
+          "Event Details": {
+            event_name: "Next week",
+            event_date: "2026-10-14",
+            start_time: "10:00:00",
+            end_time: "11:00:00",
+          },
         },
       ]);
       render(<VenueCalendar venues={VENUES} />);
@@ -314,9 +331,12 @@ describe("VenueCalendar", () => {
         {
           request_id: 1,
           status: "Approved",
-          start_datetime: "2026-10-07 10:00:00",
-          end_datetime: "2026-10-07 12:00:00",
-          "Event Details": { event_name: "Gala" },
+          "Event Details": {
+            event_name: "Gala",
+            event_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "12:00:00",
+          },
         },
       ]);
       render(<VenueCalendar venues={setupVenue} />);
@@ -349,9 +369,12 @@ describe("VenueCalendar", () => {
         {
           request_id: 1,
           status: "Approved",
-          start_datetime: "2026-10-07 10:00:00",
-          end_datetime: "2026-10-07 12:00:00",
-          "Event Details": { event_name: "Gala" },
+          "Event Details": {
+            event_name: "Gala",
+            event_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "12:00:00",
+          },
         },
       ]);
       render(<VenueCalendar venues={teardownVenue} />);
@@ -383,9 +406,12 @@ describe("VenueCalendar", () => {
         {
           request_id: 1,
           status: "Approved",
-          start_datetime: "2026-10-07 10:00:00",
-          end_datetime: "2026-10-07 12:00:00",
-          "Event Details": { event_name: "Short Setup" },
+          "Event Details": {
+            event_name: "Short Setup",
+            event_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "12:00:00",
+          },
         },
       ]);
       render(<VenueCalendar venues={shortVenue} />);
@@ -394,6 +420,83 @@ describe("VenueCalendar", () => {
       await waitFor(() => expect(screen.getByText("Short Setup")).toBeInTheDocument());
       expect(screen.queryByText("Setup")).not.toBeInTheDocument();
       expect(screen.queryByText("Teardown")).not.toBeInTheDocument();
+    },
+  );
+});
+
+describe("eventTimes", () => {
+  tc(
+    "FE-VCAL-013",
+    "eventWindow",
+    "An event has a start date, end date and times.",
+    "Start and end combine each date with its time as SGT wall-clock values; a blank end date ends the event on its start date.",
+    {
+      data: "2026-10-07 22:00 to 2026-10-08 02:00; 2026-10-09 08:00-09:30 with no end date",
+      steps: "1. Call eventWindow for a multi-day event. 2. Call it for a single-day event.",
+    },
+    () => {
+      const overnight = eventWindow({
+        event_date: "2026-10-07",
+        event_end_date: "2026-10-08",
+        start_time: "22:00:00",
+        end_time: "02:00:00",
+      });
+      expect(overnight).toEqual({
+        start: new Date(2026, 9, 7, 22, 0),
+        end: new Date(2026, 9, 8, 2, 0),
+      });
+      const singleDay = eventWindow({
+        event_date: "2026-10-09",
+        event_end_date: null,
+        start_time: "08:00",
+        end_time: "09:30:00",
+      });
+      expect(singleDay).toEqual({
+        start: new Date(2026, 9, 9, 8, 0),
+        end: new Date(2026, 9, 9, 9, 30),
+      });
+    },
+  );
+
+  tc(
+    "FE-VCAL-014",
+    "eventWindow",
+    "There is no event, or it is missing its date or a time, or its date is invalid.",
+    "null is returned in every case.",
+    {
+      kind: "Negative",
+      data: 'null; no event_date; no start_time; no end_time; event_date = "2026-13-45"',
+      steps: "1. Call eventWindow with each incomplete or invalid event.",
+    },
+    () => {
+      const full = {
+        event_date: "2026-10-07",
+        start_time: "09:00:00",
+        end_time: "17:00:00",
+      };
+      expect(eventWindow(null)).toBeNull();
+      expect(eventWindow({ ...full, event_date: null })).toBeNull();
+      expect(eventWindow({ ...full, start_time: null })).toBeNull();
+      expect(eventWindow({ ...full, end_time: "" })).toBeNull();
+      expect(eventWindow({ ...full, event_date: "2026-13-45" })).toBeNull();
+      expect(eventWindow({ ...full, event_end_date: "soon" })).toBeNull();
+    },
+  );
+
+  tc(
+    "FE-VCAL-015",
+    "clockTime",
+    "A stored time has seconds, has none, or is missing.",
+    'The hours and minutes are returned ("09:00"); a missing time gives "".',
+    {
+      kind: "Edge",
+      data: '"09:00:00", "14:30", null',
+      steps: "1. Call clockTime for each value.",
+    },
+    () => {
+      expect(clockTime("09:00:00")).toBe("09:00");
+      expect(clockTime("14:30")).toBe("14:30");
+      expect(clockTime(null)).toBe("");
     },
   );
 });

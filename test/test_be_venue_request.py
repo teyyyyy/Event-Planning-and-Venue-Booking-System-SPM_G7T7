@@ -1,5 +1,7 @@
 """Unit tests for backend/venue_request.py (coordinators request venues)."""
 
+from unittest import mock
+
 import pytest
 from fastapi import HTTPException
 from postgrest.exceptions import APIError
@@ -144,6 +146,20 @@ def test_by_coordinator_empty(monkeypatch):
     use(monkeypatch)
     assert vr.list_requests_by_coordinator("nobody") == []
 
+
+@tc("BE-VREQ-024", "list_requests_by_coordinator", "A coordinator's submissions are loaded with their linked events.",
+    "Each event's event_date, event_end_date, start_time and end_time are embedded; the unused start_datetime/end_datetime columns are not requested.",
+    steps="1. Call list_requests_by_coordinator(\"c1\"). 2. Inspect the columns selected.", kind="Regression")
+def test_by_coordinator_selects_split_event_times(monkeypatch):
+    client = mock.MagicMock()
+    query = client.table.return_value
+    query.select.return_value.eq.return_value.execute.return_value.data = []
+    monkeypatch.setattr(vr, "get_supabase", lambda: client)
+    vr.list_requests_by_coordinator("c1")
+    columns = query.select.call_args.args[0]
+    assert all(field in columns for field in ("event_date", "event_end_date", "start_time", "end_time"))
+    assert "datetime" not in columns
+
 @tc("BE-VREQ-016", "create_venue_booking", "A coordinator submits a booking for an event that already has a request for a DIFFERENT venue.", "A Pending row for the event and the new venue is inserted.", pre="Event 10 already has a request for venue 5.", data="event 10, venue 6, coordinator c1", steps="1. Pre-populate a booking. 2. Call create_venue_booking with a different venue.", kind="Positive")
 def test_create_different_venue_ok(monkeypatch):
     client = use(monkeypatch, {
@@ -219,17 +235,17 @@ def test_create_request_venue_became_unavailable(monkeypatch):
     assert info.value.detail == "This venue is unavailable. Refresh and select a replacement venue."
 
 
-@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking at 10:00-12:00 with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
+@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking whose event runs 10:00-12:00, with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
 def test_availability_check_includes_setup_teardown_buffer(monkeypatch):
     use(monkeypatch, {
         "Venues": [{"venue_id": 1, "setup_time": 30, "teardown_time": 30}],
+        "Event Details": [{"id": 1, "event_date": "2026-10-07", "event_end_date": "2026-10-07", "start_time": "10:00:00", "end_time": "12:00:00"}],
         BOOKING: [
             {
                 "request_id": 1,
                 "venue_id": 1,
+                "event_id": 1,
                 "status": "Approved",
-                "start_datetime": "2026-10-07T10:00:00+08:00",
-                "end_datetime": "2026-10-07T12:00:00+08:00"
             }
         ]
     })

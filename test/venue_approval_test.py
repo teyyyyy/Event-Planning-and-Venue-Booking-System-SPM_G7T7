@@ -14,7 +14,7 @@ import venue_approval  # noqa: E402
 STAFF = {"id": "staff-1"}
 BOOKING = {
     "request_id": 1, "venue_id": 1, "event_id": 10, "status": "Pending", "venue_staff_id": "staff-1",
-    "coordinator_id": "c1", "start_datetime": "2026-10-03T08:00:00+00:00", "end_datetime": "2026-10-03T18:00:00+00:00",
+    "coordinator_id": "c1",
     "accessibility_required": 1, "layout_required": "Theatre", "facilities_required": ["Parking"],
 }
 
@@ -60,23 +60,25 @@ class FakeClient:
 
 
 class ViewTests(unittest.TestCase):
-    def test_falls_back_to_booking_values_when_event_has_none(self):
+    def test_event_without_times_has_no_times_and_falls_back_for_accessibility(self):
+        # Bookings have no times of their own, so an event without times leaves them unset.
         result = venue_approval.view(BOOKING, {"event_name": "Gala"}, None, {})
-        self.assertEqual(result["start_datetime"], "2026-10-03T16:00:00+08:00")  # 08:00 UTC -> SGT
+        self.assertIsNone(result["event_date"])
+        self.assertIsNone(result["start_time"])
         self.assertTrue(result["accessibility_required"])
         self.assertEqual(result["venue_name"], "Venue 1")
 
     def test_multi_day_event_uses_end_date(self):
         event = {"event_date": "2026-10-03", "event_end_date": "2026-10-05", "start_time": "09:00:00", "end_time": "17:00:00"}
         result = venue_approval.view(BOOKING, event, None, {})
-        self.assertEqual(result["start_datetime"], "2026-10-03T09:00:00+08:00")
-        self.assertEqual(result["end_datetime"], "2026-10-05T17:00:00+08:00")
+        self.assertEqual((result["event_date"], result["start_time"]), ("2026-10-03", "09:00:00"))
+        self.assertEqual((result["event_end_date"], result["end_time"]), ("2026-10-05", "17:00:00"))
 
     def test_event_details_take_priority(self):
         event = {"event_date": "2026-10-04", "start_time": "09:00:00", "end_time": "12:00:00", "accessibility_required": False}
         result = venue_approval.view(BOOKING, event, {"venue_name": "Hall A"}, {})
-        self.assertEqual(result["start_datetime"], "2026-10-04T09:00:00+08:00")
-        self.assertEqual(result["end_datetime"], "2026-10-04T12:00:00+08:00")
+        self.assertEqual((result["event_date"], result["start_time"]), ("2026-10-04", "09:00:00"))
+        self.assertEqual((result["event_end_date"], result["end_time"]), ("2026-10-04", "12:00:00"))  # single-day
         self.assertFalse(result["accessibility_required"])
         self.assertEqual(result["venue_name"], "Hall A")
 
@@ -130,46 +132,46 @@ class DecisionTests(unittest.TestCase):
     # --- Overlap Buffer AC Tests ---
 
     def test_approve_fails_on_core_overlap(self):
-        existing = {**BOOKING, "request_id": 2, "status": "Approved", 
-                    "start_datetime": "2026-10-03T11:00:00+00:00", "end_datetime": "2026-10-03T13:00:00+00:00"}
-        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
-        
+        existing = {**BOOKING, "request_id": 2, "event_id": 20, "status": "Approved"}
+        target = {**BOOKING, "request_id": 1}
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "11:00:00", "13:00:00")]
+
         with self.assertRaises(HTTPException) as ctx:
-            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing])
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], events=events)
         self.assertEqual(ctx.exception.status_code, 409)
 
     def test_approve_fails_on_setup_buffer_overlap(self):
         # Target: 10:00 to 12:00.
         # Existing: 12:30 to 14:00, but has 60 mins setup time -> effective start 11:30. Overlaps target's end (12:00).
-        existing = {**BOOKING, "request_id": 2, "status": "Approved",
-                    "start_datetime": "2026-10-03T12:30:00+00:00", "end_datetime": "2026-10-03T14:00:00+00:00"}
-        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        existing = {**BOOKING, "request_id": 2, "event_id": 20, "status": "Approved"}
+        target = {**BOOKING, "request_id": 1}
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "12:30:00", "14:00:00")]
         venues = [{"venue_id": 1, "setup_time": 60, "teardown_time": 0}]
-        
+
         with self.assertRaises(HTTPException) as ctx:
-            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues)
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues, events=events)
         self.assertEqual(ctx.exception.status_code, 409)
 
     def test_approve_fails_on_teardown_buffer_overlap(self):
         # Target: 10:00 to 12:00.
         # Existing: 08:00 to 09:30, but has 60 mins teardown time -> effective end 10:30. Overlaps target's start (10:00).
-        existing = {**BOOKING, "request_id": 2, "status": "Approved",
-                    "start_datetime": "2026-10-03T08:00:00+00:00", "end_datetime": "2026-10-03T09:30:00+00:00"}
-        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
+        existing = {**BOOKING, "request_id": 2, "event_id": 20, "status": "Approved"}
+        target = {**BOOKING, "request_id": 1}
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "08:00:00", "09:30:00")]
         venues = [{"venue_id": 1, "setup_time": 0, "teardown_time": 60}]
-        
+
         with self.assertRaises(HTTPException) as ctx:
-            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues)
+            self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], venues=venues, events=events)
         self.assertEqual(ctx.exception.status_code, 409)
 
     def test_reject_ignores_overlaps(self):
         # Target: 10:00 to 12:00. Existing: 11:00 to 13:00. Exact same overlap as core overlap test.
-        existing = {**BOOKING, "request_id": 2, "status": "Approved", 
-                    "start_datetime": "2026-10-03T11:00:00+00:00", "end_datetime": "2026-10-03T13:00:00+00:00"}
-        target = {**BOOKING, "request_id": 1, "start_datetime": "2026-10-03T10:00:00+00:00", "end_datetime": "2026-10-03T12:00:00+00:00"}
-        
+        existing = {**BOOKING, "request_id": 2, "event_id": 20, "status": "Approved"}
+        target = {**BOOKING, "request_id": 1}
+        events = [self.event(10, "2026-10-03", "10:00:00", "12:00:00"), self.event(20, "2026-10-03", "11:00:00", "13:00:00")]
+
         # Should not raise 409, because overlap checking is skipped on rejection
-        result = self.run_decide(target, STAFF, {"status": "Rejected"}, existing_bookings=[existing])
+        result = self.run_decide(target, STAFF, {"status": "Rejected"}, existing_bookings=[existing], events=events)
         self.assertEqual(result["status"], "Rejected")
 
     # --- Times from Event Details (the live booking table has no start/end columns) ---
