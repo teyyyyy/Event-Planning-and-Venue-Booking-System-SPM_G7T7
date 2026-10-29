@@ -101,6 +101,7 @@ ROLE_ACTIONS = (
         },
         {200},
     ),
+    ("Event Organiser", "DELETE", "/api/event-organisers/{user_id}/requests/2", None, {200}),
     ("Event Coordinator", "POST", "/api/events/1/clarification-requests",
      {"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."}, {200}),
     ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
@@ -149,7 +150,9 @@ def client_for_role(monkeypatch, role):
     }
     fake = FakeClient({
         "users": users,
-        "Event Details": [event_row, {**event_row, "id": "1"}],
+        "Event Details": [event_row, {**event_row, "id": "1"}, {
+            **event_row, "id": "2", "status": "Draft",
+        }],
         "Venue Booking Requests": [{
             "request_id": 1, "venue_id": 1, "event_id": 1,
             "coordinator_id": USER_IDS["Event Coordinator"],
@@ -242,6 +245,7 @@ def assert_role_access(client, role, user_id):
 
     assert client.get(f"/api/users/{user_id}-other/role").status_code == 403
     assert client.get(f"/api/event-organisers/{user_id}-other/submitted-requests").status_code == 403
+    assert client.delete(f"/api/event-organisers/{user_id}-other/requests/2").status_code == 403
     assert client.get(f"/api/event-coordinators/{user_id}-other/events").status_code == 403
 
     for owner, method, path_template, body, allowed_statuses in ROLE_ACTIONS:
@@ -434,4 +438,3 @@ def test_event_coordinator_lead_access(monkeypatch):
 def test_safety_officer_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Safety Officer")
     assert_role_access(client, "Safety Officer", user_id)
-

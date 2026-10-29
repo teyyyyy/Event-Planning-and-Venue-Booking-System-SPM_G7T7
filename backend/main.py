@@ -56,6 +56,7 @@ app.include_router(venue_holds_router)
 
 # Database objects created by migrations, mapped to the file that creates them.
 MIGRATION_OBJECTS = {
+    "assign_event_coordinator": "coordinator_reassignment.sql",
     "coordinator_comments": "coordinator_clarification_requests.sql",
     "amendments": "coordinator_clarification_requests.sql",
     "submit_coordinator_feedback": "coordinator_clarification_requests.sql",
