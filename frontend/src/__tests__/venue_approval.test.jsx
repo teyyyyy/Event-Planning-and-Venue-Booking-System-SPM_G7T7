@@ -21,8 +21,10 @@ const booking = (o = {}) => ({
   event_name: "Gala",
   venue_id: 1,
   venue_name: "Hall A",
-  start_datetime: "2026-10-03T09:00:00+08:00",
-  end_datetime: "2026-10-05T17:00:00+08:00",
+  event_date: "2026-10-03",
+  event_end_date: "2026-10-05",
+  start_time: "09:00:00",
+  end_time: "17:00:00",
   accessibility_required: true,
   layout_required: "Theatre",
   facilities_required: ["Parking", "AV"],
@@ -143,7 +145,7 @@ describe("VenueApproval", () => {
           facilities_required: [],
           coordinator_name: null,
           event_description: null,
-          start_datetime: null,
+          start_time: null,
         }),
       ]);
       render(<VenueApproval />);
@@ -504,15 +506,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 2,
               event_name: "Approved Event",
               status: "Approved",
-              start_datetime: "2026-10-03T12:00:00+08:00",
-              end_datetime: "2026-10-03T14:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "12:00:00",
+              end_time: "14:00:00",
             }),
           ];
         return [];
@@ -583,15 +589,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 2,
               event_name: "Approved Event",
               status: "Approved",
-              start_datetime: "2026-10-03T12:00:00+08:00",
-              end_datetime: "2026-10-03T14:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "12:00:00",
+              end_time: "14:00:00",
             }),
           ];
         return [];
@@ -634,15 +644,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Core Collision Event",
               status: "Approved",
-              start_datetime: "2026-10-03T11:00:00+08:00",
-              end_datetime: "2026-10-03T13:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "11:00:00",
+              end_time: "13:00:00",
             }),
           ];
         return [];
@@ -682,15 +696,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending A",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Pending B",
               status: "Pending",
-              start_datetime: "2026-10-03T10:30:00+08:00",
-              end_datetime: "2026-10-03T12:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:30:00",
+              end_time: "12:30:00",
             }),
           ];
         return [];
@@ -717,43 +735,6 @@ describe("VenueApproval", () => {
   );
 
   tc(
-    "FE-VENUE-024",
-    "VenueApproval (overlap)",
-    "A pending request uses nested Event Details start and end datetimes.",
-    "Dates are correctly parsed from Event Details and availability is checked.",
-    {
-      steps:
-        "1. Mock request with nested Event Details timestamps. 2. Open request.",
-    },
-    async () => {
-      request.mockImplementation(async (url) => {
-        if (url === "/venues")
-          return [{ venue_id: 1, setup_time: 0, teardown_time: 0 }];
-        if (url === "/venue-booking-requests")
-          return [
-            {
-              request_id: 1,
-              status: "Pending",
-              venue_id: 1,
-              venue_name: "Hall A",
-              "Event Details": {
-                start_datetime: "2026-10-03T09:00:00+08:00",
-                end_datetime: "2026-10-03T11:00:00+08:00",
-              },
-              event_name: "Nested Event",
-            },
-          ];
-        return [];
-      });
-      render(<VenueApproval />);
-      const panel = await open();
-      expect(
-        within(panel).getByText("Venue is available for this time slot."),
-      ).toBeInTheDocument();
-    },
-  );
-
-  tc(
     "FE-VENUE-025",
     "VenueApproval (overlap)",
     "Multiple competing pending requests overlap with the selected request.",
@@ -769,22 +750,28 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Target Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Competitor A",
               status: "Pending",
-              start_datetime: "2026-10-03T10:30:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:30:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 3,
               event_name: "Competitor B",
               status: "Pending",
-              start_datetime: "2026-10-03T11:00:00+08:00",
-              end_datetime: "2026-10-03T12:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "11:00:00",
+              end_time: "12:30:00",
             }),
           ];
         return [];
@@ -822,8 +809,8 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Bad Dates Event",
               status: "Pending",
-              start_datetime: null,
-              end_datetime: null,
+              start_time: null,
+              end_time: null,
             }),
           ];
         return [];
@@ -849,7 +836,7 @@ describe("VenueApproval", () => {
       request.mockImplementation(async (url) => {
         if (url === '/venues') return [{ venue_id: 1, setup_time: 10, teardown_time: 10 }];
         if (url === '/venue-booking-requests') return [
-          booking({ request_id: 1, event_name: 'Bad Dates Event', status: 'Pending', start_datetime: null, end_datetime: null })
+          booking({ request_id: 1, event_name: 'Bad Dates Event', status: 'Pending', start_time: null, end_time: null })
         ];
         return [];
       });

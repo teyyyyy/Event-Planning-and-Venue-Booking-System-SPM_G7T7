@@ -9,7 +9,7 @@ from auth import require_venue_staff
 from coordinator_assignment import EVENT_TABLE, db
 from venue_holds import (
     APPROVED, BOOKING_TABLE, EXPIRED, ON_HOLD, PENDING, SGT, VENUE_TABLE,
-    booking_window, effective_status, event_datetime, find_conflict, to_sgt,
+    booking_window, effective_status, find_conflict, to_sgt,
 )
 
 router = APIRouter()
@@ -61,8 +61,11 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
         "event_type": event.get("event_type"),
         "event_description": event.get("description"),
         "event_capacity": event.get("event_capacity"),
-        "start_datetime": event_datetime(event, "event_date", "start_time") or to_sgt(booking.get("start_datetime")),
-        "end_datetime": event_datetime(event, "event_end_date", "end_time") or to_sgt(booking.get("end_datetime")),
+        # SGT wall-clock values, as stored on Event Details; a blank end date means a single-day event.
+        "event_date": event.get("event_date"),
+        "event_end_date": event.get("event_end_date") or event.get("event_date"),
+        "start_time": event.get("start_time"),
+        "end_time": event.get("end_time"),
         "setup_time": venue.get("setup_time"),
         "teardown_time": venue.get("teardown_time"),
         "accessibility_required": bool(accessibility),
@@ -113,7 +116,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
         if booking.get("replacement_required") or venue.get("is_available") is False:
             raise HTTPException(409, "This booking needs a replacement venue and cannot be approved.")
         event = client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"]).maybe_single().execute().data
-        requested = booking_window(booking, event)
+        requested = booking_window(event)
         conflict = find_conflict(client, booking["venue_id"], venue, requested, request_id) if requested else None
         if conflict and conflict.get("status") == ON_HOLD:
             raise HTTPException(409, "Cannot approve: Venue is on hold for another event during this time (including setup/teardown buffers).")

@@ -63,7 +63,7 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     if venue.get("is_available") is False:
         raise HTTPException(409, "This venue is unavailable. Please select another venue.")
     # A confirmed booking or an unexpired hold makes the venue unavailable for overlapping times.
-    window = booking_window({}, event)
+    window = booking_window(event)
     if window and find_conflict(supabase, booking.venue_id, venue, window):
         raise HTTPException(409, "This venue is already booked or on hold for this event's time. Please choose a different venue.")
 
@@ -112,7 +112,7 @@ def list_requests_by_coordinator(coordinator_id: str):
     client = get_supabase()
     bookings = (
         client.table(BOOKING_TABLE)
-        .select(f'*, "{EVENTS_TABLE}"(layout_required, facilities_required, accessibility_required, start_datetime, end_datetime)')
+        .select(f'*, "{EVENTS_TABLE}"(layout_required, facilities_required, accessibility_required, event_date, event_end_date, start_time, end_time)')
         .eq("coordinator_id", coordinator_id)
         .execute()
         .data or []
