@@ -134,6 +134,32 @@ def update_event_request(organiser_id: str, event_id: str, request: EventRequest
     return updated[0]
 
 
+@router.delete("/api/event-organisers/{organiser_id}/requests/{event_id}")
+def discard_event_request(organiser_id: str, event_id: str):
+    client = db()
+    event = client.table(EVENT_TABLE).select("*").eq("id", event_id).maybe_single().execute().data
+    if not event:
+        raise HTTPException(404, "Event request not found.")
+    if not organiser_owns_event(event, organiser_id):
+        raise HTTPException(403, "You can only discard your own event request.")
+    if str(event.get("status", "")).strip().lower() != "draft":
+        raise HTTPException(400, "Only draft event requests can be discarded.")
+
+    discarded = (
+        client.table(EVENT_TABLE)
+        .delete()
+        .eq("id", event_id)
+        .eq("organiser_id", organiser_id)
+        .eq("status", event["status"])
+        .select("id")
+        .execute()
+        .data
+    )
+    if not discarded:
+        raise HTTPException(409, "Event draft changed before it could be discarded.")
+    return {"message": "Event draft discarded successfully."}
+
+
 @router.post("/api/event-organisers/{organiser_id}/requests/{event_id}/submit")
 def submit_event_request(organiser_id: str, event_id: str):
     client = db()

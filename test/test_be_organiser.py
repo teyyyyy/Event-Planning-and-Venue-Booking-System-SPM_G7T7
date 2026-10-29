@@ -284,6 +284,39 @@ def test_submit_returns_nothing(use_db):
     assert err(eo.submit_event_request, "o1", 1) == (500, "Event request could not be submitted.")
 
 
+@tc("BE-ORG-058", "discard_event_request", "Owner discards their Draft.", "The draft is removed and a success message is returned.",
+    pre="Draft event 1 is owned by o1.", steps="1. Call discard_event_request(\"o1\", 1).")
+def test_discard_draft(use_db):
+    client = setup(use_db, [row(id="1")])
+    assert eo.discard_event_request("o1", "1") == {"message": "Event draft discarded successfully."}
+    assert client.tables["Event Details"] == []
+
+
+@tc("BE-ORG-059", "discard_event_request", "Event id does not exist.", "HTTP 404 \"Event request not found.\".",
+    steps="1. Call discard_event_request(\"o1\", \"99\").", kind="Negative")
+def test_discard_missing_draft(use_db):
+    setup(use_db, [row()])
+    assert err(eo.discard_event_request, "o1", "99") == (404, "Event request not found.")
+
+
+@tc("BE-ORG-060", "discard_event_request", "A different organiser tries to discard the draft.",
+    "HTTP 403 and the draft remains.", pre="Draft event 1 is owned by o1.",
+    steps="1. Call discard_event_request(\"o2\", \"1\").", kind="Security")
+def test_discard_wrong_owner(use_db):
+    client = setup(use_db, [row(id="1")])
+    assert err(eo.discard_event_request, "o2", "1")[0] == 403
+    assert client.tables["Event Details"] == [row(id="1")]
+
+
+@tc("BE-ORG-061", "discard_event_request", "Owner tries to discard an event that is not a Draft.",
+    "HTTP 400 and the event remains.", pre="Event 1 is Submitted and owned by o1.",
+    steps="1. Call discard_event_request(\"o1\", \"1\").", kind="Negative")
+def test_discard_non_draft(use_db):
+    client = setup(use_db, [row(id="1", status="Submitted")])
+    assert err(eo.discard_event_request, "o1", "1") == (400, "Only draft event requests can be discarded.")
+    assert client.tables["Event Details"] == [row(id="1", status="Submitted")]
+
+
 @tc("BE-ORG-039", "create_event_change_request", "Owner requests changes to a confirmed event assigned to a coordinator.",
     "The request is stored with its organiser, event and assigned coordinator; that coordinator receives an event notification.",
     pre="Confirmed event 1 belongs to o1 and is assigned to c1.",
