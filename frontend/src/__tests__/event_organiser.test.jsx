@@ -151,13 +151,13 @@ describe('EventOrganiser', () => {
       expect(await screen.findByText('Use a valid event date and time.')).toBeInTheDocument();
     });
 
-  tc('FE-ORG-015', 'EventOrganiser (Draft list)', 'Rows in Submitted, Draft and Approved status are returned.', 'The Create event table shows only the Draft row, with Edit as its only action.', { data: 'Submitted, Draft, Approved', steps: '1. Render three requests.' },
+  tc('FE-ORG-015', 'EventOrganiser (Draft list)', 'Rows in Submitted, Draft and Approved status are returned.', 'The Create event table shows only the Draft row, with Edit and Discard actions.', { data: 'Submitted, Draft, Approved', steps: '1. Render three requests.' },
     async () => {
       backend([row({ id: 1, event_name: 'Sub', status: 'Submitted' }), row({ id: 2, event_name: 'Dra', status: 'Draft' }), row({ id: 3, event_name: 'App', status: 'Approved' })]);
       render(<EventOrganiser />);
       await screen.findByText('Dra');
       const buttons = (n) => Array.from(screen.getByText(n).closest('tr').querySelectorAll('button')).map((b) => b.textContent);
-      expect(buttons('Dra')).toEqual(['Edit']);
+      expect(buttons('Dra')).toEqual(['Edit', 'Discard']);
       expect(screen.queryByText('Sub')).not.toBeInTheDocument();
       expect(screen.queryByText('App')).not.toBeInTheDocument();
     });
@@ -357,5 +357,93 @@ describe('EventOrganiser', () => {
       expect(screen.queryByText('Completed')).not.toBeInTheDocument();
       expect(screen.queryByText('Cancelled')).not.toBeInTheDocument();
       expect(screen.queryByText('Rejected')).not.toBeInTheDocument();
+    });
+
+  tc('FE-ORG-035', 'EventOrganiser (discard draft)', 'Organiser cancels the discard confirmation.',
+    'The confirmation closes, the draft remains listed, and no DELETE request is sent.',
+    { steps: '1. Render a Draft row. 2. Click "Discard". 3. Click "Cancel".' },
+    async () => {
+      const f = backend([row()]);
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent('Discard “Gala”?');
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+      expect(screen.getByText('Gala')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/1', 'DELETE')).toHaveLength(0);
+    });
+
+  tc('FE-ORG-036', 'EventOrganiser (discard draft)', 'Organiser confirms discarding a draft.',
+    'DELETE is sent for the selected draft, the refreshed list no longer shows it, and success is reported.',
+    { steps: '1. Render a Draft row. 2. Click "Discard". 3. Confirm "Discard draft".' },
+    async () => {
+      const drafts = [row()];
+      const f = mockFetch((url, options) => {
+        if (url.endsWith('/submitted-requests')) return json(drafts);
+        if (options.method === 'DELETE') {
+          drafts.splice(0, 1);
+          return json({ message: 'Event draft discarded successfully.' });
+        }
+        return json({});
+      });
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+      expect(await screen.findByText('No draft event requests found for this organiser.')).toBeInTheDocument();
+      expect(await screen.findByText('Event draft discarded successfully and removed from your active drafts.')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/1', 'DELETE')).toHaveLength(1);
+    });
+
+  tc('FE-ORG-037', 'EventOrganiser (discard draft)', 'The backend rejects discarding a draft.',
+    'An error is shown and the draft remains in the list.',
+    { kind: 'Negative', steps: '1. Render a Draft row. 2. Confirm discard. 3. Return 400.' },
+    async () => {
+      const f = backend([row()], () => json({ detail: 'Only draft event requests can be discarded.' }, 400));
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+      expect(await screen.findByText('Only draft event requests can be discarded.')).toBeInTheDocument();
+      expect(screen.getByText('Gala')).toBeInTheDocument();
+      expect(callsTo(f, '/submitted-requests')).toHaveLength(1);
+    });
+
+  tc('FE-ORG-038', 'EventOrganiser (discard draft)', 'The backend cannot be reached while discarding a draft.',
+    'A connection error is shown and the draft remains in the list.',
+    { kind: 'Negative', steps: '1. Render a Draft row. 2. Confirm discard. 3. Make DELETE reject.' },
+    async () => {
+      const f = backend([row()], (url) => {
+        if (url.includes('/requests/')) throw new TypeError('Failed to fetch');
+        return json({});
+      });
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+      expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
+      expect(screen.getByText('Gala')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/1', 'DELETE')).toHaveLength(1);
+    });
+
+  tc('FE-ORG-039', 'EventOrganiser (discard draft)', 'The draft is discarded but refreshing the list fails.',
+    'An error explains that the draft was discarded but the refreshed list could not be loaded.',
+    { kind: 'Negative', steps: '1. Let DELETE succeed. 2. Return 500 for the refreshed list.' },
+    async () => {
+      let lists = 0;
+      const f = mockFetch((url) => {
+        if (url.endsWith('/submitted-requests')) {
+          lists += 1;
+          return lists === 1 ? json([row()]) : json({}, 500);
+        }
+        return json({ message: 'Event draft discarded successfully.' });
+      });
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+      expect(await screen.findByText('Draft was discarded, but the refreshed event list could not be loaded.')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/1', 'DELETE')).toHaveLength(1);
     });
 });

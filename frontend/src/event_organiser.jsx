@@ -27,6 +27,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
   const [notice, setNotice] = useState(null);
   const [loadingAction, setLoadingAction] = useState(null);
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
+  const [draftToDiscard, setDraftToDiscard] = useState(null);
   const isSubmitting = loadingAction !== null;
   const organiserId = user?.id || '';
   const draftRequests = requests.filter((request) => String(request.status).trim().toLowerCase() === 'draft');
@@ -174,6 +175,37 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     setForm(emptyRequest); setEditingId(null); setIsEditingDraft(false); setNotice({ type: 'success', title: 'Draft saved', text: editingId ? 'Event draft updated successfully.' : 'Event draft saved successfully and added to the table.' }); setLoadingAction(null);
   }
 
+  async function discardDraft() {
+    if (!draftToDiscard || isSubmitting) return;
+    setLoadingAction('discard');
+    let response;
+    try {
+      response = await fetch(`${API}/event-organisers/${organiserId}/requests/${draftToDiscard.id}`, { method: 'DELETE' });
+    } catch {
+      setDraftToDiscard(null);
+      setNotice({ type: 'error', text: `Cannot reach the backend at ${API}. Start FastAPI and try again.` });
+      setLoadingAction(null);
+      return;
+    }
+    const result = await response.json();
+    if (!response.ok) {
+      setDraftToDiscard(null);
+      setNotice({ type: 'error', text: result.detail || 'Event draft could not be discarded.' });
+      setLoadingAction(null);
+      return;
+    }
+    setDraftToDiscard(null);
+    try {
+      await loadRequests();
+    } catch {
+      setNotice({ type: 'error', text: 'Draft was discarded, but the refreshed event list could not be loaded.' });
+      setLoadingAction(null);
+      return;
+    }
+    setNotice({ type: 'success', title: 'Draft discarded', text: 'Event draft discarded successfully and removed from your active drafts.' });
+    setLoadingAction(null);
+  }
+
   return <main className="shell organiser-shell">
     <aside><div className="logo">G</div><div className="side-label">EVENT ORGANISER</div></aside>
     <section className="content">
@@ -186,9 +218,11 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
       <div className="table-wrap"><table><thead><tr><th>Event</th><th>Type</th><th>Date and time</th><th>Status</th><th>Actions</th></tr></thead><tbody>{isLoadingRequests ? <tr><td className="empty" colSpan="5">Loading draft events...</td></tr> : draftRequests.length ? draftRequests.map((request) => {
         return <tr key={request.id}><td><strong>{request.event_name}</strong><br /><small>{request.event_capacity} attendee capacity</small></td><td>{request.event_type}</td><td>{dateRange(request.event_date, request.event_end_date)}<br />{request.start_time} - {request.end_time}</td><td><span className="pill">{request.status}</span></td><td>
           <button className="assign" onClick={() => editRequest(request)}>Edit</button>
+          <button className="assign" type="button" onClick={() => setDraftToDiscard(request)}>Discard</button>
         </td></tr>;
       }) : <tr><td className="empty" colSpan="5">No draft event requests found for this organiser.</td></tr>}</tbody></table></div>
-      {isSubmitting && <div className="loading-backdrop" role="status" aria-live="polite"><span className="loading-spinner" /> <span>{loadingAction === 'draft' ? 'Saving draft...' : loadingAction === 'edit' ? 'Saving changes...' : 'Submitting event...'}</span></div>}
+      {draftToDiscard && <><div className="notice-backdrop" /><div className="notice" role="alertdialog" aria-modal="true" aria-labelledby="discard-title"><div className="notice-icon">!</div><div><h2 id="discard-title">Discard draft?</h2><p>Discard “{draftToDiscard.event_name}”? This draft will be removed from your active drafts.</p><div className="discard-dialog-actions"><button className="secondary" type="button" onClick={() => setDraftToDiscard(null)} disabled={isSubmitting}>Cancel</button><button className="primary" type="button" onClick={discardDraft} disabled={isSubmitting}>{loadingAction === 'discard' ? 'Discarding...' : 'Discard draft'}</button></div></div></div></>}
+      {isSubmitting && <div className="loading-backdrop" role="status" aria-live="polite"><span className="loading-spinner" /> <span>{loadingAction === 'draft' ? 'Saving draft...' : loadingAction === 'edit' ? 'Saving changes...' : loadingAction === 'discard' ? 'Discarding draft...' : 'Submitting event...'}</span></div>}
       {notice && <><div className="notice-backdrop" /> <div className={`notice ${notice.type}`} role="alertdialog" aria-modal="true" aria-labelledby="notice-title"><div className="notice-icon">{notice.type === 'success' ? '✓' : '!'}</div><div><h2 id="notice-title">{notice.title || (notice.type === 'success' ? 'Submission successful' : 'Submission unsuccessful')}</h2><p>{notice.text}</p><button className="primary" onClick={() => setNotice(null)}>Close</button></div></div></>}
     </section>
   </main>;
