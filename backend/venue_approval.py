@@ -208,7 +208,18 @@ def alternative_venue_availability(
             conflict = find_conflict(
                 client, venue["venue_id"], venue, window, request_id,
             )
-            if conflict and conflict.get("status") == ON_HOLD:
+            # Check if this exact event already has an active request for this venue
+            active_request = (
+                client.table(BOOKING_TABLE).select("request_id")
+                .eq("event_id", event["id"])
+                .eq("venue_id", venue["venue_id"])
+                .in_("status", [APPROVED, PENDING, ON_HOLD])
+                .neq("request_id", request_id)  # ignore the current request
+                .maybe_single().execute().data
+            )
+            if active_request:
+                reason = "This event already has an active request for this venue."
+            elif conflict and conflict.get("status") == ON_HOLD:
                 reason = f"Venue is on hold until {to_sgt(conflict.get('hold_expires_at'))}."
             elif conflict:
                 reason = "A confirmed booking overlaps this event, including setup/teardown time."

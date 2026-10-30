@@ -209,6 +209,25 @@ class DecisionTests(unittest.TestCase):
         result = self.run_decide(target, STAFF, {"status": "Approved"}, existing_bookings=[existing], events=events)
         self.assertEqual(result["status"], "Approved")
 
+class AlternativeVenueAvailabilityTests(unittest.TestCase):
+    def test_alternative_venue_availability_active_request_conflict(self):
+        bookings = [
+            {"request_id": 1, "venue_id": 1, "event_id": 10, "status": "Pending", "venue_staff_id": "staff-1", "coordinator_id": "c1"},
+            {"request_id": 2, "venue_id": 2, "event_id": 10, "status": "Pending", "venue_staff_id": "staff-1", "coordinator_id": "c1"}
+        ]
+        venues = [
+            {"venue_id": 1, "name": "Hall A", "is_available": True},
+            {"venue_id": 2, "name": "Hall B", "is_available": True}
+        ]
+        events = [
+            {"id": 10, "event_date": "2026-10-03", "start_time": "09:00:00", "end_time": "17:00:00"}
+        ]
+        client = FakeClient(bookings=bookings, venues=venues, events=events)
+        with mock.patch.object(venue_approval, "db", return_value=client):
+            result = venue_approval.alternative_venue_availability(1, STAFF)
+            hall_b = next(v for v in result if v["venue_id"] == 2)
+            self.assertFalse(hall_b["available"])
+            self.assertEqual(hall_b["reason"], "This event already has an active request for this venue.")
 
 if __name__ == "__main__":
     unittest.main()
