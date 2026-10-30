@@ -4,13 +4,14 @@ import pytest
 from fastapi import HTTPException
 
 import venue_approval as va
+import venue_holds as vh
 from fake_supabase import FakeClient
 from tc import tc
 
 STAFF = {"id": "s1", "role": "venue staff"}
 BOOKING = {
     "request_id": 1, "venue_id": 5, "event_id": 10, "status": "Pending", "venue_staff_id": "s1", "coordinator_id": "c1",
-    "created_at": "2026-09-01T00:00:00+00:00", "start_datetime": "2026-10-03T08:00:00+00:00", "end_datetime": "2026-10-03T18:00:00+00:00",
+    "created_at": "2026-09-01T00:00:00+00:00",
     "accessibility_required": 1, "layout_required": "Theatre", "facilities_required": ["Parking"],
 }
 EVENT = {"id": 10, "event_name": "Gala", "event_type": "Dinner", "description": "d", "event_capacity": 100,
@@ -56,18 +57,18 @@ def test_to_sgt_none():
 
 @tc("BE-VENUE-006", "event_datetime", "Event has date and time.", "Wall-clock value is stamped with +08:00.", data="event_date 2026-10-03, start 09:00:00", steps="1. Call event_datetime(event, \"event_date\", \"start_time\").")
 def test_event_datetime():
-    assert va.event_datetime(EVENT, "event_date", "start_time") == "2026-10-03T09:00:00+08:00"
+    assert vh.event_datetime(EVENT, "event_date", "start_time") == "2026-10-03T09:00:00+08:00"
 
 
 @tc("BE-VENUE-007", "event_datetime", "End date column is missing (single-day event).", "Falls back to event_date.", data="no event_end_date", steps="1. Call event_datetime(event, \"event_end_date\", \"end_time\").", kind="Edge")
 def test_event_datetime_fallback():
     event = {"event_date": "2026-10-03", "end_time": "17:00:00"}
-    assert va.event_datetime(event, "event_end_date", "end_time") == "2026-10-03T17:00:00+08:00"
+    assert vh.event_datetime(event, "event_end_date", "end_time") == "2026-10-03T17:00:00+08:00"
 
 
 @tc("BE-VENUE-008", "event_datetime", "Time is missing.", "None is returned.", data="no start_time", steps="1. Call event_datetime on an event without a start time.", kind="Negative")
 def test_event_datetime_no_time():
-    assert va.event_datetime({"event_date": "2026-10-03"}, "event_date", "start_time") is None
+    assert vh.event_datetime({"event_date": "2026-10-03"}, "event_date", "start_time") is None
 
 
 @tc("BE-VENUE-009", "event_accessibility", "Event has accessibility_required.", "That value is returned.", data="accessibility_required = True", steps="1. Call event_accessibility.")
@@ -85,20 +86,22 @@ def test_accessibility_none():
     assert va.event_accessibility({}) is None
 
 
-@tc("BE-VENUE-012", "view", "Booking with a full event, venue and coordinator.", "Response merges booking, event, venue and coordinator; event dates are SGT and multi-day end date is honoured.",
+@tc("BE-VENUE-012", "view", "Booking with a full event, venue and coordinator.", "Response merges booking, event, venue and coordinator; the event's dates and times are returned as stored (SGT wall-clock), including the multi-day end date.",
     steps="1. Call view(BOOKING, EVENT, VENUE, users).")
 def test_view_full():
     out = va.view(BOOKING, EVENT, VENUE, {"c1": USER})
     assert (out["venue_name"], out["event_name"], out["coordinator_name"]) == ("Hall A", "Gala", "Cara")
-    assert (out["start_datetime"], out["end_datetime"]) == ("2026-10-03T09:00:00+08:00", "2026-10-05T17:00:00+08:00")
+    assert (out["event_date"], out["event_end_date"], out["start_time"], out["end_time"]) == ("2026-10-03", "2026-10-05", "09:00:00", "17:00:00")
+    assert "start_datetime" not in out and "end_datetime" not in out
     assert out["facilities_required"] == ["Parking"] and out["layout_required"] == "Theatre"
 
 
-@tc("BE-VENUE-013", "view", "Event and venue are missing.", "Booking timestamps are converted to SGT; venue name falls back to \"Venue <id>\"; event fields are None.",
+@tc("BE-VENUE-013", "view", "Event and venue are missing.", "Event dates and times are None (bookings have none of their own); venue name falls back to \"Venue <id>\"; event fields are None.",
     steps="1. Call view(BOOKING, None, None, {}).", kind="Edge")
 def test_view_fallbacks():
     out = va.view(BOOKING, None, None, {})
-    assert out["start_datetime"] == "2026-10-03T16:00:00+08:00" and out["venue_name"] == "Venue 5" and out["event_name"] is None
+    assert (out["event_date"], out["event_end_date"], out["start_time"], out["end_time"]) == (None, None, None, None)
+    assert out["venue_name"] == "Venue 5" and out["event_name"] is None
     assert out["accessibility_required"] is True
 
 
@@ -181,17 +184,19 @@ def test_decide_race(use_db):
 @tc("BE-VENUE-027", "approve_request", "Staff approves a pending request.", "Status Approved; rejection reason and alternative venue are cleared.", pre="Booking has stale rejection fields.",
     steps="1. Call approve_request(1, STAFF).")
 def test_approve(use_db):
-    client = use_db(world([{**BOOKING, "rejection_reason": "old", "alternative_venue": "old"}]), va)
+    client = use_db(world([{**BOOKING, "rejection_reason": "old", "alternative_venue_id": 6}]), va)
     out = va.approve_request(1, STAFF)
-    assert out["status"] == "Approved" and out["rejection_reason"] is None and out["alternative_venue"] is None and client.tables[va.BOOKING_TABLE][0]["rejection_reason"] is None
+    assert out["status"] == "Approved" and out["rejection_reason"] is None and out["alternative_venue_id"] is None and client.tables[va.BOOKING_TABLE][0]["rejection_reason"] is None
 
 
-@tc("BE-VENUE-028", "reject_request", "Staff rejects with reason and alternative venue.", "Status Rejected; both values trimmed and stored.", data="reason \"  Double booked \", alternative \" Hall B\"",
+@tc("BE-VENUE-028", "reject_request", "Staff rejects with reason and alternative venue.", "Status Rejected; reason and linked alternative venue are stored.", data="reason \"  Double booked \", alternative venue_id 6",
     steps="1. Call reject_request(1, RejectionDetails(...), STAFF).")
 def test_reject_details(use_db):
-    use_db(world(), va)
-    out = va.reject_request(1, va.RejectionDetails(reason="  Double booked ", alternative_venue=" Hall B"), STAFF)
-    assert (out["status"], out["rejection_reason"], out["alternative_venue"]) == ("Rejected", "Double booked", "Hall B")
+    client = use_db(world(venues=(VENUE, {"venue_id": 6, "name": "Hall B"})), va)
+    out = va.reject_request(1, va.RejectionDetails(reason="  Double booked ", alternative_venue_id=6), STAFF)
+    saved = client.tables[va.BOOKING_TABLE][0]
+    assert (out["status"], out["rejection_reason"], out["alternative_venue_id"]) == ("Alternative Offered", "Double booked", 6)
+    assert saved["alternative_venue_id"] == 6
 
 
 @tc("BE-VENUE-029", "reject_request", "Staff rejects with no body.", "Still rejected; reason and alternative are None.", data="details = None", steps="1. Call reject_request(1, None, STAFF).", kind="Edge")
@@ -242,3 +247,88 @@ def test_decide_superseded(use_db):
     client = use_db(world([{**BOOKING, "status": "Superseded"}]), va)
     assert err(va.decide, 1, STAFF, {"status": "Approved"}) == (409, "This request has already been superseded.")
     assert client.tables[va.BOOKING_TABLE][0]["status"] == "Superseded"
+
+
+@tc("BE-VENUE-036", "view", "The booking's event is a single-day event with no end date stored.",
+    "event_end_date is returned as the start date, so the request still shows when it ends.",
+    data="event_date 2026-10-03, event_end_date None, 09:00-12:00", steps="1. Call view with the single-day event.", kind="Edge")
+def test_view_single_day_end_date():
+    out = va.view(BOOKING, {**EVENT, "event_end_date": None, "end_time": "12:00:00"}, VENUE, {})
+    assert (out["event_date"], out["event_end_date"], out["end_time"]) == ("2026-10-03", "2026-10-03", "12:00:00")
+
+@tc("BE-VENUE-037", "reject_request", "An approved booking overlaps the suggested venue.", "HTTP 409 and no alternative offer is saved.", steps="1. Offer Hall B while another event has an overlapping approved booking.", kind="Negative")
+def test_alternative_offer_blocked_by_approved_overlap(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Approved"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(alternative_venue_id=6), STAFF) == (
+        409,
+        "The suggested venue is already booked during this event time.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-038", "reject_request", "A pending booking overlaps the suggested venue.", "The suggestion is accepted because pending requests do not reserve the venue.", steps="1. Offer Hall B while another event has an overlapping pending request.")
+def test_alternative_offer_ignores_pending_overlap(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Pending"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    out = va.reject_request(1, va.RejectionDetails(alternative_venue_id=6), STAFF)
+    assert out["status"] == "Alternative Offered"
+    assert out["alternative_venue_id"] == 6
+    assert len(client.tables[va.BOOKING_TABLE]) == 2
+
+
+@tc("BE-VENUE-039", "reject_request", "Event timing is missing when staff proposes an alternative venue.", "HTTP 409; no unchecked alternative is offered.", steps="1. Propose Hall B for an event without a complete date/time window.", kind="Negative")
+def test_alternative_offer_requires_event_window(use_db):
+    client = use_db(world(events=({"id": 10, "coordinator_id": "c1"},), venues=(VENUE, {"venue_id": 6, "name": "Hall B"})), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(alternative_venue_id=6), STAFF) == (
+        409,
+        "The event needs a date, start time, and end time before an alternative venue can be offered.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-040", "alternative_venue_availability", "Staff opens the alternative selector.", "The catalogue marks unavailable venues, overlapping confirmed bookings and active holds with reasons; a pending overlap remains available.", steps="1. Query alternatives for request 1.")
+def test_alternative_venue_availability_reasons(use_db):
+    on_hold_expiry = "2099-02-01T10:00:00+00:00"
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Approved"},
+        {**BOOKING, "request_id": 3, "event_id": 12, "venue_id": 7, "status": "On Hold", "hold_expires_at": on_hold_expiry},
+        {**BOOKING, "request_id": 4, "event_id": 13, "venue_id": 8, "status": "Pending"},
+    ]
+    events = (EVENT, {**EVENT, "id": 11}, {**EVENT, "id": 12}, {**EVENT, "id": 13})
+    venues = (
+        VENUE,
+        {"venue_id": 6, "name": "Confirmed Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 7, "name": "Held Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 8, "name": "Pending Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 9, "name": "Closed Hall", "is_available": False, "unavailability_reason": "Renovation"},
+    )
+    use_db(world(bookings, events=events, venues=venues), va)
+
+    statuses = {row["venue_id"]: row for row in va.alternative_venue_availability(1, STAFF)}
+
+    assert statuses[6] == {
+        "venue_id": 6,
+        "available": False,
+        "reason": "A confirmed booking overlaps this event, including setup/teardown time.",
+    }
+    assert statuses[7]["available"] is False and statuses[7]["reason"].startswith("Venue is on hold until")
+    assert statuses[8] == {"venue_id": 8, "available": True, "reason": None}
+    assert statuses[9] == {"venue_id": 9, "available": False, "reason": "Renovation"}

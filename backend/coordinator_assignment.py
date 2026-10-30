@@ -19,6 +19,7 @@ SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 
 class CoordinatorAssignment(BaseModel):
     coordinator_id: str
+    expected_coordinator_id: str | None = None
 
 class EventStatusUpdate(BaseModel):
     event_status: str
@@ -44,8 +45,19 @@ def fetch_one(query) -> dict[str, Any] | None:
     result = query.maybe_single().execute()
     return result.data if result else None
 
+def fetch_all(query_factory) -> list[dict[str, Any]]:
+    # PostgREST caps each response; a fresh builder avoids accumulating range parameters.
+    rows = []
+    page_size = 500
+    while True:
+        page = query_factory().range(len(rows), len(rows) + page_size - 1).execute().data or []
+        rows.extend(page)
+        if len(page) < page_size:
+            return rows
+
+
 def coordinator_records(client: Client) -> list[dict[str, Any]]:
-    users = client.table("users").select("id,name,role,email,active_event_count").execute().data or []
+    users = fetch_all(lambda: client.table("users").select("id,name,role,email,active_event_count").order("id"))
     return [user for user in users if str(user.get("role", "")).strip().lower() == "event coordinator"]
 
 def view(request: dict[str, Any], assignment: dict[str, Any] | None, users: dict[str, dict[str, Any]]):
@@ -169,12 +181,8 @@ def user_role(user_id: str, user: dict[str, Any] = Depends(require_path_user)):
 def unassigned_queue(user: dict[str, Any] = Depends(require_coordinator_lead)):
     client = db()
     users = client.table("users").select("id,name,role,email").execute().data or []
-    events = (
-        client.table(EVENT_TABLE).select("*")
-        .eq("status", "Submitted")
-        .order("event_date")
-        .execute().data or []
-    )
+    events = fetch_all(lambda: client.table(EVENT_TABLE).select("*")
+                       .eq("status", "Submitted").order("event_date").order("id"))
     # Keep the application-level guard as well as the database filter so stale
     # or non-null assignment values can never leak into the lead queue.
     return [
@@ -183,24 +191,37 @@ def unassigned_queue(user: dict[str, Any] = Depends(require_coordinator_lead)):
         if str(item.get("status", "")).strip().lower() == "submitted" and not item.get("coordinator_id")
     ]
 
+@router.get("/api/event-coordinator-lead/events", dependencies=[Depends(require_coordinator_lead)])
+def lead_active_events(coordinator_id: str | None = None):
+    client = db()
+    users = {str(item["id"]): item for item in coordinator_records(client)}
+    def query():
+        result = client.table(EVENT_TABLE).select("*").order("event_date").order("id")
+        return result.eq("coordinator_id", coordinator_id) if coordinator_id else result
+    events = fetch_all(query)
+    return [view(item, item, users) for item in events if is_active_status(item.get("status"))]
+
+
 @router.patch("/api/event-coordinator-lead/events/{event_id}/coordinator")
 def assign_from_unassigned_queue(event_id: str, assignment: CoordinatorAssignment, user: dict[str, Any] = Depends(require_coordinator_lead)):
     client = db()
-    event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
-    if not event or str(event.get("status", "")).strip().lower() not in {"submitted", "assigned"}:
-        raise HTTPException(409, "This event is no longer available in the assignment queue.")
-    coordinator = next((item for item in coordinator_records(client) if str(item["id"]) == str(assignment.coordinator_id)), None)
-    if not coordinator:
-        raise HTTPException(400, "Select an available event coordinator.")
-    previous_id = event.get("coordinator_id")
-    response = client.table(EVENT_TABLE).update({"coordinator_id": coordinator["id"], "status": "Assigned"}).eq("id", event_id).in_("status", ["Submitted", "Assigned"]).execute()
-    if not response.data:
-        raise HTTPException(409, "This event is no longer available in the assignment queue.")
-    if str(previous_id or "") != str(coordinator["id"]):
-        if previous_id:
-            adjust_workload(client, str(previous_id), -1)
-        adjust_workload(client, str(coordinator["id"]), 1)
-    return view(response.data[0], response.data[0], {str(coordinator["id"]): coordinator})
+    try:
+        result = client.rpc("assign_event_coordinator", {
+            "p_event_id": event_id,
+            "p_coordinator_id": assignment.coordinator_id,
+            "p_expected_coordinator_id": assignment.expected_coordinator_id,
+            "p_lead_id": user["id"],
+        }).execute()
+    except APIError as error:
+        statuses = {"P0002": 404, "42501": 403, "22023": 400, "55000": 409}
+        if error.code in statuses:
+            raise HTTPException(statuses[error.code], error.message) from error
+        raise
+    if not result.data:
+        raise HTTPException(409, "The event changed. Refresh the event list and try again.")
+    updated = result.data[0] if isinstance(result.data, list) else result.data
+    users = {str(item["id"]): item for item in coordinator_records(client)}
+    return view(updated, updated, users)
 
 # Retained for compatibility with existing organiser-side clients. New event
 # submissions do not call this helper; Lead assignment uses the endpoint above.
@@ -381,5 +402,11 @@ def coordinators(): return sorted(coordinator_records(db()), key=lambda user: us
 def coordinator_workloads():
     client = db()
     coordinators = coordinator_records(client)
-    workloads = active_workloads(client, coordinators)
-    return [{"id": item["id"], "name": item["name"], "role": item["role"], "active_event_count": workloads[item["id"]]} for item in coordinators]
+    # Count the actual assignments, rather than trusting a cached user counter.
+    workloads = {str(item["id"]): 0 for item in coordinators}
+    events = fetch_all(lambda: client.table(EVENT_TABLE).select("coordinator_id,status").order("id"))
+    for event in events:
+        coordinator_id = str(event.get("coordinator_id"))
+        if coordinator_id in workloads and is_active_status(event.get("status")):
+            workloads[coordinator_id] += 1
+    return [{"id": item["id"], "name": item["name"], "role": item["role"], "active_event_count": workloads[str(item["id"])]} for item in coordinators]

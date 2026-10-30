@@ -21,8 +21,10 @@ const booking = (o = {}) => ({
   event_name: "Gala",
   venue_id: 1,
   venue_name: "Hall A",
-  start_datetime: "2026-10-03T09:00:00+08:00",
-  end_datetime: "2026-10-05T17:00:00+08:00",
+  event_date: "2026-10-03",
+  event_end_date: "2026-10-05",
+  start_time: "09:00:00",
+  end_time: "17:00:00",
   accessibility_required: true,
   layout_required: "Theatre",
   facilities_required: ["Parking", "AV"],
@@ -143,7 +145,7 @@ describe("VenueApproval", () => {
           facilities_required: [],
           coordinator_name: null,
           event_description: null,
-          start_datetime: null,
+          start_time: null,
         }),
       ]);
       render(<VenueApproval />);
@@ -191,22 +193,29 @@ describe("VenueApproval", () => {
     "No Approve/Reject buttons; a Rejected request shows its reason and alternative venue.",
     {
       kind: "State",
-      data: 'status Rejected, reason "Double booked", alternative "Hall B"',
+      data: 'status Alternative Offered, reason "Double booked", alternative_venue_id 2',
       steps: "1. Open a rejected booking.",
     },
     async () => {
-      request.mockResolvedValue([
-        booking({
-          status: "Rejected",
-          rejection_reason: "Double booked",
-          alternative_venue: "Hall B",
-        }),
-      ]);
+      request.mockImplementation(async (url) =>
+        url === "/venues"
+          ? [{ venue_id: 2, name: "Hall B", location: "Jurong" }]
+          : [
+              booking({
+                status: "Alternative Offered",
+                rejection_reason: "Double booked",
+                alternative_venue_id: 2,
+              }),
+            ],
+      );
       render(<VenueApproval />);
       const p = within(await open());
       expect(p.queryByRole("button", { name: "Approve" })).toBeNull();
       expect(p.getByText("Double booked")).toBeInTheDocument();
       expect(p.getByText("Hall B")).toBeInTheDocument();
+      expect(
+        p.getByText(/awaiting the event coordinator's decision/i),
+      ).toBeInTheDocument();
     },
   );
 
@@ -285,7 +294,7 @@ describe("VenueApproval", () => {
     "FE-VENUE-013",
     "VenueApproval (reject)",
     "Staff confirms a rejection with reason and alternative.",
-    'POST /reject is sent with {reason, alternative_venue}; the row shows Rejected and the message "Request for Gala rejected.".',
+    'POST /reject is sent with {reason, alternative_venue_id}; the row shows Alternative Offered and the message "Request for Gala alternative offered.".',
     {
       data: 'reason "Double booked", alternative "Hall B"',
       steps:
@@ -293,13 +302,16 @@ describe("VenueApproval", () => {
     },
     async () => {
       request.mockImplementation(async (url) => {
-        if (url === "/venues") return [];
+        if (url === "/venues")
+          return [{ venue_id: 2, name: "Hall B", location: "Jurong" }];
         if (url === "/venue-booking-requests") return [booking()];
+        if (url === "/venue-booking-requests/1/alternative-venue-availability")
+          return [{ venue_id: 2, available: true, reason: null }];
         if (url === "/venue-booking-requests/1/reject")
           return booking({
-            status: "Rejected",
+            status: "Alternative Offered",
             rejection_reason: "Double booked",
-            alternative_venue: "Hall B",
+            alternative_venue_id: 2,
           });
       });
       render(<VenueApproval />);
@@ -310,13 +322,13 @@ describe("VenueApproval", () => {
         target: { value: "Double booked" },
       });
       fireEvent.change(screen.getByLabelText(/Alternative venue/), {
-        target: { value: "Hall B" },
+        target: { value: "2" },
       });
       fireEvent.click(
         screen.getByRole("button", { name: "Confirm rejection" }),
       );
       expect(
-        await screen.findByText("Request for Gala rejected."),
+        await screen.findByText("Request for Gala alternative offered."),
       ).toBeInTheDocument();
       const [path, options] = request.mock.calls.find(
         (call) => call[0] === "/venue-booking-requests/1/reject",
@@ -324,8 +336,51 @@ describe("VenueApproval", () => {
       expect(path).toBe("/venue-booking-requests/1/reject");
       expect(JSON.parse(options.body)).toEqual({
         reason: "Double booked",
-        alternative_venue: "Hall B",
+        alternative_venue_id: 2,
       });
+    },
+  );
+
+  tc(
+    "FE-VENUE-028",
+    "VenueApproval (alternative venue availability)",
+    "Staff opens the optional alternative venue selector.",
+    "Unavailable catalogue venues, confirmed overlaps and active holds are disabled with reasons; a clear venue is labeled Available.",
+    { steps: "1. Open a pending request. 2. Open Reject. 3. Inspect alternative venue options." },
+    async () => {
+      const venues = [
+        { venue_id: 1, name: "Hall A", location: "Campus" },
+        { venue_id: 2, name: "Renovation Hall", location: "West", is_available: false, unavailability_reason: "Renovation" },
+        { venue_id: 3, name: "Confirmed Hall", location: "East" },
+        { venue_id: 4, name: "Held Hall", location: "North" },
+        { venue_id: 5, name: "Available Hall", location: "South" },
+      ];
+      request.mockImplementation(async (url) => {
+        if (url === "/venues") return venues;
+        if (url === "/venue-booking-requests") return [booking()];
+        if (url === "/venue-booking-requests/1/alternative-venue-availability") {
+          return [
+            { venue_id: 1, available: true, reason: null },
+            { venue_id: 2, available: false, reason: "Renovation" },
+            { venue_id: 3, available: false, reason: "A confirmed booking overlaps this event, including setup/teardown time." },
+            { venue_id: 4, available: false, reason: "Venue is on hold until 2026-10-30 20:00 SGT." },
+            { venue_id: 5, available: true, reason: null },
+          ];
+        }
+        return [];
+      });
+      render(<VenueApproval />);
+      const panel = within(await open());
+      fireEvent.click(panel.getByRole("button", { name: "Reject…" }));
+
+      const renovation = await screen.findByRole("option", { name: /Renovation Hall.*Unavailable: Renovation/ });
+      const confirmed = screen.getByRole("option", { name: /Confirmed Hall.*A confirmed booking overlaps/ });
+      const held = screen.getByRole("option", { name: /Held Hall.*Venue is on hold until/ });
+      const available = screen.getByRole("option", { name: /Available Hall.*Available/ });
+      expect(renovation).toBeDisabled();
+      expect(confirmed).toBeDisabled();
+      expect(held).toBeDisabled();
+      expect(available).toBeEnabled();
     },
   );
 
@@ -504,15 +559,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 2,
               event_name: "Approved Event",
               status: "Approved",
-              start_datetime: "2026-10-03T12:00:00+08:00",
-              end_datetime: "2026-10-03T14:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "12:00:00",
+              end_time: "14:00:00",
             }),
           ];
         return [];
@@ -583,15 +642,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 2,
               event_name: "Approved Event",
               status: "Approved",
-              start_datetime: "2026-10-03T12:00:00+08:00",
-              end_datetime: "2026-10-03T14:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "12:00:00",
+              end_time: "14:00:00",
             }),
           ];
         return [];
@@ -634,15 +697,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Core Collision Event",
               status: "Approved",
-              start_datetime: "2026-10-03T11:00:00+08:00",
-              end_datetime: "2026-10-03T13:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "11:00:00",
+              end_time: "13:00:00",
             }),
           ];
         return [];
@@ -682,15 +749,19 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Pending A",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Pending B",
               status: "Pending",
-              start_datetime: "2026-10-03T10:30:00+08:00",
-              end_datetime: "2026-10-03T12:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:30:00",
+              end_time: "12:30:00",
             }),
           ];
         return [];
@@ -717,43 +788,6 @@ describe("VenueApproval", () => {
   );
 
   tc(
-    "FE-VENUE-024",
-    "VenueApproval (overlap)",
-    "A pending request uses nested Event Details start and end datetimes.",
-    "Dates are correctly parsed from Event Details and availability is checked.",
-    {
-      steps:
-        "1. Mock request with nested Event Details timestamps. 2. Open request.",
-    },
-    async () => {
-      request.mockImplementation(async (url) => {
-        if (url === "/venues")
-          return [{ venue_id: 1, setup_time: 0, teardown_time: 0 }];
-        if (url === "/venue-booking-requests")
-          return [
-            {
-              request_id: 1,
-              status: "Pending",
-              venue_id: 1,
-              venue_name: "Hall A",
-              "Event Details": {
-                start_datetime: "2026-10-03T09:00:00+08:00",
-                end_datetime: "2026-10-03T11:00:00+08:00",
-              },
-              event_name: "Nested Event",
-            },
-          ];
-        return [];
-      });
-      render(<VenueApproval />);
-      const panel = await open();
-      expect(
-        within(panel).getByText("Venue is available for this time slot."),
-      ).toBeInTheDocument();
-    },
-  );
-
-  tc(
     "FE-VENUE-025",
     "VenueApproval (overlap)",
     "Multiple competing pending requests overlap with the selected request.",
@@ -769,22 +803,28 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Target Event",
               status: "Pending",
-              start_datetime: "2026-10-03T10:00:00+08:00",
-              end_datetime: "2026-10-03T12:00:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:00:00",
+              end_time: "12:00:00",
             }),
             booking({
               request_id: 2,
               event_name: "Competitor A",
               status: "Pending",
-              start_datetime: "2026-10-03T10:30:00+08:00",
-              end_datetime: "2026-10-03T11:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "10:30:00",
+              end_time: "11:30:00",
             }),
             booking({
               request_id: 3,
               event_name: "Competitor B",
               status: "Pending",
-              start_datetime: "2026-10-03T11:00:00+08:00",
-              end_datetime: "2026-10-03T12:30:00+08:00",
+              event_date: "2026-10-03",
+              event_end_date: "2026-10-03",
+              start_time: "11:00:00",
+              end_time: "12:30:00",
             }),
           ];
         return [];
@@ -822,8 +862,8 @@ describe("VenueApproval", () => {
               request_id: 1,
               event_name: "Bad Dates Event",
               status: "Pending",
-              start_datetime: null,
-              end_datetime: null,
+              start_time: null,
+              end_time: null,
             }),
           ];
         return [];
@@ -844,18 +884,34 @@ describe("VenueApproval", () => {
     },
   );
 
-  tc('FE-VENUE-027', 'VenueApproval (decide)', 'Staff attempts to approve when overlapInfo has an error type.', 'Action is blocked and approval is disabled.', { steps: '1. Open a request with invalid times. 2. Inspect Approve button.' },
+  tc(
+    "FE-VENUE-027",
+    "VenueApproval (decide)",
+    "Staff attempts to approve when overlapInfo has an error type.",
+    "Action is blocked and approval is disabled.",
+    {
+      steps: "1. Open a request with invalid times. 2. Inspect Approve button.",
+    },
     async () => {
       request.mockImplementation(async (url) => {
-        if (url === '/venues') return [{ venue_id: 1, setup_time: 10, teardown_time: 10 }];
-        if (url === '/venue-booking-requests') return [
-          booking({ request_id: 1, event_name: 'Bad Dates Event', status: 'Pending', start_datetime: null, end_datetime: null })
-        ];
+        if (url === "/venues")
+          return [{ venue_id: 1, setup_time: 10, teardown_time: 10 }];
+        if (url === "/venue-booking-requests")
+          return [
+            booking({
+              request_id: 1,
+              event_name: "Bad Dates Event",
+              status: "Pending",
+              start_time: null,
+              end_time: null,
+            }),
+          ];
         return [];
       });
       render(<VenueApproval />);
       const panel = await open();
-      const approveBtn = within(panel).getByRole('button', { name: 'Approve' });
+      const approveBtn = within(panel).getByRole("button", { name: "Approve" });
       expect(approveBtn).toBeDisabled();
-    });
+    },
+  );
 });

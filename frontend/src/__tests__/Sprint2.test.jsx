@@ -110,13 +110,14 @@ tc('FE-SP2-010', 'Inbox retry', 'Initial inbox request fails.', 'The error is sh
   expect(screen.queryByRole('alert')).toBeNull();
 });
 
-tc('FE-SP2-011', 'Correct linked record', 'A venue booking notification is opened.', 'The exact booking, venue and rejection details are shown.', { steps: '1. Open notification deep link. 2. Inspect linked booking.' }, async () => {
+tc('FE-SP2-011', 'Correct linked record', 'A venue booking notification with an alternative offer is opened.', 'The booking record stores the alternative venue ID and notification details resolve it to the catalogue venue name and location.', { steps: '1. Open notification deep link. 2. Inspect linked booking and alternative venue.' }, async () => {
   window.history.replaceState(null, '', '/#notification/1');
-  request.mockImplementation(path => Promise.resolve(path.endsWith('/record') ? { type: 'venue_booking', event, record: { request_id: 7, status: 'Rejected', rejection_reason: 'Unavailable' }, venue: { name: 'Hall B', location: 'Campus' } } : [notification]));
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record') ? { type: 'venue_booking', event, record: { request_id: 7, status: 'Alternative Offered', rejection_reason: 'Unavailable', alternative_venue_id: 8 }, venue: { name: 'Hall B', location: 'Campus' }, alternative_venue_details: { venue_id: 8, name: 'Hall C', location: 'North Campus' } } : [notification]));
   render(<Notifications />);
   expect(await screen.findByText('Venue booking #7')).toBeInTheDocument();
   expect(screen.getByText('Requested venue: Hall B — Campus')).toBeInTheDocument();
   expect(screen.getByText('Reason: Unavailable')).toBeInTheDocument();
+  expect(screen.getByText('Alternative venue: Hall C — North Campus')).toBeInTheDocument();
 });
 
 tc('FE-SP2-012', 'Registration pending', 'The registration response has not arrived.', 'Repeated clicks are blocked until the response returns.', { steps: '1. Hold POST pending. 2. Click Register. 3. Check disabled action. 4. Resolve success.' }, async () => {

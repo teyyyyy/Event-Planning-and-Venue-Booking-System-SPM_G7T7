@@ -20,6 +20,7 @@ class Query:
         self.client, self.name = client, name
         self.op, self.payload = "select", None
         self.filters, self.orders, self.single = [], [], False
+        self.page = None
 
     def select(self, *_): return self
     def insert(self, payload): self.op, self.payload = "insert", payload; return self
@@ -30,6 +31,7 @@ class Query:
     def in_(self, key, values): self.filters.append(lambda r: r.get(key) in values); return self
     def lt(self, key, value): self.filters.append(lambda r: r.get(key) is not None and r[key] < value); return self
     def gt(self, key, value): self.filters.append(lambda r: r.get(key) is not None and r[key] > value); return self
+    def range(self, start, end): self.page = (start, end); return self
     def limit(self, *_): return self
     def order(self, key, desc=False): self.orders.append((key, desc)); return self
     def maybe_single(self): self.single = True; return self
@@ -62,7 +64,10 @@ class Query:
                 rows.remove(row)
             return Result(data=[dict(r) for r in matched])
         for key, desc in reversed(self.orders):
-            matched.sort(key=lambda r: (r.get(key) is None, r.get(key)), reverse=desc)
+            # Legacy HTTP fixtures contain both integer and string forms of the same ID.
+            matched.sort(key=lambda r: (r.get(key) is None, type(r.get(key)).__name__, r.get(key)), reverse=desc)
+        if self.page is not None:
+            matched = matched[self.page[0]:self.page[1] + 1]
         matched = [dict(r) for r in matched]
         if self.single:
             return Result(data=matched[0] if matched else None)
