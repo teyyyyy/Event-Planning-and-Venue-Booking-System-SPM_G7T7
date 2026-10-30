@@ -13,13 +13,24 @@ const today = new Date().toISOString().split('T')[0];
 
 function formTime(value) { return String(value ?? '').slice(0, 5); }
 function dateRange(start, end) { return end && end !== start ? `${start} to ${end}` : start; }
+function formSelections(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const serialized = value.trim();
+  const hasArrayBrackets = (serialized.startsWith('{') && serialized.endsWith('}'))
+    || (serialized.startsWith('[') && serialized.endsWith(']'));
+  return (hasArrayBrackets ? serialized.slice(1, -1) : serialized)
+    .split(',')
+    .map((item) => item.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+}
 function formFromEvent(event) {
   return Object.fromEntries(Object.keys(emptyRequest).map((key) => {
     if (key === 'event_name') return [key, event.event_name ?? event.event_title ?? ''];
     if (key === 'event_end_date') return [key, event.event_end_date ?? event.event_date ?? ''];
     if (key.endsWith('_time')) return [key, formTime(event[key])];
     if (key === 'accessibility_required') return [key, Number(event[key]) === 1 ? 1 : 0];
-    if (key === 'equipment_required' || key === 'facilities_required') return [key, Array.isArray(event[key]) ? event[key] : []];
+    if (key === 'equipment_required' || key === 'facilities_required') return [key, formSelections(event[key])];
     return [key, event[key] ?? ''];
   }));
 }
