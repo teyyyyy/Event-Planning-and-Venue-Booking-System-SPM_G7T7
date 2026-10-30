@@ -112,10 +112,20 @@ def test_is_active_none():
     data="request with organiser_id o1; assignment coordinator c2",
     steps="1. Call view(request, {\"coordinator_id\": \"c2\"}, users).")
 def test_view_with_coordinator():
-    out = ca.view({"id": 1, "event_name": "Gala", "status": "Approved", "organiser_id": "o1", "event_date": "2026-10-01"},
+    out = ca.view({
+        "id": 1, "event_name": "Gala", "status": "Approved", "organiser_id": "o1",
+        "event_date": "2026-10-01", "layout_required": "Banquet",
+        "equipment_required": ["Microphone", "Projector"],
+        "equipment_placement": "Projector at the stage.",
+        "crowd_movement": "Keep the center aisle clear.",
+        "facilities_required": ["Aircon", "Stage"], "accessibility_required": 1,
+    },
                   {"coordinator_id": "c2"}, {"c2": COORDS[1]})
     assert (out["coordinator_name"], out["coordinator_email"], out["event_status"], out["event_organiser_id"]) == ("Amy", "a@x", "Approved", "o1")
     assert out["event_title"] == out["event_name"] == "Gala"
+    assert out["equipment_required"] == ["Microphone", "Projector"]
+    assert out["facilities_required"] == ["Aircon", "Stage"]
+    assert out["accessibility_required"] == 1
 
 
 @tc("BE-COORD-011", "view", "Event has no assignment.", "Coordinator fields are None.",

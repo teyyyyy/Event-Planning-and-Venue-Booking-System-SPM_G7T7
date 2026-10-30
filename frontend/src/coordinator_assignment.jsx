@@ -77,6 +77,9 @@ function CoordinatorFeedbackDialog({ event, clarification, amendments, error, is
     ['Start time', formatTime(event.start_time)],
     ['End time', formatTime(event.end_time)],
     ['Required layout', event.layout_required],
+    ['Required equipment', event.equipment_required],
+    ['Equipment placement', event.equipment_placement],
+    ['Crowd movement', event.crowd_movement],
     ['Required facilities', event.facilities_required],
     ['Accessibility requirements', event.accessibility_required],
   ];
@@ -116,6 +119,9 @@ function CoordinatorFeedbackLogDialog({ event, onClose }) {
     ['Start time', formatTime(event.start_time)],
     ['End time', formatTime(event.end_time)],
     ['Required layout', event.layout_required],
+    ['Required equipment', event.equipment_required],
+    ['Equipment placement', event.equipment_placement],
+    ['Crowd movement', event.crowd_movement],
     ['Required facilities', event.facilities_required],
     ['Accessibility requirements', event.accessibility_required],
   ];
@@ -139,16 +145,31 @@ function CoordinatorFeedbackLogDialog({ event, onClose }) {
 function LeadEventDetailsDialog({ event, coordinators, workloads, selectedCoordinator, onCoordinatorChange, onAssign, onClose, assigning, error }) {
   const [confirming, setConfirming] = useState(false);
   const reassigning = Boolean(event.assigned_coordinator_id);
-  const details = [['Event title', event.event_title], ['Event type', event.event_type], ['Event date', event.event_date], ['Status', event.event_status], ['Capacity', event.event_capacity], ['Start time', formatTime(event.start_time)], ['End time', formatTime(event.end_time)], ['Layout required', event.layout_required], ['Facilities required', event.facilities_required], ['Accessibility requirements', event.accessibility_required]];
+  const details = [
+    ['Event title', event.event_title],
+    ['Event type', event.event_type],
+    ['Event date', event.event_date],
+    ['Status', event.event_status],
+    ['Capacity', event.event_capacity],
+    ['Start time', formatTime(event.start_time)],
+    ['End time', formatTime(event.end_time)],
+    ['Layout required', event.layout_required],
+    ['Equipment required', event.equipment_required],
+    ['Equipment placement', event.equipment_placement],
+    ['Crowd movement', event.crowd_movement],
+    ['Facilities required', event.facilities_required],
+    ['Accessibility requirements', event.accessibility_required],
+  ];
   const availableCoordinators = Array.isArray(coordinators) ? coordinators : [];
+  const availableWorkloads = Array.isArray(workloads) ? workloads : [];
   const selected = availableCoordinators.find((coordinator) => coordinator.id === selectedCoordinator);
   return <div className="feedback-backdrop"><section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="lead-event-title">
     <div className="feedback-heading"><div><p>Event #{event.id}</p><h2 id="lead-event-title">{reassigning ? 'Reassign event coordinator' : 'Review event request'}</h2></div><button className="feedback-close" type="button" aria-label="Close" onClick={onClose} disabled={assigning}>X</button></div>
     <div className="feedback-details">{details.map(([label, value]) => <label key={label}>{label}<input value={displayEventDetail(value)} readOnly /></label>)}<label className="wide">Description and planning requirements<textarea value={displayEventDetail(event.description)} readOnly rows="4" /></label></div>
     {reassigning && <p>Current coordinator: <strong>{event.coordinator_name || 'Unknown coordinator'}</strong></p>}
     {error && <p role="alert">{error}</p>}
-    {confirming && <p role="status">Reassign {event.event_title} from {event.coordinator_name || 'the current coordinator'} to {selected.name}? Both coordinators will be notified. The event status will stay unchanged.</p>}
-    <div className="form-actions"><label>{reassigning ? 'New Event Coordinator' : 'Assign Event Coordinator'}<select aria-label="Assign event coordinator" value={selectedCoordinator} disabled={assigning} onChange={(input) => { setConfirming(false); onCoordinatorChange(input.target.value); }}><option value="">Select coordinator</option>{availableCoordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name} — {workloads.find((item) => item.id === coordinator.id)?.active_event_count ?? 0} active events</option>)}</select></label><button className="primary" type="button" disabled={!selectedCoordinator || selectedCoordinator === event.assigned_coordinator_id || assigning} onClick={() => reassigning && !confirming ? setConfirming(true) : onAssign()}>{assigning ? 'Saving...' : reassigning ? confirming ? 'Confirm reassignment' : 'Review reassignment' : 'Assign coordinator'}</button><button className="secondary" type="button" onClick={onClose} disabled={assigning}>Cancel</button></div>
+    {confirming && selected && <p role="status">Reassign {event.event_title} from {event.coordinator_name || 'the current coordinator'} to {selected.name}? Both coordinators will be notified. The event status will stay unchanged.</p>}
+    <div className="form-actions"><label>{reassigning ? 'New Event Coordinator' : 'Assign Event Coordinator'}<select aria-label="Assign event coordinator" value={selectedCoordinator} disabled={assigning} onChange={(input) => { setConfirming(false); onCoordinatorChange(input.target.value); }}><option value="">Select coordinator</option>{availableCoordinators.map((coordinator) => { const activeCount = availableWorkloads.find((item) => item.id === coordinator.id)?.active_event_count ?? 0; return <option key={coordinator.id} value={coordinator.id}>{coordinator.name} — {activeCount} active event{activeCount === 1 ? '' : 's'}</option>; })}</select></label><button className="primary" type="button" disabled={!selectedCoordinator || selectedCoordinator === event.assigned_coordinator_id || assigning} onClick={() => reassigning && !confirming ? setConfirming(true) : onAssign()}>{assigning ? 'Saving...' : reassigning ? confirming ? 'Confirm reassignment' : 'Review reassignment' : 'Assign coordinator'}</button><button className="secondary" type="button" onClick={onClose} disabled={assigning}>Cancel</button></div>
   </section></div>;
 }
 
@@ -167,7 +188,7 @@ function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChange
     <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
   </tr>
   {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
-  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>No event requests found.</td></tr>;
+  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>Loading Event Request...</td></tr>;
 }
 
 function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError, onProcess, processingChangeRequestId }) {
@@ -265,6 +286,7 @@ export default function CoordinatorAssignment({ user }) {
   const leadLoadId = useRef(0);
   const [leadSelectedCoordinator, setLeadSelectedCoordinator] = useState('');
   const [isAssigningLeadEvent, setIsAssigningLeadEvent] = useState(false);
+  const [leadAssignmentError, setLeadAssignmentError] = useState('');
   const [message, setMessage] = useState('');
   const [changeRequestEvent, setChangeRequestEvent] = useState(null);
   const [changeProposal, setChangeProposal] = useState(EMPTY_PROPOSAL);
@@ -679,7 +701,7 @@ export default function CoordinatorAssignment({ user }) {
         <div className="form-actions"><button className="primary" type="submit" disabled={!changeRequestText.trim() || isSubmittingChangeRequest}>{isSubmittingChangeRequest ? (editingChangeRequestId !== null ? 'Saving...' : 'Sending request...') : editingChangeRequestId !== null ? 'Save change request' : 'Send for coordinator approval'}</button><button className="secondary" type="button" onClick={cancelChangeRequest} disabled={isSubmittingChangeRequest}>Cancel</button></div>
       </form>}
       {isCoordinator && feedbackEvent && <CoordinatorFeedbackDialog event={feedbackEvent} clarification={feedbackClarification} amendments={feedbackAmendments} error={feedbackError} isSubmitting={isSubmittingFeedback} onChange={changeCoordinatorFeedback} onClose={closeCoordinatorFeedback} onSubmit={submitCoordinatorFeedback} />}
-      {isLead && leadDetailEvent && <LeadEventDetailsDialog event={leadDetailEvent} coordinators={coordinators} workloads={coordinatorWorkloads} error={leadAssignmentError} selectedCoordinator={leadSelectedCoordinator} onCoordinatorChange={setLeadSelectedCoordinator} onAssign={assignLeadEvent} onClose={() => setLeadDetailEvent(null)} assigning={isAssigningLeadEvent} />}
+      {isLead && leadDetailEvent && <LeadEventDetailsDialog event={leadDetailEvent} coordinators={coordinators} workloads={coordinatorWorkloads} selectedCoordinator={leadSelectedCoordinator} onCoordinatorChange={setLeadSelectedCoordinator} onAssign={assignLeadEvent} onClose={() => setLeadDetailEvent(null)} assigning={isAssigningLeadEvent} error={leadAssignmentError} />}
       {isOrganiser && feedbackLogEvent && <CoordinatorFeedbackLogDialog event={feedbackLogEvent} onClose={() => setFeedbackLogEvent(null)} />}
     </section>
   </main>;

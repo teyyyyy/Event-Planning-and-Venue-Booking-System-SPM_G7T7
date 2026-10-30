@@ -82,7 +82,10 @@ def test_http_create_draft(monkeypatch):
     monkeypatch.setattr(eo, "db", lambda: fake)
     monkeypatch.setitem(main.app.dependency_overrides, current_user, lambda: {"id": "o1", "role": "Event Organiser"})
     body = {"event_name": "Gala", "event_type": "Workshop", "event_date": (date.today() + timedelta(days=3)).isoformat(),
-            "event_capacity": 10, "description": "d", "start_time": "09:00", "end_time": "17:00"}
+            "event_capacity": 10, "description": "d", "start_time": "09:00", "end_time": "17:00",
+            "layout_required": "Banquet", "equipment_required": ["Microphone"],
+            "accessibility_required": 0, "equipment_placement": "Near the stage.",
+            "crowd_movement": "Keep the center aisle clear.", "facilities_required": ["Aircon"]}
     response = client.post("/api/event-organisers/o1/requests", json=body)
     assert response.status_code == 200 and response.json()["status"] == "Draft"
 

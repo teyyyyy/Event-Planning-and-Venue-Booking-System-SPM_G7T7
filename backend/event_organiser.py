@@ -5,7 +5,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
@@ -23,6 +23,16 @@ SUPABASE_URL = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 EVENT_TABLE = "Event Details"
 EDITABLE_ORGANISER_STATUSES = {"draft", "submitted"}
+LAYOUT_OPTIONS = {"Banquet", "Boardroom", "U-shape", "Theatre", "Classroom"}
+EQUIPMENT_OPTIONS = {
+    "Microphone", "Speaker", "Spotlight", "Projector", "Laptop",
+    "Extension cord", "Mixing console", "Video camera", "Tripod", "LED display",
+}
+FACILITY_OPTIONS = {
+    "Aircon", "Breakout Room", "Catering Area", "Dance Floor", "Dining Area",
+    "Restrooms", "Green Room", "Stage", "Dressing Room", "Loading Bay",
+    "Parking", "Registration Desk", "Reception Area",
+}
 
 
 class EventRequest(BaseModel):
@@ -34,6 +44,12 @@ class EventRequest(BaseModel):
     description: str
     start_time: str
     end_time: str
+    layout_required: str = Field(min_length=1)
+    equipment_required: list[str] = Field(min_length=1)
+    accessibility_required: int = Field(ge=0, le=1)
+    equipment_placement: str = Field(min_length=1)
+    crowd_movement: str = Field(min_length=1)
+    facilities_required: list[str] = Field(min_length=1)
 
 
 class EventRequestUpdate(EventRequest):
@@ -42,6 +58,12 @@ class EventRequestUpdate(EventRequest):
 
 class EventChangeRequest(EventRequest):
     request_text: str
+    layout_required: str = ""
+    equipment_required: list[str] = Field(default_factory=list)
+    accessibility_required: int = Field(default=0, ge=0, le=1)
+    equipment_placement: str = ""
+    crowd_movement: str = ""
+    facilities_required: list[str] = Field(default_factory=list)
 
 
 def db() -> Client:
@@ -67,7 +89,11 @@ def organiser_owns_event(event: dict[str, Any], organiser_id: str) -> bool:
     return str(event.get("organiser_id")) == organiser_id
 
 
-def validate_request(request: EventRequest, allow_past_date: bool = False) -> None:
+def validate_request(
+    request: EventRequest,
+    allow_past_date: bool = False,
+    require_planning_details: bool = True,
+) -> None:
     try:
         event_date = date.fromisoformat(request.event_date)
         event_end_date = date.fromisoformat(request.event_end_date or request.event_date)
@@ -83,6 +109,23 @@ def validate_request(request: EventRequest, allow_past_date: bool = False) -> No
         raise HTTPException(400, "End date cannot be before the start date.")
     if event_end_date == event_date and end_time <= start_time:
         raise HTTPException(400, "End time must be later than the start time.")
+    if require_planning_details:
+        if not request.layout_required.strip():
+            raise HTTPException(400, "Select a layout.")
+        if not request.equipment_required:
+            raise HTTPException(400, "Select at least one required equipment item.")
+        if not request.equipment_placement.strip():
+            raise HTTPException(400, "Enter the equipment placement.")
+        if not request.crowd_movement.strip():
+            raise HTTPException(400, "Enter the crowd movement plan.")
+        if not request.facilities_required:
+            raise HTTPException(400, "Select at least one required facility.")
+    if request.layout_required and request.layout_required not in LAYOUT_OPTIONS:
+        raise HTTPException(400, "Select a valid event layout.")
+    if not set(request.equipment_required).issubset(EQUIPMENT_OPTIONS):
+        raise HTTPException(400, "Select valid required equipment.")
+    if not set(request.facilities_required).issubset(FACILITY_OPTIONS):
+        raise HTTPException(400, "Select valid required facilities.")
 
 
 @router.get("/api/event-organisers/{organiser_id}/submitted-requests")
@@ -187,7 +230,7 @@ def create_event_change_request(organiser_id: str, event_id: int, request: Event
         raise HTTPException(400, "Describe the changes you are requesting.")
     if len(request_text) > 5000:
         raise HTTPException(400, "Change requests must be 5,000 characters or fewer.")
-    validate_request(request, allow_past_date=True)
+    validate_request(request, allow_past_date=True, require_planning_details=False)
     proposal = request_data(request)
 
     try:
@@ -225,7 +268,7 @@ def create_event_change_request(organiser_id: str, event_id: int, request: Event
 @router.patch("/api/event-organisers/{organiser_id}/change-requests/{request_id}")
 def update_event_change_request(organiser_id: str, request_id: int, request: EventChangeRequest):
     request_text = request.request_text.strip()
-    validate_request(request, allow_past_date=True)
+    validate_request(request, allow_past_date=True, require_planning_details=False)
     try:
         result = db().rpc("update_event_change_request", {
             "p_request_id": request_id, "p_organiser_id": organiser_id, "p_request_text": request_text,
