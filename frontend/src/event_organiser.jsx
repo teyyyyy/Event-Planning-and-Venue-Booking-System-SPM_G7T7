@@ -1,15 +1,28 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { authenticatedFetch as fetch } from './api';
 
 const API = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api').replace(/\/$/, '');
-const emptyRequest = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
+const emptyRequest = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '', layout_required: '', equipment_required: [], accessibility_required: '', equipment_placement: '', crowd_movement: '', facilities_required: [] };
 export const eventTypes = ['Conference', 'Workshop', 'Seminar', 'Training', 'Meeting', 'Networking', 'Exhibition', 'Social event', 'Other'];
 export const capacityOptions = [{ label: '1-25 attendees', value: 25 }, { label: '26-50 attendees', value: 50 }, { label: '51-100 attendees', value: 100 }, { label: '101-250 attendees', value: 250 }, { label: '251-500 attendees', value: 500 }, { label: '501-1000 attendees', value: 1000 }, { label: 'More than 1000 attendees', value: 1001 }];
 export const timeOptions = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, '0')}:00`);
+export const layoutOptions = ['Banquet', 'Boardroom', 'U-shape', 'Theatre', 'Classroom'];
+export const equipmentOptions = ['Microphone', 'Speaker', 'Spotlight', 'Projector', 'Laptop', 'Extension cord', 'Mixing console', 'Video camera', 'Tripod', 'LED display'];
+export const facilityOptions = ['Aircon', 'Breakout Room', 'Catering Area', 'Dance Floor', 'Dining Area', 'Restrooms', 'Green Room', 'Stage', 'Dressing Room', 'Loading Bay', 'Parking', 'Registration Desk', 'Reception Area'];
 const today = new Date().toISOString().split('T')[0];
 
 function formTime(value) { return String(value ?? '').slice(0, 5); }
 function dateRange(start, end) { return end && end !== start ? `${start} to ${end}` : start; }
+function formFromEvent(event) {
+  return Object.fromEntries(Object.keys(emptyRequest).map((key) => {
+    if (key === 'event_name') return [key, event.event_name ?? event.event_title ?? ''];
+    if (key === 'event_end_date') return [key, event.event_end_date ?? event.event_date ?? ''];
+    if (key.endsWith('_time')) return [key, formTime(event[key])];
+    if (key === 'accessibility_required') return [key, Number(event[key]) === 1 ? 1 : 0];
+    if (key === 'equipment_required' || key === 'facilities_required') return [key, Array.isArray(event[key]) ? event[key] : []];
+    return [key, event[key] ?? ''];
+  }));
+}
 // Single-day events store the same end date; older rows may have none.
 function scheduleError(form) {
   const endDate = form.event_end_date || form.event_date;
@@ -19,6 +32,7 @@ function scheduleError(form) {
 }
 
 export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
+  const formElement = useRef(null);
   const [requests, setRequests] = useState([]);
   const [form, setForm] = useState(emptyRequest);
   const [editingId, setEditingId] = useState(null);
@@ -49,24 +63,53 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     if (!editingEvent) return;
     setEditingId(editingEvent.id);
     setIsEditingDraft(String(editingEvent.status ?? editingEvent.event_status ?? '').trim().toLowerCase() === 'draft');
-    setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [
-      key,
-      key === 'event_name'
-        ? (editingEvent.event_name ?? editingEvent.event_title ?? '')
-        : key === 'event_end_date'
-          ? (editingEvent.event_end_date ?? editingEvent.event_date ?? '')
-          : (editingEvent[key] ?? ''),
-    ])));
+    setForm(formFromEvent(editingEvent));
     onEditComplete?.();
   }, [editingEvent, onEditComplete]);
 
-  function change(event) { setForm({ ...form, [event.target.name]: event.target.value }); }
+  function change(event) {
+    const { name, type, value, checked, multiple, selectedOptions } = event.target;
+    setForm((current) => {
+      if (type === 'checkbox' && (name === 'equipment_required' || name === 'facilities_required')) {
+        const selected = current[name];
+        return {
+          ...current,
+          [name]: checked
+            ? [...selected, value]
+            : selected.filter((item) => item !== value),
+        };
+      }
+      const nextValue = type === 'checkbox'
+        ? Number(checked)
+        : type === 'radio' && name === 'accessibility_required'
+          ? Number(value)
+        : multiple
+          ? Array.from(selectedOptions, (option) => option.value)
+          : value;
+      return { ...current, [name]: nextValue };
+    });
+  }
 
   function editRequest(request) {
     setEditingId(request.id);
     setIsEditingDraft(true);
-    setForm(Object.fromEntries(Object.keys(emptyRequest).map((key) => [key, key.endsWith('_time') ? formTime(request[key]) : key === 'event_end_date' ? (request[key] ?? request.event_date ?? '') : request[key] ?? ''])));
+    setForm(formFromEvent(request));
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function validateRequiredFields() {
+    if (!formElement.current.reportValidity()) return false;
+    if (form.equipment_required.length === 0) {
+      setNotice({ type: 'error', text: 'Select at least one required equipment item.' });
+      formElement.current.querySelector('[name="equipment_required"]').focus();
+      return false;
+    }
+    if (form.facilities_required.length === 0) {
+      setNotice({ type: 'error', text: 'Select at least one required facility.' });
+      formElement.current.querySelector('[name="facilities_required"]').focus();
+      return false;
+    }
+    return true;
   }
 
   async function saveChanges(event) {
@@ -74,6 +117,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     if (isSubmitting) return;
     const scheduleProblem = scheduleError(form);
     if (scheduleProblem) return setNotice({ type: 'error', text: scheduleProblem });
+    if (!validateRequiredFields()) return;
     setLoadingAction('edit');
     let response;
     try {
@@ -104,6 +148,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     if (isSubmitting) return;
     const scheduleProblem = scheduleError(form);
     if (scheduleProblem) return setNotice({ type: 'error', text: scheduleProblem });
+    if (!validateRequiredFields()) return;
     setLoadingAction('submit');
     let response;
     let draftUpdated = false;
@@ -145,6 +190,7 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
 
   async function saveDraft() {
     if (isSubmitting) return;
+    if (!validateRequiredFields()) return;
     setLoadingAction('draft');
     let response;
     try {
@@ -210,9 +256,36 @@ export default function EventOrganiser({ user, editingEvent, onEditComplete }) {
     <aside><div className="logo">G</div><div className="side-label">EVENT ORGANISER</div></aside>
     <section className="content">
       <header><div><p className="kicker">Gather / Planning desk</p><h1>Event requests</h1></div><span className="live">● Supabase connected</span></header>
-      <form className="request-form" onSubmit={editingId && !isEditingDraft ? saveChanges : submitForm}>
+      <form ref={formElement} className="request-form" onSubmit={editingId && !isEditingDraft ? saveChanges : submitForm}>
         <div className="form-heading"><div><h2>{editingId ? 'Update event request' : 'Create event request'}</h2><p>Capture the details ConnectSphere needs to plan your event.</p></div><div className="form-actions">{(!editingId || isEditingDraft) && <button className="secondary" type="button" onClick={saveDraft} disabled={isSubmitting}>{loadingAction === 'draft' ? <span className="spinner" aria-label="Saving draft" /> : 'Save draft'}</button>}<button className="primary" type="submit" disabled={isSubmitting}>{loadingAction === 'submit' || loadingAction === 'edit' ? <span className="spinner" aria-label={editingId && !isEditingDraft ? 'Saving changes' : 'Submitting request'} /> : (editingId && !isEditingDraft ? 'Save changes' : 'Submit request')}</button></div></div>
-        <div className="form-grid"><label>Event name<input name="event_name" value={form.event_name} onChange={change} required /></label><label>Event type<select name="event_type" value={form.event_type} onChange={change} required><option value="">Select event type</option>{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label>Start date<input name="event_date" type="date" min={today} value={form.event_date} onChange={change} required /></label><label>End date<input name="event_end_date" type="date" min={form.event_date || today} value={form.event_end_date} onChange={change} required /></label><label>Capacity<select name="event_capacity" value={form.event_capacity} onChange={change} required><option value="">Select capacity</option>{capacityOptions.map(({ label, value }) => <option key={value} value={value}>{label}</option>)}</select></label><label>Start time<select name="start_time" value={form.start_time} onChange={change} required><option value="">Select start time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label>End time<select name="end_time" value={form.end_time} onChange={change} required><option value="">Select end time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label><label className="wide">Description and planning requirements<textarea name="description" value={form.description} onChange={change} required rows="6" placeholder="Include the purpose, venue requirements, accessibility needs, equipment requirements, and registration needs." /></label></div>
+        <div className="form-grid">
+          <label>Event name<input name="event_name" value={form.event_name} onChange={change} required /></label>
+          <label>Event type<select name="event_type" value={form.event_type} onChange={change} required><option value="">Select event type</option>{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+          <label>Start date<input name="event_date" type="date" min={today} value={form.event_date} onChange={change} required /></label>
+          <label>End date<input name="event_end_date" type="date" min={form.event_date || today} value={form.event_end_date} onChange={change} required /></label>
+          <label>Capacity<select name="event_capacity" value={form.event_capacity} onChange={change} required><option value="">Select capacity</option>{capacityOptions.map(({ label, value }) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>Start time<select name="start_time" value={form.start_time} onChange={change} required><option value="">Select start time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+          <label>End time<select name="end_time" value={form.end_time} onChange={change} required><option value="">Select end time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+          <label>Layout required<select name="layout_required" value={form.layout_required} onChange={change} required><option value="">Select a layout</option>{layoutOptions.map((layout) => <option key={layout} value={layout}>{layout}</option>)}</select></label>
+          <fieldset className="choice-group">
+            <legend>Equipment required <span aria-hidden="true">*</span></legend>
+            <div className="checkbox-options">{equipmentOptions.map((equipment) => <label className="checkbox-option" key={equipment}><input type="checkbox" name="equipment_required" value={equipment} checked={form.equipment_required.includes(equipment)} onChange={change} />{equipment}</label>)}</div>
+          </fieldset>
+          <fieldset className="choice-group">
+            <legend>Facilities required <span aria-hidden="true">*</span></legend>
+            <div className="checkbox-options">{facilityOptions.map((facility) => <label className="checkbox-option" key={facility}><input type="checkbox" name="facilities_required" value={facility} checked={form.facilities_required.includes(facility)} onChange={change} />{facility}</label>)}</div>
+          </fieldset>
+          <fieldset className="choice-group">
+            <legend>Accessibility required <span aria-hidden="true">*</span></legend>
+            <div className="radio-options">
+              <label className="radio-option"><input name="accessibility_required" type="radio" value="1" checked={form.accessibility_required === 1} onChange={change} required />Yes</label>
+              <label className="radio-option"><input name="accessibility_required" type="radio" value="0" checked={form.accessibility_required === 0} onChange={change} required />No</label>
+            </div>
+          </fieldset>
+          <label>Equipment placement<textarea name="equipment_placement" value={form.equipment_placement} onChange={change} required rows="4" placeholder="Describe where equipment should be placed." /></label>
+          <label>Crowd movement<textarea name="crowd_movement" value={form.crowd_movement} onChange={change} required rows="4" placeholder="Describe the planned crowd flow." /></label>
+          <label className="wide">Description and planning requirements<textarea name="description" value={form.description} onChange={change} required rows="6" placeholder="Additional comments or description of the event" /></label>
+        </div>
       </form>
       {message && <p className="message">{message}</p>}
       <div className="table-wrap"><table><thead><tr><th>Event</th><th>Type</th><th>Date and time</th><th>Status</th><th>Actions</th></tr></thead><tbody>{isLoadingRequests ? <tr><td className="empty" colSpan="5">Loading draft events...</td></tr> : draftRequests.length ? draftRequests.map((request) => {

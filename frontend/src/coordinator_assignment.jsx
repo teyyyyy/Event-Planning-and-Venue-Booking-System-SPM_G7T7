@@ -77,6 +77,9 @@ function CoordinatorFeedbackDialog({ event, clarification, amendments, error, is
     ['Start time', formatTime(event.start_time)],
     ['End time', formatTime(event.end_time)],
     ['Required layout', event.layout_required],
+    ['Required equipment', event.equipment_required],
+    ['Equipment placement', event.equipment_placement],
+    ['Crowd movement', event.crowd_movement],
     ['Required facilities', event.facilities_required],
     ['Accessibility requirements', event.accessibility_required],
   ];
@@ -116,6 +119,9 @@ function CoordinatorFeedbackLogDialog({ event, onClose }) {
     ['Start time', formatTime(event.start_time)],
     ['End time', formatTime(event.end_time)],
     ['Required layout', event.layout_required],
+    ['Required equipment', event.equipment_required],
+    ['Equipment placement', event.equipment_placement],
+    ['Crowd movement', event.crowd_movement],
     ['Required facilities', event.facilities_required],
     ['Accessibility requirements', event.accessibility_required],
   ];
@@ -137,7 +143,7 @@ function CoordinatorFeedbackLogDialog({ event, onClose }) {
 }
 
 function LeadEventDetailsDialog({ event, coordinators, selectedCoordinator, onCoordinatorChange, onAssign, onClose, assigning }) {
-  const details = [['Event title', event.event_title], ['Event type', event.event_type], ['Event date', event.event_date], ['Status', event.event_status], ['Capacity', event.event_capacity], ['Start time', formatTime(event.start_time)], ['End time', formatTime(event.end_time)], ['Layout required', event.layout_required], ['Facilities required', event.facilities_required], ['Accessibility requirements', event.accessibility_required]];
+  const details = [['Event title', event.event_title], ['Event type', event.event_type], ['Event date', event.event_date], ['Status', event.event_status], ['Capacity', event.event_capacity], ['Start time', formatTime(event.start_time)], ['End time', formatTime(event.end_time)], ['Layout required', event.layout_required], ['Equipment required', event.equipment_required], ['Equipment placement', event.equipment_placement], ['Crowd movement', event.crowd_movement], ['Facilities required', event.facilities_required], ['Accessibility requirements', event.accessibility_required]];
   const availableCoordinators = Array.isArray(coordinators) ? coordinators : [];
   return <div className="feedback-backdrop"><section className="feedback-dialog" role="dialog" aria-modal="true" aria-labelledby="lead-event-title">
     <div className="feedback-heading"><div><p>Event #{event.id}</p><h2 id="lead-event-title">Review event request</h2></div><button className="feedback-close" type="button" aria-label="Close" onClick={onClose}>X</button></div>
@@ -161,7 +167,7 @@ function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChange
     <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
   </tr>
   {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
-  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>No event requests found.</td></tr>;
+  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>Loading Event Request...</td></tr>;
 }
 
 function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError, onProcess, processingChangeRequestId }) {

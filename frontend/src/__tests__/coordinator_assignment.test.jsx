@@ -51,7 +51,14 @@ describe('CoordinatorAssignment', () => {
     { steps: '1. Open event details. 2. Select a coordinator. 3. Confirm assignment.' },
     async () => {
       const f = mockFetch((url, options = {}) => {
-        if (url.includes('unassigned-queue')) return json([ev()]);
+        if (url.includes('unassigned-queue')) return json([ev({
+          layout_required: 'Banquet',
+          equipment_required: ['Microphone', 'Projector'],
+          equipment_placement: 'Projector at the stage.',
+          crowd_movement: 'Keep the center aisle clear.',
+          facilities_required: ['Aircon', 'Stage'],
+          accessibility_required: 1,
+        })]);
         if (url.includes('coordinator-workloads')) return json([{ id: 'c1', name: 'Bob', active_event_count: 1 }]);
         if (url.includes('event-coordinator-lead/events/1/coordinator')) return json({ id: 1, event_title: 'Gala', event_status: 'Assigned', coordinator_name: 'Bob' });
         if (!options.method || options.method === 'GET') return json([{ id: 'c1', name: 'Bob' }]);
@@ -60,6 +67,9 @@ describe('CoordinatorAssignment', () => {
       render(<CoordinatorAssignment user={LEAD} />);
       fireEvent.click(await screen.findByRole('button', { name: 'View details' }));
       const dialog = await screen.findByRole('dialog', { name: 'Review event request' });
+      expect(within(dialog).getByDisplayValue('Microphone, Projector')).toBeInTheDocument();
+      expect(within(dialog).getByDisplayValue('Projector at the stage.')).toBeInTheDocument();
+      expect(within(dialog).getByDisplayValue('Keep the center aisle clear.')).toBeInTheDocument();
       fireEvent.change(within(dialog).getByRole('combobox', { name: 'Assign event coordinator' }), { target: { value: 'c1' } });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Assign coordinator' }));
       await waitFor(() => expect(callsTo(f, 'event-coordinator-lead/events/1/coordinator', 'PATCH')).toHaveLength(1));
@@ -86,11 +96,11 @@ describe('CoordinatorAssignment', () => {
       expect(screen.getByText('2026-11-01')).toBeInTheDocument();
     });
 
-  tc('FE-COORD-003', 'CoordinatorAssignment', 'The organiser has no events.', '"No event requests found." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
+  tc('FE-COORD-003', 'CoordinatorAssignment', 'The organiser has no events.', '"Loading Event Request..." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
     async () => {
       mockFetch(() => json([]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      expect(await screen.findByText('No event requests found.')).toBeInTheDocument();
+      expect(await screen.findByText('Loading Event Request...')).toBeInTheDocument();
     });
 
   tc('FE-COORD-004', 'CoordinatorAssignment', 'The backend is unreachable when loading.', 'A message tells the user to start the backend and includes the error.',
@@ -150,12 +160,12 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-009', 'CoordinatorAssignment (organiser status)', 'The organiser has only Draft events.',
-    'The Event status table excludes Draft events and displays its empty state.',
+    'The Event status table excludes Draft events and displays "Loading Event Request...".',
     { pre: 'The organiser has one Draft event.', steps: '1. Render the Event status tab.' },
     async () => {
       mockFetch(() => json([ev({ event_status: 'Draft' })]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      expect(await screen.findByText('No event requests found.')).toBeInTheDocument();
+      expect(await screen.findByText('Loading Event Request...')).toBeInTheDocument();
     });
 
   tc('FE-COORD-011', 'CoordinatorAssignment (organiser status)', 'Events in different statuses are listed.',

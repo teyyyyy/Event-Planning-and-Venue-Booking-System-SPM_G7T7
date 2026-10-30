@@ -6,16 +6,30 @@ import { json, mockFetch, callsTo } from '../test/helpers';
 
 import EventOrganiser from '../event_organiser';
 
-const row = (o = {}) => ({ id: 1, event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 50, description: 'd', start_time: '09:00:00', end_time: '17:00:00', status: 'Draft', ...o });
 // The form only accepts dates from today on, so edits that click the real submit button need a date that never expires.
 const FUTURE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+const offsetDate = (days) => { const date = new Date(`${FUTURE}T00:00:00`); date.setDate(date.getDate() + days); return date.toISOString().slice(0, 10); };
+const row = (o = {}) => ({ id: 1, event_name: 'Gala', event_type: 'Workshop', event_date: FUTURE, event_end_date: FUTURE, event_capacity: 50, description: 'd', start_time: '09:00:00', end_time: '17:00:00', status: 'Draft', layout_required: 'Banquet', equipment_required: ['Microphone'], accessibility_required: 0, equipment_placement: 'Near the stage.', crowd_movement: 'Keep the center aisle clear.', facilities_required: ['Aircon'], ...o });
 const field = (name) => document.querySelector(`[name=${name}]`);
+const optionCheckbox = (name, value) => document.querySelector(`[name="${name}"][value="${value}"]`);
 const form = () => document.querySelector('form.request-form');
 
 function fillForm(o = {}) {
-  const values = { event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: '50', start_time: '09:00', end_time: '17:00', description: 'desc', ...o };
+  const values = { event_name: 'Gala', event_type: 'Workshop', event_date: FUTURE, event_end_date: FUTURE, event_capacity: '50', start_time: '09:00', end_time: '17:00', description: 'desc', ...o };
   Object.entries(values).forEach(([name, value]) => fireEvent.change(field(name), { target: { value } }));
+  fireEvent.change(field('layout_required'), { target: { value: 'Banquet' } });
+  checkOptions('equipment_required', ['Microphone']);
+  fireEvent.click(document.querySelector('[name="accessibility_required"][value="0"]'));
+  fireEvent.change(field('equipment_placement'), { target: { value: 'Near the stage.' } });
+  fireEvent.change(field('crowd_movement'), { target: { value: 'Keep the center aisle clear.' } });
+  checkOptions('facilities_required', ['Aircon']);
 }
+
+function checkOptions(name, values) {
+  values.forEach((value) => fireEvent.click(optionCheckbox(name, value)));
+}
+
+const accessibilityRadio = (value) => document.querySelector(`[name="accessibility_required"][value="${value}"]`);
 
 // GET /submitted-requests returns `list`; every other call is handled by `other`.
 const backend = (list = [], other = () => json({})) =>
@@ -40,7 +54,7 @@ describe('EventOrganiser', () => {
     async () => { mockFetch(() => json({}, 500)); render(<EventOrganiser />); expect(await screen.findByText('Unable to load event requests.')).toBeInTheDocument(); });
 
   tc('FE-ORG-004', 'EventOrganiser', 'A multi-day request is listed.', 'The date column shows "<start> to <end>" followed by the time range.', { data: '2026-10-01 to 2026-10-03', steps: '1. Render with a multi-day request.' },
-    async () => { backend([row({ event_end_date: '2026-10-03' })]); render(<EventOrganiser />); expect(await screen.findByText(/2026-10-01 to 2026-10-03/)).toBeInTheDocument(); });
+    async () => { backend([row({ event_end_date: offsetDate(2) })]); render(<EventOrganiser />); expect(await screen.findByText(new RegExp(`${FUTURE} to ${offsetDate(2)}`))).toBeInTheDocument(); });
 
   tc('FE-ORG-005', 'EventOrganiser (form)', 'The form renders in create mode.', 'Heading "Create event request", "Submit request" and "Save draft" buttons are shown.', { steps: '1. Render.' },
     async () => {
@@ -51,6 +65,48 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
     });
 
+  tc('FE-ORG-040', 'EventOrganiser (form)', 'Planning requirement inputs are available.', 'Layout, equipment, facilities, accessibility, equipment placement and crowd movement controls render with the specified options.',
+    { steps: '1. Render the organiser form. 2. Inspect the planning requirement controls.' },
+    async () => {
+      backend([]);
+      render(<EventOrganiser />);
+      await screen.findByText('No draft event requests found for this organiser.');
+      expect(Array.from(field('layout_required').options).map((option) => option.value)).toEqual(['', 'Banquet', 'Boardroom', 'U-shape', 'Theatre', 'Classroom']);
+      expect(Array.from(document.querySelectorAll('[name="equipment_required"]')).map((checkbox) => checkbox.value)).toEqual(['Microphone', 'Speaker', 'Spotlight', 'Projector', 'Laptop', 'Extension cord', 'Mixing console', 'Video camera', 'Tripod', 'LED display']);
+      expect(Array.from(document.querySelectorAll('[name="facilities_required"]')).map((checkbox) => checkbox.value)).toEqual(['Aircon', 'Breakout Room', 'Catering Area', 'Dance Floor', 'Dining Area', 'Restrooms', 'Green Room', 'Stage', 'Dressing Room', 'Loading Bay', 'Parking', 'Registration Desk', 'Reception Area']);
+      expect(optionCheckbox('equipment_required', 'Microphone')).toHaveAttribute('type', 'checkbox');
+      expect(optionCheckbox('facilities_required', 'Aircon')).toHaveAttribute('type', 'checkbox');
+      expect(accessibilityRadio('1')).not.toBeChecked();
+      expect(accessibilityRadio('0')).not.toBeChecked();
+      expect(field('equipment_placement')).toBeInTheDocument();
+      expect(field('crowd_movement')).toBeInTheDocument();
+      expect(field('description')).toHaveAttribute('placeholder', 'Additional comments or description of the event');
+      expect(accessibilityRadio('1')).toBeRequired();
+      expect(accessibilityRadio('0')).toBeRequired();
+      expect(field('layout_required')).toBeRequired();
+      expect(field('equipment_placement')).toBeRequired();
+      expect(field('crowd_movement')).toBeRequired();
+    });
+
+  tc('FE-ORG-041', 'EventOrganiser (required fields)', 'Equipment or facilities are not selected.', 'Submission is blocked with a clear message until each checkbox group has at least one selection.',
+    { kind: 'Negative', steps: '1. Fill all required fields. 2. Clear the equipment selection and submit. 3. Clear the facility selection and submit.' },
+    async () => {
+      const f = backend([]);
+      render(<EventOrganiser />);
+      await screen.findByText('No draft event requests found for this organiser.');
+      fillForm();
+      fireEvent.click(optionCheckbox('equipment_required', 'Microphone'));
+      fireEvent.submit(form());
+      expect(await screen.findByText('Select at least one required equipment item.')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/submit', 'POST')).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      checkOptions('equipment_required', ['Projector']);
+      fireEvent.click(optionCheckbox('facilities_required', 'Aircon'));
+      fireEvent.submit(form());
+      expect(await screen.findByText('Select at least one required facility.')).toBeInTheDocument();
+      expect(callsTo(f, '/requests/submit', 'POST')).toHaveLength(0);
+    });
+
   tc('FE-ORG-006', 'EventOrganiser (submit)', 'A valid request is submitted.', 'POST /requests/submit is sent with capacity as a number, the success dialog appears and the form is cleared.',
     { data: 'Gala, Workshop, 2026-10-01 09:00-17:00, capacity 50', steps: '1. Fill in all fields. 2. Submit the form.' },
     async () => {
@@ -58,10 +114,25 @@ describe('EventOrganiser', () => {
       render(<EventOrganiser />);
       await screen.findByText('No draft event requests found for this organiser.');
       fillForm();
+      checkOptions('equipment_required', ['Projector']);
+      fireEvent.click(accessibilityRadio('1'));
+      fireEvent.change(field('equipment_placement'), { target: { value: 'Projector at the stage.' } });
+      fireEvent.change(field('crowd_movement'), { target: { value: 'Keep the center aisle clear.' } });
+      checkOptions('facilities_required', ['Stage']);
       fireEvent.submit(form());
       expect(await screen.findByText('Event request submitted successfully and added to the table.')).toBeInTheDocument();
       const [, options] = callsTo(f, '/requests/submit', 'POST')[0];
-      expect(JSON.parse(options.body)).toMatchObject({ event_name: 'Gala', event_capacity: 50, start_time: '09:00' });
+      expect(JSON.parse(options.body)).toMatchObject({
+        event_name: 'Gala',
+        event_capacity: 50,
+        start_time: '09:00',
+        layout_required: 'Banquet',
+        equipment_required: ['Microphone', 'Projector'],
+        accessibility_required: 1,
+        equipment_placement: 'Projector at the stage.',
+        crowd_movement: 'Keep the center aisle clear.',
+        facilities_required: ['Aircon', 'Stage'],
+      });
       expect(field('event_name')).toHaveValue('');
     });
 
@@ -70,7 +141,7 @@ describe('EventOrganiser', () => {
       const f = backend([]);
       render(<EventOrganiser />);
       await screen.findByText('No draft event requests found for this organiser.');
-      fillForm({ event_date: '2026-10-05', event_end_date: '2026-10-01' });
+      fillForm({ event_date: offsetDate(2), event_end_date: FUTURE });
       fireEvent.submit(form());
       expect(await screen.findByText('End date cannot be before the start date.')).toBeInTheDocument();
       expect(callsTo(f, '/requests/submit')).toHaveLength(0);
@@ -92,7 +163,7 @@ describe('EventOrganiser', () => {
       const f = backend([], () => json({ id: 1 }));
       render(<EventOrganiser />);
       await screen.findByText('No draft event requests found for this organiser.');
-      fillForm({ event_end_date: '2026-10-03', end_time: '08:00' });
+      fillForm({ event_end_date: offsetDate(2), end_time: '08:00' });
       fireEvent.submit(form());
       await waitFor(() => expect(callsTo(f, '/requests/submit', 'POST')).toHaveLength(1));
     });
@@ -147,6 +218,7 @@ describe('EventOrganiser', () => {
       backend([], () => json({ detail: 'Use a valid event date and time.' }, 400));
       render(<EventOrganiser />);
       await screen.findByText('No draft event requests found for this organiser.');
+      fillForm();
       fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
       expect(await screen.findByText('Use a valid event date and time.')).toBeInTheDocument();
     });
@@ -165,12 +237,20 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-018', 'EventOrganiser (edit)', 'Organiser clicks Edit on a Draft row.', 'The form switches to "Update event request", loads the row values (times as HH:MM), and shows "Save draft" and "Submit request".', { steps: '1. Render a draft request. 2. Click "Edit".' },
     async () => {
       window.scrollTo = vi.fn();
-      backend([row({ status: 'Draft' })]);
+      backend([row({ status: 'Draft', layout_required: 'Banquet', equipment_required: ['Microphone', 'Projector'], accessibility_required: 1, equipment_placement: 'Projector at the stage.', crowd_movement: 'Keep the center aisle clear.', facilities_required: ['Aircon', 'Stage'] })]);
       render(<EventOrganiser />);
       fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
       expect(field('event_name')).toHaveValue('Gala');
       expect(field('start_time')).toHaveValue('09:00');
+      expect(field('layout_required')).toHaveValue('Banquet');
+      expect(optionCheckbox('equipment_required', 'Microphone')).toBeChecked();
+      expect(optionCheckbox('equipment_required', 'Projector')).toBeChecked();
+      expect(accessibilityRadio('1')).toBeChecked();
+      expect(field('equipment_placement')).toHaveValue('Projector at the stage.');
+      expect(field('crowd_movement')).toHaveValue('Keep the center aisle clear.');
+      expect(optionCheckbox('facilities_required', 'Aircon')).toBeChecked();
+      expect(optionCheckbox('facilities_required', 'Stage')).toBeChecked();
       expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Submit request' })).toBeInTheDocument();
     });
@@ -225,7 +305,7 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('heading', { name: 'Update event request' })).toBeInTheDocument();
       expect(onEditComplete).toHaveBeenCalled();
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
-      fillForm({ event_name: 'Gala 2', event_date: '2026-10-05', event_end_date: '2026-10-05', event_capacity: '25' });
+      fillForm({ event_name: 'Gala 2', event_date: FUTURE, event_end_date: FUTURE, event_capacity: '25' });
       fireEvent.submit(form());
       expect(await screen.findByText('Event request updated successfully.')).toBeInTheDocument();
       const [, options] = callsTo(f, '/requests/4', 'PUT')[0];
@@ -235,7 +315,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-032', 'EventOrganiser (editingEvent prop)', 'Updating a submitted event is rejected.', 'The backend error appears and the event remains in edit mode.', { kind: 'Negative', steps: '1. Render with a submitted editingEvent. 2. Return 403 for PUT. 3. Save changes.' },
     async () => {
       backend([], () => json({ detail: 'This event request cannot be updated during its current status.' }, 403));
-      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: FUTURE, event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd', layout_required: 'Banquet', equipment_required: ['Microphone'], accessibility_required: 0, equipment_placement: 'Near the stage.', crowd_movement: 'Keep the center aisle clear.', facilities_required: ['Aircon'] }} />);
       fireEvent.submit(form());
       expect(await screen.findByText('This event request cannot be updated during its current status.')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
@@ -244,7 +324,7 @@ describe('EventOrganiser', () => {
   tc('FE-ORG-033', 'EventOrganiser (editingEvent prop)', 'Saving a submitted event fails because the backend cannot be reached.', 'The backend connection error appears and the event remains in edit mode.', { kind: 'Negative', steps: '1. Render with a submitted editingEvent. 2. Make the PUT reject. 3. Save changes.' },
     async () => {
       backend([], () => { throw new TypeError('Failed to fetch'); });
-      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: FUTURE, event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd', layout_required: 'Banquet', equipment_required: ['Microphone'], accessibility_required: 0, equipment_placement: 'Near the stage.', crowd_movement: 'Keep the center aisle clear.', facilities_required: ['Aircon'] }} />);
       fireEvent.submit(form());
       expect(await screen.findByText(/Cannot reach the backend at/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument();
@@ -260,7 +340,7 @@ describe('EventOrganiser', () => {
         }
         return json({ id: 4 });
       });
-      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: '2026-10-05', event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd' }} />);
+      render(<EventOrganiser editingEvent={{ id: 4, status: 'Submitted', event_name: 'Gala', event_date: FUTURE, event_capacity: 25, event_type: 'Workshop', start_time: '09:00', end_time: '17:00', description: 'd', layout_required: 'Banquet', equipment_required: ['Microphone'], accessibility_required: 0, equipment_placement: 'Near the stage.', crowd_movement: 'Keep the center aisle clear.', facilities_required: ['Aircon'] }} />);
       fireEvent.submit(form());
       expect(await screen.findByText('Event was updated, but the refreshed event list could not be loaded.')).toBeInTheDocument();
     });
