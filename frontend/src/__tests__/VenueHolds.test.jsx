@@ -26,8 +26,10 @@ const booking = (o = {}) => ({
   event_name: "Gala",
   venue_id: 1,
   venue_name: "Hall A",
-  start_datetime: "2026-10-03T09:00:00+08:00",
-  end_datetime: "2026-10-03T17:00:00+08:00",
+  event_date: "2026-10-03",
+  event_end_date: "2026-10-03",
+  start_time: "09:00:00",
+  end_time: "17:00:00",
   facilities_required: [],
   ...o,
 });
@@ -161,7 +163,7 @@ describe("Venue holds — venue staff", () => {
     "An active hold blocks approval and further holds with a message naming the event and expiry; an expired hold is ignored and the venue shows as available.",
     { kind: "Negative", pre: "Rival 2026-10-03 12:00-14:00 at Hall A.", steps: "1. Open Gala with Rival On Hold. 2. Repeat with Rival Expired." },
     async () => {
-      const rival = (o) => booking({ request_id: 2, event_id: 11, event_name: "Rival", start_datetime: "2026-10-03T12:00:00+08:00", end_datetime: "2026-10-03T14:00:00+08:00", ...o });
+      const rival = (o) => booking({ request_id: 2, event_id: 11, event_name: "Rival", event_date: "2026-10-03", event_end_date: "2026-10-03", start_time: "12:00:00", end_time: "14:00:00", ...o });
       staffApi([booking(), rival({ status: "On Hold", hold_expires_at: "2026-10-01T12:00:00+08:00" })]);
       const { unmount } = render(<VenueApproval />);
       let panel = await openFirst();
@@ -189,9 +191,9 @@ describe("Venue holds — calendar", () => {
       vi.setSystemTime(new Date(2026, 9, 7, 10, 0));
       request.mockResolvedValue([
         { request_id: 1, status: "On Hold", hold_expires_at: "2026-10-06T18:00:00+08:00",
-          start_datetime: "2026-10-07 10:00:00", end_datetime: "2026-10-07 12:00:00", "Event Details": { event_name: "Held Gala" } },
+          "Event Details": { event_name: "Held Gala", event_date: "2026-10-07", start_time: "10:00:00", end_time: "12:00:00" } },
         { request_id: 2, status: "Expired", hold_expires_at: "2026-10-05T18:00:00+08:00",
-          start_datetime: "2026-10-08 14:00:00", end_datetime: "2026-10-08 15:00:00", "Event Details": { event_name: "Lapsed" } },
+          "Event Details": { event_name: "Lapsed", event_date: "2026-10-08", start_time: "14:00:00", end_time: "15:00:00" } },
       ]);
       render(<VenueCalendar venues={[{ venue_id: 1, name: "Hall A" }]} />);
       expect(screen.queryByText("On Hold (until expiry)")).not.toBeInTheDocument();
@@ -216,7 +218,7 @@ describe("Venue holds — calendar", () => {
 
 const venue = (venue_id, name) => ({ venue_id, name, location: "Singapore", capacity: 100, layouts: [], facilities: [], accessible: 1 });
 const VENUES = [venue(1, "Hall A"), venue(2, "Hall B"), venue(3, "Hall C"), venue(4, "Hall D")];
-const event = (id, name) => ({ id, event_name: name, event_date: "2026-10-05", start_datetime: "2026-10-05T10:00:00+08:00", end_datetime: "2026-10-05T12:00:00+08:00",
+const event = (id, name) => ({ id, event_name: name, event_date: "2026-10-05", event_end_date: "2026-10-05", start_time: "10:00:00", end_time: "12:00:00",
   event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 });
 const STATUSES = [
   { venue_id: 1, status: "Available", hold_expires_at: null, request_id: null, own_event: false },
@@ -317,7 +319,7 @@ describe("Venue holds — event coordinator", () => {
       coordinatorApi({
         statuses: () => json({}, 500),
         booked: [{ request_id: 8, status: "On Hold", hold_expires_at: "2026-10-02T18:00:00+08:00",
-          start_datetime: "2026-10-05T10:30:00+08:00", end_datetime: "2026-10-05T11:30:00+08:00" }],
+          "Event Details": { event_date: "2026-10-05", event_end_date: "2026-10-05", start_time: "10:30:00", end_time: "11:30:00" } }],
       });
       await renderCoordinator();
       pickEvent(1);
@@ -342,7 +344,7 @@ describe("Venue holds — event coordinator", () => {
       expect(await screen.findByText("Held until 2026-10-02 18:00 SGT")).toBeInTheDocument();
       expect(screen.getByText("Hold expired — submit a new request to continue.")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByText("Held until 2026-10-02 18:00 SGT").closest("tr"));
+      fireEvent.click(screen.getByText("Held until 2026-10-02 18:00 SGT").closest("li"));
       let dialog = screen.getByRole("alertdialog");
       expect(dialog).toHaveTextContent("Hold expires: 2026-10-02 18:00 SGT");
       fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));

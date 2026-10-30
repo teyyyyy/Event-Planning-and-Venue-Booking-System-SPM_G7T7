@@ -9,9 +9,9 @@ import VenueRequest from '../VenueRequest';
 const USER = { id: 'c1' };
 const HALL_A = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 100, layouts: ['Theatre', 'Banquet'], facilities: ['Wi-Fi', 'Projector'], accessible: 1 };
 const HALL_B = { venue_id: 2, name: 'Hall B', location: 'Jurong', capacity: 30, layouts: ['Classroom'], facilities: ['Wi-Fi'], accessible: 0 };
-const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', start_datetime: '2026-10-01T09:00:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
-const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', start_datetime: '2026-10-02T10:00:00+08:00', end_datetime: '2026-10-02T12:00:00+08:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
-const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { start_datetime: '2026-10-01T09:30:00+08:00', end_datetime: '2026-10-01T17:00:00+08:00' } };
+const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:00:00', end_time: '17:00:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
+const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', event_end_date: '2026-10-02', start_time: '10:00:00', end_time: '12:00:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
+const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:30:00', end_time: '17:00:00' } };
 
 function backend(o = {}) {
   const d = { venues: [HALL_A, HALL_B], events: [GALA, WORKSHOP], submitted: [], booked: [], catalogue: { setup_time: 0, teardown_time: 0 }, post: () => json({ request_id: 9 }), ...o };
@@ -59,12 +59,15 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-004', 'VenueRequest', 'Loading the coordinator\'s events fails.', 'The backend detail is shown as a page error.', { kind: 'Negative', data: '500 "Assigned events unavailable"', steps: '1. Return 500 with a detail for events.' },
     async () => { backend({ events: () => json({ detail: 'Assigned events unavailable' }, 500) }); await ready(); expect(screen.getByText('Assigned events unavailable')).toBeInTheDocument(); });
 
-  tc('FE-VREQ-005', 'VenueRequest (event details)', 'The coordinator selects an event.', 'An Event Details table shows name, date, 12-hour timing, capacity, layout, facilities and accessibility.', { steps: '1. Select "Gala".' },
+  tc('FE-VREQ-005', 'VenueRequest (event details)', 'The coordinator selects an event.', 'An Event Details table shows name, date, 12-hour timing, capacity, layout, facilities and accessibility with labels for narrow layouts.', { steps: '1. Select "Gala".' },
     async () => {
       backend();
       await ready();
       pickEvent(1);
       const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
+      expect(row.closest('table')).toHaveClass('venue-responsive-table', 'event-details-table');
+      expect(row.querySelector('td[data-label="Event Name"]')).toHaveTextContent('Gala');
+      expect(row.querySelector('td[data-label="Facilities"]')).toHaveTextContent('Wi-Fi');
       expect(within(row).getByText('Gala')).toBeInTheDocument();
       expect(row).toHaveTextContent('9:00 AM - 5:00 PM');
       expect(row).toHaveTextContent('50');
@@ -88,7 +91,7 @@ describe('VenueRequest', () => {
     });
 
   tc('FE-VREQ-007', 'VenueRequest (auto-filter)', 'An event with no requirements is selected.', 'All venues are listed.', { kind: 'Edge', steps: '1. Select "Workshop".' },
-    async () => { backend(); await ready(); pickEvent(2); expect(await screen.findByText('Hall A')).toBeInTheDocument(); expect(screen.getByText('Hall B')).toBeInTheDocument(); });
+    async () => { backend(); await ready(); pickEvent(2); expect(await screen.findByText('Hall A')).toBeInTheDocument(); expect(screen.getByText('Hall B')).toBeInTheDocument(); const row = screen.getByText('Hall A').closest('tr'); expect(row.closest('table')).toHaveClass('venue-responsive-table', 'venue-catalogue-table'); expect(row.querySelector('td[data-label="Venue"]')).toHaveTextContent('Hall A'); expect(row.querySelector('td[data-label="Action"]')).toHaveTextContent('Select Venue'); });
 
   tc('FE-VREQ-008', 'VenueRequest (manual filters)', 'The coordinator opens Manual Filtering and sets a minimum capacity above every venue.', '"No venues match your current filters." appears; "Clear Filters" restores the list.', { data: 'minimum capacity 200', steps: '1. Select "Workshop". 2. Click "Manual Filtering". 3. Enter 200. 4. Click "Clear Filters".' },
     async () => {
@@ -180,7 +183,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-014', 'VenueRequest (submit)', 'The venue already has an approved booking overlapping the requested time.', 'An error dialog says the venue is already booked and no POST is sent.', { kind: 'Negative', pre: 'Approved booking 08:00-10:00 on the same day.', steps: '1. Choose event and venue. 2. Click "Submit Request".' },
     async () => {
-      const f = backend({ booked: [{ status: 'Approved', start_datetime: '2026-10-01 08:00:00+00', end_datetime: '2026-10-01 10:00:00+00' }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '08:00:00', end_time: '10:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -192,7 +195,7 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-015', 'VenueRequest (submit)', 'An approved booking ends exactly when the requested slot starts (back-to-back).', 'It is not treated as an overlap and the request is submitted.', { kind: 'Edge', pre: 'Approved booking ends 09:00; request starts 09:00.', steps: '1. Choose event and venue. 2. Submit.' },
     async () => {
-      const f = backend({ booked: [{ start_datetime: '2026-10-01 07:00:00+00', end_datetime: '2026-10-01 09:00:00+00' }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '07:00:00', end_time: '09:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -250,9 +253,11 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-020', 'VenueRequest (submissions)', 'The coordinator opens "My Submissions".', 'Each request shows its event id, event and venue names (mapped from ids), the event\'s date and 12-hour times, and status.', { pre: 'One Approved request for Gala at Hall A; the event runs 09:30-17:00.', steps: '1. Click "My Submissions".' },
     async () => {
       backend({ submitted: [SUBMISSION] });
-      await ready();
-      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('Gala')).closest('tr');
+      render(<VenueRequest user={{ id: 1 }} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'My Submissions' }));
+    
+      const row = (await screen.findByText('Gala')).closest('li'); 
+      
       expect(row).toHaveTextContent('5');
       expect(row).toHaveTextContent('Hall A');
       expect(row).toHaveTextContent('2026-10-01');
@@ -263,20 +268,34 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-021', 'VenueRequest (submissions)', 'A request refers to an event and venue that are not in the loaded lists, and has no status.', 'The raw ids are shown as names and the status defaults to "Pending".', { kind: 'Edge', data: 'event_id 999, venue_id 998, no status', steps: '1. Open "My Submissions" with such a request.' },
     async () => {
-      backend({ submitted: [{ request_id: 6, event_id: 999, venue_id: 998, 'Event Details': null }] });
-      await ready();
-      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('999')).closest('tr');
-      expect(row).toHaveTextContent('998');
-      expect(within(row).getByText('Pending')).toBeInTheDocument();
+      // Use the specific mock data for unknown events/venues, NOT the standard SUBMISSION
+    backend({
+      submitted: [{
+        id: 998,
+        event_id: 999,
+        venue_id: 999,
+        status: null
+      }]
+    });
+
+    render(<VenueRequest user={{ id: 1 }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'My Submissions' }));
+    
+    const row = (await screen.findByText('999')).closest('li'); 
+    
+    expect(row).toHaveTextContent('998');
+    expect(within(row).getByText('Pending')).toBeInTheDocument();
     });
 
   tc('FE-VREQ-022', 'VenueRequest (submissions)', 'Requests start just after midnight and just after noon.', 'Times render as "12:30 AM" and "12:05 PM".', { kind: 'Edge', data: '00:30 and 12:05', steps: '1. Open "My Submissions" with such times.' },
     async () => {
-      backend({ submitted: [{ ...SUBMISSION, 'Event Details': { start_datetime: '2026-10-01T00:30:00', end_datetime: '2026-10-01T12:05:00' } }] });
+      backend({ submitted: [{ ...SUBMISSION, 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '00:30:00', end_time: '12:05:00' } }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('Gala')).closest('tr');
+    
+      const row = (await screen.findByText('Gala')).closest('li'); 
+      
       expect(row).toHaveTextContent('12:30 AM');
       expect(row).toHaveTextContent('12:05 PM');
     });
@@ -309,10 +328,10 @@ describe('VenueRequest', () => {
       expect(screen.queryByRole('alertdialog')).toBeNull();
     });
 
-  tc('FE-VREQ-026', 'VenueRequest (submit)', 'An existing booking only has its times on the linked event, and another booking has no times at all.',
+  tc('FE-VREQ-026', 'VenueRequest (submit)', 'One booking\'s linked event runs 16:00-18:00 and another booking has no linked event.',
     'Nested "Event Details" times are used for the overlap check; a booking without times is ignored.', { kind: 'Edge', pre: 'Pending booking whose event runs 16:00-18:00; a booking with no times.', steps: '1. Choose Gala (09:00-17:00) and Hall A. 2. Submit.' },
     async () => {
-      const f = backend({ booked: [{ status: 'Approved', 'Event Details': null }, { status: 'Approved', 'Event Details': { start_datetime: '2026-10-01 16:00:00+00', end_datetime: '2026-10-01 18:00:00+00' } }] });
+      const f = backend({ booked: [{ status: 'Approved', 'Event Details': null }, { status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '16:00:00', end_time: '18:00:00' } }] });
       await ready();
       pickEvent(1);
       await chooseVenue();
@@ -325,7 +344,7 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-027', 'VenueRequest (submissions)', 'The coordinator clicks a rejected submission.', 'A "Booking Request Details" dialog shows the status, rejection reason and decision time; "Close" dismisses it.',
     { pre: 'Request 5 Rejected with reason "Double booked".', steps: '1. Open "My Submissions". 2. Click the row. 3. Click "Close".' },
     async () => {
-      backend({ submitted: [{ ...SUBMISSION, status: 'Rejected', rejection_reason: 'Double booked', decided_at: '2026-09-20T10:00:00Z' }] });
+      backend({ submitted: [{ ...SUBMISSION, status: 'Rejected', rejection_reason: 'Double booked', alternative_venue_id: 2, decided_at: '2026-09-20T10:00:00Z' }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
       fireEvent.click((await screen.findByText('Gala')).closest('tr'));
@@ -333,6 +352,7 @@ describe('VenueRequest', () => {
       expect(within(dialog).getByText('Booking Request Details')).toBeInTheDocument();
       expect(dialog).toHaveTextContent('Status: Rejected');
       expect(dialog).toHaveTextContent('Rejection Reason: Double booked');
+      expect(within(dialog).queryByRole('button', { name: /accept alternative|decline alternative/i })).toBeNull();
       expect(dialog).toHaveTextContent(`Decided At: ${new Date('2026-09-20T10:00:00Z').toLocaleString()}`);
       fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -367,9 +387,9 @@ describe('VenueRequest', () => {
     async () => { backend({ submitted: () => json({}, 500) }); await ready(); expect(screen.getByText('Unable to load submitted requests.')).toBeInTheDocument(); });
 
   tc('FE-VREQ-031', 'VenueRequest (event details)', 'The coordinator selects an event that has no start or end time, picks a venue and submits.', 'The Event Details table renders with "—" as the timing; submitting shows an error that the event has no times, and neither the availability check nor the POST is sent.',
-    { kind: 'Edge', data: 'start_datetime = null, end_datetime = null', steps: '1. Select "Offsite". 2. Click "Select Venue" for Hall A. 3. Click "Submit Request".' },
+    { kind: 'Edge', data: 'start_time = null, end_time = null', steps: '1. Select "Offsite". 2. Click "Select Venue" for Hall A. 3. Click "Submit Request".' },
     async () => {
-      const f = backend({ events: [{ ...WORKSHOP, id: 3, event_name: 'Offsite', start_datetime: null, end_datetime: null }] });
+      const f = backend({ events: [{ ...WORKSHOP, id: 3, event_name: 'Offsite', start_time: null, end_time: null }] });
       await ready();
       pickEvent(3);
       const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
@@ -412,7 +432,7 @@ describe('VenueRequest', () => {
     async () => {
       const f = mockFetch((url, opts) => {
         if ((opts.method || 'GET') === 'POST') return json({ request_id: 9 });
-        if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', start_datetime: '2026-10-01 12:00:00+00', end_datetime: '2026-10-01 14:00:00+00' }]);
+        if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '12:00:00', end_time: '14:00:00' } }]);
         if (url.includes('/venue-catalogue/')) return json({ ...HALL_A, setup_time: 60, teardown_time: 60 });
         if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
         if (url.includes('/event-coordinators/')) return json([GALA]);
@@ -436,12 +456,26 @@ tc('FE-VREQ-034', 'Venue unavailability', 'A blocked venue appears in the catalo
   expect(screen.getByRole('button', { name: 'Select Venue' })).toBeDisabled();
 });
 
-tc('FE-VREQ-035', 'Venue unavailability', 'A request requires replacement.', 'The replacement action opens the same event for a new request.', { steps: 'Open submissions and click Request replacement venue.' }, async () => {
-  backend({ submitted: [{ ...SUBMISSION, status: 'Pending', replacement_required: true }] });
-  await ready(); fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+tc('FE-VREQ-035', 'Venue unavailability', 'A request requires replacement.', 'The original request is rejected via the coordinator endpoint before the same event opens for a new request.', { steps: 'Open submissions and click Request replacement venue.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', replacement_required: true, alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Rejected', replacement_required: false, alternative_venue_id: 2 }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Request replacement venue' }));
-  expect(eventSelect()).toHaveValue('1');
   expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
+  expect(eventSelect()).toHaveValue('1');
+  const [url, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/replacement', 'POST')[0];
+  expect(url).toContain('/venue-booking-requests/coordinators/c1/5/replacement');
+  expect(JSON.parse(options.body)).toEqual({});
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('li'));
+  const dialog = screen.getByRole('alertdialog');
+  expect(dialog).toHaveTextContent('Status: Rejected');
+  expect(dialog).not.toHaveTextContent('Alternative venue: Hall B');
+  expect(within(dialog).queryByRole('button', { name: /accept alternative|decline alternative/i })).toBeNull();
+  expect(screen.queryByText('Alternative venue offered: Hall B')).toBeNull();
 });
 
 tc('FE-VREQ-036', 'Venue unavailability', 'The venue is blocked after selection.', 'Submission stops with a clear error before posting.', { steps: 'Select venue, block in the server response, submit.' }, async () => {
@@ -449,4 +483,54 @@ tc('FE-VREQ-036', 'Venue unavailability', 'The venue is blocked after selection.
   await ready(); pickEvent(1); await chooseVenue(); fireEvent.click(submitBtn());
   expect(await screen.findByText('This venue is unavailable. Please select another venue.')).toBeInTheDocument();
   expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+});
+
+tc('FE-VREQ-037', 'VenueRequest (alternative venue)', 'The coordinator reviews and accepts an alternative venue offer.', 'The dialog shows catalogue details; accepting confirms the booking at the alternative venue.', { steps: 'Open submissions, open the rejected request, inspect the alternative, and accept it.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Approved', venue_id: 2, alternative_venue_id: null }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  const dialog = screen.getByRole('alertdialog');
+  expect(dialog).toHaveTextContent('Alternative venue: Hall B');
+  expect(dialog).toHaveTextContent('Location: Jurong');
+  expect(dialog).toHaveTextContent('Capacity: 30');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Accept alternative' }));
+  expect(await screen.findByText('Alternative venue accepted. The booking is confirmed.')).toBeInTheDocument();
+  const [url, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/alternative', 'POST')[0];
+  expect(url).toContain('/venue-booking-requests/coordinators/c1/5/alternative');
+  expect(JSON.parse(options.body)).toEqual({ decision: 'accept' });
+  expect(await screen.findByText('Request #5 · Hall B')).toBeInTheDocument();
+});
+
+tc('FE-VREQ-038', 'VenueRequest (alternative venue)', 'The coordinator declines an alternative venue offer.', 'The decision is sent to the backend and the rejection remains final.', { steps: 'Open the offered alternative and decline it.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Rejected', alternative_venue_id: null }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Decline alternative' }));
+  expect(await screen.findByText('Alternative venue declined. The request remains rejected.')).toBeInTheDocument();
+  const [, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/alternative', 'POST')[0];
+  expect(JSON.parse(options.body)).toEqual({ decision: 'decline' });
+});
+
+tc('FE-VREQ-039', 'VenueRequest (alternative venue)', 'Accepting the suggested venue fails availability validation.', 'The error is shown inside the open details dialog above the decision buttons so the coordinator can retry or decline.', { steps: 'Open an alternative offer and accept it while the API returns 409.' }, async () => {
+  backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ detail: 'The suggested venue is no longer available.' }, 409),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  const dialog = screen.getByRole('alertdialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Accept alternative' }));
+  const alert = await within(dialog).findByRole('alert');
+  expect(alert).toHaveTextContent('The suggested venue is no longer available.');
+  expect(within(dialog).getByRole('button', { name: 'Accept alternative' })).toBeEnabled();
+  expect(within(dialog).getByRole('button', { name: 'Decline alternative' })).toBeEnabled();
 });

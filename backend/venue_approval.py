@@ -9,11 +9,12 @@ from auth import require_venue_staff
 from coordinator_assignment import EVENT_TABLE, db
 from venue_holds import (
     APPROVED, BOOKING_TABLE, EXPIRED, ON_HOLD, PENDING, SGT, VENUE_TABLE,
-    booking_window, effective_status, event_datetime, find_conflict, to_sgt,
+    booking_window, effective_status, find_conflict, to_sgt,
 )
 
 router = APIRouter()
 REJECTED = "Rejected"
+ALTERNATIVE_OFFERED = "Alternative Offered"
 
 # Event Details columns that may hold accessibility once the booking-request
 # feature writes it there; the first one present wins over the booking row.
@@ -22,7 +23,7 @@ EVENT_ACCESSIBILITY_COLUMNS = ("accessibility_required", "accessibility")
 
 class RejectionDetails(BaseModel):
     reason: str | None = None
-    alternative_venue: str | None = None
+    alternative_venue_id: int | None = None
 
 
 class HoldDetails(BaseModel):
@@ -61,8 +62,11 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
         "event_type": event.get("event_type"),
         "event_description": event.get("description"),
         "event_capacity": event.get("event_capacity"),
-        "start_datetime": event_datetime(event, "event_date", "start_time") or to_sgt(booking.get("start_datetime")),
-        "end_datetime": event_datetime(event, "event_end_date", "end_time") or to_sgt(booking.get("end_datetime")),
+        # SGT wall-clock values, as stored on Event Details; a blank end date means a single-day event.
+        "event_date": event.get("event_date"),
+        "event_end_date": event.get("event_end_date") or event.get("event_date"),
+        "start_time": event.get("start_time"),
+        "end_time": event.get("end_time"),
         "setup_time": venue.get("setup_time"),
         "teardown_time": venue.get("teardown_time"),
         "accessibility_required": bool(accessibility),
@@ -71,7 +75,7 @@ def view(booking: dict[str, Any], event: dict[str, Any] | None, venue: dict[str,
         "coordinator_name": coordinator.get("name"),
         "coordinator_email": coordinator.get("email"),
         "rejection_reason": booking.get("rejection_reason"),
-        "alternative_venue": booking.get("alternative_venue"),
+        "alternative_venue_id": booking.get("alternative_venue_id"),
         "change_request_id": booking.get("change_request_id"),
     }
 
@@ -80,7 +84,12 @@ def enrich(client, bookings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not bookings:
         return []
     event_ids = list({b["event_id"] for b in bookings})
-    venue_ids = list({b["venue_id"] for b in bookings})
+    venue_ids = list({
+        venue_id
+        for booking in bookings
+        for venue_id in (booking.get("venue_id"), booking.get("alternative_venue_id"))
+        if venue_id is not None
+    })
     user_ids = list({str(b["coordinator_id"]) for b in bookings if b.get("coordinator_id")})
     events = {e["id"]: e for e in client.table(EVENT_TABLE).select("*").in_("id", event_ids).execute().data or []}
     venues = {v["venue_id"]: v for v in client.table(VENUE_TABLE).select("*").in_("venue_id", venue_ids).execute().data or []}
@@ -106,6 +115,24 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
     if status not in (PENDING, ON_HOLD):
         raise HTTPException(409, f"This request has already been {status.lower()}.")
 
+    alternative_id = changes.get("alternative_venue_id")
+    if alternative_id is not None:
+        if alternative_id == booking["venue_id"]:
+            raise HTTPException(400, "Choose a different venue as the alternative.")
+        alternative = (
+            client.table(VENUE_TABLE).select("*").eq("venue_id", alternative_id)
+            .maybe_single().execute().data
+        )
+        if not alternative or alternative.get("is_available") is False:
+            raise HTTPException(409, "The suggested venue is unavailable.")
+        event = client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"]).maybe_single().execute().data
+        requested = booking_window(event)
+        if not requested:
+            raise HTTPException(409, "The event needs a date, start time, and end time before an alternative venue can be offered.")
+        conflict = find_conflict(client, alternative_id, alternative, requested)
+        if conflict:
+            raise HTTPException(409, "The suggested venue is already booked during this event time.")
+
     # Prevent approvals if event logic overlaps (including setup/teardown buffers).
     # Approving a held request converts its hold into the confirmed booking.
     if changes.get("status") == APPROVED:
@@ -113,7 +140,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
         if booking.get("replacement_required") or venue.get("is_available") is False:
             raise HTTPException(409, "This booking needs a replacement venue and cannot be approved.")
         event = client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"]).maybe_single().execute().data
-        requested = booking_window(booking, event)
+        requested = booking_window(event)
         conflict = find_conflict(client, booking["venue_id"], venue, requested, request_id) if requested else None
         if conflict and conflict.get("status") == ON_HOLD:
             raise HTTPException(409, "Cannot approve: Venue is on hold for another event during this time (including setup/teardown buffers).")
@@ -154,9 +181,52 @@ def get_request(request_id: int, staff: dict[str, Any] = Depends(require_venue_s
     return enrich(client, [owned_booking(client, request_id, staff)])[0]
 
 
+@router.get("/api/venue-booking-requests/{request_id}/alternative-venue-availability")
+def alternative_venue_availability(
+    request_id: int,
+    staff: dict[str, Any] = Depends(require_venue_staff),
+):
+    client = db()
+    booking = owned_booking(client, request_id, staff)
+    event = (
+        client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"])
+        .maybe_single().execute().data
+    )
+    if not event:
+        raise HTTPException(404, "Event not found.")
+
+    window = booking_window(event)
+    venues = client.table(VENUE_TABLE).select("*").execute().data or []
+    result = []
+    for venue in venues:
+        reason = None
+        if venue.get("is_available") is False:
+            reason = venue.get("unavailability_reason") or "Venue is marked unavailable."
+        elif not window:
+            reason = "Event date, start time, and end time are required to check availability."
+        else:
+            conflict = find_conflict(
+                client, venue["venue_id"], venue, window, request_id,
+            )
+            if conflict and conflict.get("status") == ON_HOLD:
+                reason = f"Venue is on hold until {to_sgt(conflict.get('hold_expires_at'))}."
+            elif conflict:
+                reason = "A confirmed booking overlaps this event, including setup/teardown time."
+        result.append({
+            "venue_id": venue["venue_id"],
+            "available": reason is None,
+            "reason": reason,
+        })
+    return result
+
+
 @router.post("/api/venue-booking-requests/{request_id}/approve")
 def approve_request(request_id: int, staff: dict[str, Any] = Depends(require_venue_staff)):
-    return decide(request_id, staff, {"status": APPROVED, "rejection_reason": None, "alternative_venue": None})
+    return decide(request_id, staff, {
+        "status": APPROVED,
+        "rejection_reason": None,
+        "alternative_venue_id": None,
+    })
 
 
 @router.post("/api/venue-booking-requests/{request_id}/reject")
@@ -165,7 +235,11 @@ def reject_request(request_id: int, details: RejectionDetails | None = None, sta
     return decide(
         request_id,
         staff,
-        {"status": REJECTED, "rejection_reason": clean(details.reason), "alternative_venue": clean(details.alternative_venue)},
+        {
+            "status": ALTERNATIVE_OFFERED if details.alternative_venue_id else REJECTED,
+            "rejection_reason": clean(details.reason),
+            "alternative_venue_id": details.alternative_venue_id,
+        },
     )
 
 

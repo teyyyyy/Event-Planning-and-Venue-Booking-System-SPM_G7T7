@@ -37,11 +37,11 @@ def event_datetime(event: dict[str, Any], date_key: str, time_key: str) -> str |
     return None
 
 
-def booking_window(booking: dict[str, Any], event: dict[str, Any] | None) -> tuple[datetime, datetime] | None:
-    """The booked period; event times take priority over the booking row's copies."""
+def booking_window(event: dict[str, Any] | None) -> tuple[datetime, datetime] | None:
+    """The booked period, from the event's dates and times; booking rows have no times of their own."""
     event = event or {}
-    start = event_datetime(event, "event_date", "start_time") or booking.get("start_datetime")
-    end = event_datetime(event, "event_end_date", "end_time") or booking.get("end_datetime")
+    start = event_datetime(event, "event_date", "start_time")
+    end = event_datetime(event, "event_end_date", "end_time")
     return (datetime.fromisoformat(start), datetime.fromisoformat(end)) if start and end else None
 
 
@@ -100,7 +100,7 @@ def find_conflict(
     events = events_by_id(client, bookings)
     start, end = buffered(window, venue)
     for booking in bookings:
-        other = booking_window(booking, events.get(booking["event_id"]))
+        other = booking_window(events.get(booking["event_id"]))
         if other:
             other_start, other_end = buffered(other, venue)
             if start < other_end and end > other_start:
@@ -125,7 +125,7 @@ def venue_availability(event_id: int, user: dict[str, Any] = Depends(require_coo
         raise HTTPException(404, "Event not found.")
     if str(event.get("coordinator_id")) != str(user["id"]):
         raise HTTPException(403, "You can only check venues for events assigned to you.")
-    window = booking_window({}, event)
+    window = booking_window(event)
     if not window:
         raise HTTPException(400, "This event has no start or end time, so venue availability can't be checked.")
 
@@ -138,7 +138,7 @@ def venue_availability(event_id: int, user: dict[str, Any] = Depends(require_coo
         start, end = buffered(window, venue)
         found = []
         for booking in bookings:
-            other = booking_window(booking, events.get(booking["event_id"])) if booking.get("venue_id") == venue["venue_id"] else None
+            other = booking_window(events.get(booking["event_id"])) if booking.get("venue_id") == venue["venue_id"] else None
             if other:
                 other_start, other_end = buffered(other, venue)
                 if start < other_end and end > other_start:

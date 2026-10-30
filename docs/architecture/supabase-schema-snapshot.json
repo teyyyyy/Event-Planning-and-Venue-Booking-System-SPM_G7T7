@@ -73,9 +73,10 @@
         "format": "text",
         "type": "string"
       },
-      "alternative_venue": {
-        "format": "text",
-        "type": "string"
+      "alternative_venue_id": {
+        "description": "Note:\nThis is a Foreign Key to `Venues.venue_id`.<fk table='Venues' column='venue_id'/>",
+        "format": "bigint",
+        "type": "integer"
       },
       "decided_at": {
         "format": "timestamp with time zone",

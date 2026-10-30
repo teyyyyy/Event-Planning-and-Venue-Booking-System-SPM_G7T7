@@ -353,7 +353,6 @@ Coordinator, Venue Staff, and Technical Support Staff accounts. Register for a
 future Confirmed event; try a duplicate and a full event; change its venue/time
 or cancel it; check recipient inboxes, record links, and read status after refresh.
 
-
 ### Venue unavailability (25.1–25.3)
 
 Apply `backend/sql/venue_unavailability.sql` in the Supabase SQL Editor **after**
@@ -387,3 +386,24 @@ PGLITE_MODULE=/tmp/venue-sql-check/node_modules/@electric-sql/pglite/dist/index.
 
 API checks: `python -m pytest test/venue_unavailability_test.py`.
 The catalogue, request, and approval frontend suites cover the corresponding UI.
+
+## Event timing columns
+
+An event's timing is stored only on `Event Details`, as `event_date` + `start_time` and
+`event_end_date` + `end_time`: Singapore wall-clock values, where a blank end date means a
+single-day event. The frontend combines them in `frontend/src/eventTimes.js`.
+`Equipment Reservation Item.start_datetime` / `end_datetime` are each reservation's own booked
+period and are separate.
+
+After the backend and frontend that read the split columns are deployed, run
+`backend/sql/drop_event_datetime_columns.sql` in the Supabase SQL Editor to drop the unused
+`Event Details.start_datetime` / `end_datetime`. It is transactional and rerunnable, and drops
+nothing if any event has a value there that its split columns don't reproduce; the error lists
+those event ids. The file header has the query to inspect them and the rollback.
+
+The migration is verified against PostgreSQL in isolation:
+
+```bash
+npm install --prefix /tmp/sprint2-sql-test @electric-sql/pglite
+PGLITE_MODULE=/tmp/sprint2-sql-test/node_modules/@electric-sql/pglite/dist/index.js node test/drop_event_datetime_columns_sql.mjs
+```
