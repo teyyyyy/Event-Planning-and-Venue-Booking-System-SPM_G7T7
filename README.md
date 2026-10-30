@@ -147,6 +147,14 @@ restart the backend. Both are transactional and rerunnable. Always run
 
   To undo it, drop that index and recreate the old rules from the printed
   definitions.
+- **Alternative venues:** venue staff suggest a catalogue venue, stored in
+  `alternative_venue_id`. Databases built from an earlier `venue_approval.sql`
+  stored it as text in `alternative_venue`; run
+  `backend/sql/coordinator_alternative_venue.sql` after `venue_approval.sql`
+  to convert those values to venue IDs. If a value matches no single venue,
+  nothing changes and the error names the requests to fix first. It does
+  nothing where the text column is already gone. Undo it with
+  `rollback_coordinator_alternative_venue.sql`.
 - Superseded equipment requests are hidden from the coordinator and
   technical-support screens and can no longer be edited.
 
