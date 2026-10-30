@@ -173,7 +173,7 @@ function LeadEventDetailsDialog({ event, coordinators, workloads, selectedCoordi
   </section></div>;
 }
 
-function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChanges, onEditChangeRequest, onCancelChangeRequest, onRequestClarification, onViewFeedbackLog, onViewDetails, coordinators, canManage = false, isLead = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
+function EventRows({ events, emptyMessage = 'Loading Event Request...', onAssign, onStatusChange, onSubmit, onRequestChanges, onEditChangeRequest, onCancelChangeRequest, onRequestClarification, onViewFeedbackLog, onViewDetails, coordinators, canManage = false, isLead = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
   const columnCount = 6 + (showChangeDecision ? 1 : 0);
   return events.length ? events.map((event) => <React.Fragment key={event.id}><tr>
     <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
@@ -188,7 +188,7 @@ function EventRows({ events, onAssign, onStatusChange, onSubmit, onRequestChange
     <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
   </tr>
   {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
-  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>Loading Event Request...</td></tr>;
+  </React.Fragment>) : <tr><td className="empty" colSpan={columnCount}>{emptyMessage}</td></tr>;
 }
 
 function ChangeRequestRows({ requests, onSelect, selectedRequest, onReview, reviewingChangeRequestId, reviewError, onProcess, processingChangeRequestId }) {
@@ -286,7 +286,6 @@ export default function CoordinatorAssignment({ user }) {
   const leadLoadId = useRef(0);
   const [leadSelectedCoordinator, setLeadSelectedCoordinator] = useState('');
   const [isAssigningLeadEvent, setIsAssigningLeadEvent] = useState(false);
-  const [leadAssignmentError, setLeadAssignmentError] = useState('');
   const [message, setMessage] = useState('');
   const [changeRequestEvent, setChangeRequestEvent] = useState(null);
   const [changeProposal, setChangeProposal] = useState(EMPTY_PROPOSAL);
@@ -677,7 +676,7 @@ export default function CoordinatorAssignment({ user }) {
         <h2>{isLead ? leadView === 'active' ? 'Active events by coordinator' : 'Submitted and unassigned events' : 'Event status'}</h2>
         {isLead && leadView === 'active' && <label>View events by coordinator<select aria-label="View events by coordinator" value={coordinatorFilter} onChange={(event) => setCoordinatorFilter(event.target.value)}><option value="">All coordinators</option><option value="unassigned">Unassigned</option>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select></label>}
         {isLead && leadLoading && <p role="status">Loading events and workloads...</p>}
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={isLead && leadView === 'active' && coordinatorFilter ? events.filter((event) => coordinatorFilter === 'unassigned' ? !event.assigned_coordinator_id : event.assigned_coordinator_id === coordinatorFilter) : events} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onEditChangeRequest={editChangeRequest} onCancelChangeRequest={cancelSubmittedChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} onViewDetails={(event) => { setLeadAssignmentError(''); setLeadDetailEvent(event); setLeadSelectedCoordinator(event.assigned_coordinator_id || ''); }} coordinators={coordinators} canManage={activeTab === 'management'} isLead={isLead} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={isLead && leadView === 'active' && coordinatorFilter ? events.filter((event) => coordinatorFilter === 'unassigned' ? !event.assigned_coordinator_id : event.assigned_coordinator_id === coordinatorFilter) : events} emptyMessage={isLead && leadView === 'active' && coordinatorFilter && !leadLoading ? 'No event requests found.' : 'Loading Event Request...'} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onEditChangeRequest={editChangeRequest} onCancelChangeRequest={cancelSubmittedChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} onViewDetails={(event) => { setLeadAssignmentError(''); setLeadDetailEvent(event); setLeadSelectedCoordinator(event.assigned_coordinator_id || ''); }} coordinators={coordinators} canManage={activeTab === 'management'} isLead={isLead} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
       </>}
       {isCoordinator && activeTab === 'change-requests' && <>
         <h2>Submitted change requests</h2>
