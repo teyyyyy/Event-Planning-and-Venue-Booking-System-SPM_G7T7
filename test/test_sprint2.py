@@ -76,7 +76,7 @@ def test_link_rechecks_access(world):
     world.tables['event_registrations'] = [{'event_id': 1, 'attendee_id': 'a1'}]
     assert client.get('/api/notifications/1/record').json()['event']['event_name'] == 'Gather'
 
-@tc("BE-SP2-010", "Venue notification link", "A coordinator opens a venue offer notification.", "The linked record contains alternative_venue_id and separately resolved venue details, with no free-text alternative field.", steps="1. Authenticate as the assigned coordinator. 2. Open the venue notification record.")
+@tc("BE-SP2-022", "Venue notification link", "A coordinator opens a venue offer notification.", "The linked record contains alternative_venue_id and separately resolved venue details, with no free-text alternative field.", steps="1. Authenticate as the assigned coordinator. 2. Open the venue notification record.")
 def test_venue_notification_resolves_alternative_id(world, monkeypatch):
     world.tables["Venue Booking Requests"][0].update({
         "coordinator_id": "c1",

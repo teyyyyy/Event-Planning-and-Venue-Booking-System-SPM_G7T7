@@ -51,13 +51,6 @@ def test_get_supabase(monkeypatch):
     assert vr.get_supabase() == ("u", "k")
 
 
-@tc("BE-VREQ-021", "module settings", "The backend reads its Supabase settings.", "Venue requests use the same normalised URL and key as the other routers.",
-    steps="1. Compare venue_request's settings with coordinator_assignment's.", kind="Config")
-def test_shared_settings():
-    import coordinator_assignment as ca
-    assert (vr.SUPABASE_URL, vr.SUPABASE_KEY) == (ca.SUPABASE_URL, ca.SUPABASE_SERVICE_ROLE_KEY)
-
-
 @tc("BE-VREQ-004", "get_all_venues", "The catalogue is requested.", "All venue rows are returned.", pre="Two venues.", steps="1. Call get_all_venues().")
 def test_all_venues(monkeypatch):
     use(monkeypatch, {"Venues": [{"venue_id": 1, "name": "A"}, {"venue_id": 2, "name": "B"}]})
@@ -147,19 +140,6 @@ def test_by_coordinator_empty(monkeypatch):
     assert vr.list_requests_by_coordinator("nobody") == []
 
 
-@tc("BE-VREQ-024", "list_requests_by_coordinator", "A coordinator's submissions are loaded with their linked events.",
-    "Each event's event_date, event_end_date, start_time and end_time are embedded; the unused start_datetime/end_datetime columns are not requested.",
-    steps="1. Call list_requests_by_coordinator(\"c1\"). 2. Inspect the columns selected.", kind="Regression")
-def test_by_coordinator_selects_split_event_times(monkeypatch):
-    client = mock.MagicMock()
-    query = client.table.return_value
-    query.select.return_value.eq.return_value.execute.return_value.data = []
-    monkeypatch.setattr(vr, "get_supabase", lambda: client)
-    vr.list_requests_by_coordinator("c1")
-    columns = query.select.call_args.args[0]
-    assert all(field in columns for field in ("event_date", "event_end_date", "start_time", "end_time"))
-    assert "datetime" not in columns
-
 @tc("BE-VREQ-016", "create_venue_booking", "A coordinator submits a booking for an event that already has a request for a DIFFERENT venue.", "A Pending row for the event and the new venue is inserted.", pre="Event 10 already has a request for venue 5.", data="event 10, venue 6, coordinator c1", steps="1. Pre-populate a booking. 2. Call create_venue_booking with a different venue.", kind="Positive")
 def test_create_different_venue_ok(monkeypatch):
     client = use(monkeypatch, {
@@ -213,6 +193,40 @@ def test_create_request_composite_duplicate_error(monkeypatch):
     assert info.value.detail == "Unable to save venue request. Please try again."
 
 
+@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking whose event runs 10:00-12:00, with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
+def test_availability_check_includes_setup_teardown_buffer(monkeypatch):
+    use(monkeypatch, {
+        "Venues": [{"venue_id": 1, "setup_time": 30, "teardown_time": 30}],
+        "Event Details": [{"id": 1, "event_date": "2026-10-07", "event_end_date": "2026-10-07", "start_time": "10:00:00", "end_time": "12:00:00"}],
+        BOOKING: [
+            {
+                "request_id": 1,
+                "venue_id": 1,
+                "event_id": 1,
+                "status": "Approved",
+            }
+        ]
+    })
+    
+    if hasattr(vr, "check_venue_availability"):
+        is_available = vr.check_venue_availability(
+            venue_id=1,
+            start_dt="2026-10-07T09:00:00+08:00",
+            end_dt="2026-10-07T09:45:00+08:00"
+        )
+        assert is_available is False
+    else:
+        reqs = vr.list_requests_by_venue(1)
+        assert len(reqs) == 1
+
+
+@tc("BE-VREQ-021", "module settings", "The backend reads its Supabase settings.", "Venue requests use the same normalised URL and key as the other routers.",
+    steps="1. Compare venue_request's settings with coordinator_assignment's.", kind="Config")
+def test_shared_settings():
+    import coordinator_assignment as ca
+    assert (vr.SUPABASE_URL, vr.SUPABASE_KEY) == (ca.SUPABASE_URL, ca.SUPABASE_SERVICE_ROLE_KEY)
+
+
 @tc("BE-VREQ-022", "create_venue_booking", "The database refuses a second active request for the same event and venue (23505).", "HTTP 409 asking for a different venue; the database text is not exposed.", pre="The event already has a Pending, On Hold or Approved request for venue 5.", steps="1. Make the insert raise APIError 23505. 2. Call create_venue_booking.", kind="Negative")
 def test_create_request_duplicate_venue(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
@@ -234,6 +248,16 @@ def alternative_offer():
         "alternative_venue_id": 6,
     }
 
+@tc("BE-VREQ-023", "create_venue_booking", "The database guard reports the venue became unavailable (23514).", "HTTP 409 asking for a replacement venue.", pre="Venue staff mark the venue unavailable after the form loaded.", steps="1. Make the insert raise APIError 23514. 2. Call create_venue_booking.", kind="Negative")
+def test_create_request_venue_became_unavailable(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client.fail_tables.add((BOOKING, "insert"))
+    client.fail_error = APIError({"code": "23514", "message": "Venue is unavailable or this request needs a replacement.", "details": None, "hint": None})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "This venue is unavailable. Refresh and select a replacement venue."
+
 
 @tc("BE-VREQ-024", "decide_alternative_venue", "The assigned coordinator accepts an alternative venue.", "The request is Approved at the suggested venue and the offer fields are cleared.", steps="1. Accept request 12's alternative venue.")
 def test_accept_alternative_venue(monkeypatch):
@@ -254,26 +278,6 @@ def test_accept_alternative_venue(monkeypatch):
     assert saved["alternative_venue_id"] is None
     assert saved["replacement_required"] is False
     assert client.tables[BOOKING][1]["status"] == "Pending"
-
-
-@tc("BE-VREQ-030", "decide_alternative_venue", "An approved booking overlaps the suggested venue.", "HTTP 409; the alternative is not accepted.", steps="1. Accept an alternative venue already approved for an overlapping event.", kind="Negative")
-def test_accept_alternative_blocked_by_approved_overlap(monkeypatch):
-    client = use(monkeypatch, {
-        BOOKING: [
-            alternative_offer(),
-            {"request_id": 13, "event_id": 11, "venue_id": 6, "coordinator_id": "c2", "status": "Approved"},
-        ],
-        "Event Details": [
-            {"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
-            {"id": 11, "coordinator_id": "c2", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
-        ],
-        "Venues": [{"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}],
-    })
-    with pytest.raises(HTTPException) as info:
-        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
-    assert info.value.status_code == 409
-    assert info.value.detail == "The suggested venue is already booked for this event time."
-    assert client.tables[BOOKING][0]["status"] == "Alternative Offered"
 
 
 @tc("BE-VREQ-025", "decide_alternative_venue", "The assigned coordinator declines an alternative venue.", "The request remains Rejected at its original venue and the offer fields are cleared.", steps="1. Decline request 12's alternative venue.")
@@ -339,39 +343,37 @@ def test_start_replacement_requires_flag(monkeypatch):
     assert not client.writes(BOOKING, "update")
 
 
-@tc("BE-VREQ-023", "create_venue_booking", "The database guard reports the venue became unavailable (23514).", "HTTP 409 asking for a replacement venue.", pre="Venue staff mark the venue unavailable after the form loaded.", steps="1. Make the insert raise APIError 23514. 2. Call create_venue_booking.", kind="Negative")
-def test_create_request_venue_became_unavailable(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
-    client.fail_tables.add((BOOKING, "insert"))
-    client.fail_error = APIError({"code": "23514", "message": "Venue is unavailable or this request needs a replacement.", "details": None, "hint": None})
-    with pytest.raises(HTTPException) as info:
-        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
-    assert info.value.status_code == 409
-    assert info.value.detail == "This venue is unavailable. Refresh and select a replacement venue."
-
-
-@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking whose event runs 10:00-12:00, with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
-def test_availability_check_includes_setup_teardown_buffer(monkeypatch):
-    use(monkeypatch, {
-        "Venues": [{"venue_id": 1, "setup_time": 30, "teardown_time": 30}],
-        "Event Details": [{"id": 1, "event_date": "2026-10-07", "event_end_date": "2026-10-07", "start_time": "10:00:00", "end_time": "12:00:00"}],
+@tc("BE-VREQ-030", "decide_alternative_venue", "An approved booking overlaps the suggested venue.", "HTTP 409; the alternative is not accepted.", steps="1. Accept an alternative venue already approved for an overlapping event.", kind="Negative")
+def test_accept_alternative_blocked_by_approved_overlap(monkeypatch):
+    client = use(monkeypatch, {
         BOOKING: [
-            {
-                "request_id": 1,
-                "venue_id": 1,
-                "event_id": 1,
-                "status": "Approved",
-            }
-        ]
+            alternative_offer(),
+            {"request_id": 13, "event_id": 11, "venue_id": 6, "coordinator_id": "c2", "status": "Approved"},
+        ],
+        "Event Details": [
+            {"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+            {"id": 11, "coordinator_id": "c2", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+        ],
+        "Venues": [{"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}],
     })
-    
-    if hasattr(vr, "check_venue_availability"):
-        is_available = vr.check_venue_availability(
-            venue_id=1,
-            start_dt="2026-10-07T09:00:00+08:00",
-            end_dt="2026-10-07T09:45:00+08:00"
-        )
-        assert is_available is False
-    else:
-        reqs = vr.list_requests_by_venue(1)
-        assert len(reqs) == 1
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "The suggested venue is already booked for this event time."
+    assert client.tables[BOOKING][0]["status"] == "Alternative Offered"
+
+@tc("BE-VREQ-031", "list_requests_by_coordinator", "A coordinator's submissions are loaded with their linked events.",
+    "Each event's event_date, event_end_date, start_time and end_time are embedded; the unused start_datetime/end_datetime columns are not requested.",
+    steps="1. Call list_requests_by_coordinator(\"c1\"). 2. Inspect the columns selected.", kind="Regression")
+def test_by_coordinator_selects_split_event_times(monkeypatch):
+    client = mock.MagicMock()
+    query = client.table.return_value
+    query.select.return_value.eq.return_value.execute.return_value.data = []
+    monkeypatch.setattr(vr, "get_supabase", lambda: client)
+    vr.list_requests_by_coordinator("c1")
+    columns = query.select.call_args.args[0]
+    assert all(field in columns for field in ("event_date", "event_end_date", "start_time", "end_time"))
+    assert "datetime" not in columns
+
+
+
