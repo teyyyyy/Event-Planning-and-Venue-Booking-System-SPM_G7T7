@@ -255,6 +255,25 @@ describe('EventOrganiser', () => {
       expect(screen.getByRole('button', { name: 'Submit request' })).toBeInTheDocument();
     });
 
+  tc('FE-ORG-042', 'EventOrganiser (edit draft)', 'A saved draft returns equipment selections as a serialized list.', 'The saved equipment checkboxes are restored, and saving a time change keeps those equipment selections in the update payload.',
+    { steps: '1. Load a draft with equipment_required stored as "{Spotlight,Laptop}". 2. Edit the start time. 3. Save the draft.' },
+    async () => {
+      window.scrollTo = vi.fn();
+      const f = backend([row({ status: 'Draft', equipment_required: '{Spotlight,Laptop}' })], () => json({ id: 1 }));
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      expect(optionCheckbox('equipment_required', 'Spotlight')).toBeChecked();
+      expect(optionCheckbox('equipment_required', 'Laptop')).toBeChecked();
+      fireEvent.change(field('start_time'), { target: { value: '10:00' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText('Event draft updated successfully.')).toBeInTheDocument();
+      const [, options] = callsTo(f, '/requests/1', 'PUT')[0];
+      expect(JSON.parse(options.body)).toMatchObject({
+        start_time: '10:00',
+        equipment_required: ['Spotlight', 'Laptop'],
+      });
+    });
+
   tc('FE-ORG-019', 'EventOrganiser (edit)', 'Organiser submits an edited Draft request.', 'PUT /requests/<id> saves the edited values, then POST /requests/<id>/submit submits the Draft.', { data: 'event_name = "Gala 2"', steps: '1. Click "Edit". 2. Change the name. 3. Click "Submit request".' },
     async () => {
       window.scrollTo = vi.fn();
