@@ -11,6 +11,7 @@
 | 8.4: confirm reassignment and show success | Open an assigned event, choose a different coordinator, select **Review reassignment**, then **Confirm reassignment**. Cancellation does not save. Success names the event and incoming coordinator. The event's status is preserved. |
 | 8.4: notify the incoming coordinator | The existing notification trigger creates an in-app assignment message. |
 | 8.4: notify the outgoing coordinator | A new trigger creates a self-contained message naming the reassigned event. The outgoing coordinator can still read this message; its event link and direct event-status updates are denied once they are no longer assigned. |
+| 8.4: keep venue requests with the event | Venue booking request `coordinator_id` values are updated in the same assignment transaction, so the incoming coordinator can view and decide existing venue offers. |
 | 8.4: display current workload | Counts appear above the list and in the assignment selector, and reload after successful assignment/reassignment. |
 | 8.4: unlimited reassignment | There is no reassignment counter or limit. Each genuine coordinator change creates notifications. Selecting the current coordinator is disabled; an equivalent API call is a no-op. |
 
@@ -27,6 +28,7 @@ Event and coordinator reads are paginated internally so the database's per-respo
 | `frontend/src/coordinator_assignment.jsx` | Lead tabs, coordinator filter, workloads, confirmation, success/error handling and refresh. |
 | `frontend/src/App.jsx` | Coordinator Assignments navigation label. |
 | `backend/sql/coordinator_reassignment.sql` | Atomic assignment function and outgoing-coordinator notification trigger. |
+| `backend/sql/sync_venue_booking_coordinators.sql` | One-time sync of existing venue requests to each event's current coordinator, preserving prior IDs in a backup table. |
 | `backend/sql/rollback_coordinator_reassignment.sql` | Non-destructive rollback of the new database objects. |
 | `test/test_be_coordinator.py` | Updated assignment contracts and workload expectations. |
 | `test/test_be_coordinator_lead.py` | Active lists, pagination, access controls and failure/notification checks. |
@@ -42,10 +44,11 @@ Human approval is required before applying this migration to a shared/live datab
 
 1. Confirm `backend/sql/sprint2_registration_notifications.sql` has already been applied, and that `users.active_event_count` exists (used by the existing assignment implementation).
 2. Apply `backend/sql/coordinator_reassignment.sql` in the Supabase SQL Editor **before releasing the updated backend/frontend**.
-3. Release the application changes together. The Lead assignment endpoint now uses `assign_event_coordinator`; without the migration it returns a setup error rather than saving partially.
-4. Test with non-production test accounts: initial assignment, filtered browsing, two successive reassignments, and both coordinators' inboxes.
+3. Apply `backend/sql/sync_venue_booking_coordinators.sql` to align existing venue requests with their event's current coordinator. The migration stores previous IDs in `venue_booking_coordinator_id_backup`.
+4. Release the application changes together. The Lead assignment endpoint now uses `assign_event_coordinator`; without the function migration it returns a setup error rather than saving partially.
+5. Test with non-production test accounts: initial assignment, filtered browsing, two successive reassignments, venue offer visibility, and both coordinators' inboxes.
 
-Installing the migration adds/replaces two functions and one trigger. It does not backfill or delete existing data, or alter tables. It is transactional and rerunnable. Each subsequent assignment transaction locks the event and affected coordinator rows, checks the verified Lead and selected coordinator, checks the previously displayed coordinator, updates the assignment and workload caches, and emits notifications. A failure rolls everything back. The new function can only be called using the backend service role; the Lead identity comes from the verified session, never from the browser body.
+The assignment migration is transactional and rerunnable. Each subsequent assignment transaction locks the event and affected coordinator rows, checks the verified Lead and selected coordinator, checks the previously displayed coordinator, updates the event and its venue booking ownership plus workload caches, and emits notifications. A failure rolls everything back. The new function can only be called using the backend service role; the Lead identity comes from the verified session, never from the browser body. The separate sync migration updates existing venue requests and records prior coordinator IDs in a private backup table; it does not change event assignments.
 
 The `expected_coordinator_id` field is null for initial assignment and the currently displayed ID for reassignment. If another Lead has already changed it, the server responds with HTTP 409. Close the dialog, refresh, and review the new assignment before retrying. Inactive events also return 409.
 
@@ -53,7 +56,7 @@ Existing coordinator-side legacy routes retain their behavior; the Lead workflow
 
 ## Rollback
 
-Revert the application release first, then apply `backend/sql/rollback_coordinator_reassignment.sql`. This removes only the new RPC and outgoing-notification trigger/function. It preserves existing assignments, workload values, and delivered notifications. It does not attempt to reverse a Lead's completed decisions. The original incoming-notification trigger remains installed. Reapplying the forward migration restores the new operation.
+Revert the application release first, then apply `backend/sql/rollback_coordinator_reassignment.sql`. This removes only the new RPC and outgoing-notification trigger/function. It preserves event assignments, workload values, and delivered notifications. The venue ownership sync can be reversed from `venue_booking_coordinator_id_backup` only if no coordinator reassignments have happened since the sync; otherwise reconcile ownership manually rather than restoring stale IDs. The original incoming-notification trigger remains installed. Reapplying the forward migration restores the new operation.
 
 ## Validation
 

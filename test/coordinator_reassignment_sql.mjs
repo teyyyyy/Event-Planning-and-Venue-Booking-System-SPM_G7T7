@@ -25,6 +25,13 @@ for (const [key, role] of Object.entries({ lead: ' Event Coordinator Lead ', c1:
 }
 const q = (text, values = []) => db.query(text, values);
 const one = async (text, values = []) => (await q(text, values)).rows[0];
+await q(`insert into "Event Details"(id,event_name,status,organiser_id,coordinator_id)
+  values(99,'Reassigned Gala','Confirmed',$1,$2)`, [ids.organiser, ids.c1]);
+await q(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
+  values(99,10,$2,$1,'Alternative Offered')`, [ids.c2, ids.v]);
+await db.exec(await sql('sync_venue_booking_coordinators.sql'));
+assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=99')).coordinator_id, ids.c1);
+assert.equal((await one('select previous_coordinator_id from venue_booking_coordinator_id_backup where request_id=(select request_id from "Venue Booking Requests" where event_id=99)')).previous_coordinator_id, ids.c2);
 const actor = key => q("select set_config('request.headers',$1,false)", [JSON.stringify({ 'x-actor-id': ids[key] })]);
 const assign = (id, target, expected, lead = ids.lead) => one('select * from assign_event_coordinator($1,$2,$3,$4)', [id, target, expected, lead]);
 const notes = async () => (await q('select recipient_id,description from notifications order by id')).rows;
@@ -35,11 +42,14 @@ const blocked = async (fn, code) => {
 };
 await actor('lead');
 await q(`insert into "Event Details"(id,event_name,status,organiser_id) values(1,'Gala','Submitted',$1)`, [ids.organiser]);
+await q(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
+  values(1,9,$2,$1,'Alternative Offered')`, [ids.c2, ids.v]);
 await clear();
 
 // Initial assignment is atomic, sets Assigned, and notifies only the incoming coordinator.
 assert.equal((await assign(1, ids.c1, null)).status, 'Assigned');
 assert.deepEqual(await counts(), [1, 0, 0]);
+assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=1')).coordinator_id, ids.c1);
 assert.deepEqual((await notes()).map(r => r.recipient_id), [ids.c1]);
 await clear();
 
@@ -52,6 +62,7 @@ for (const status of ['Assigned', 'Under review', 'Approved', 'Planning', 'Confi
   const result = await assign(1, next, current);
   assert.equal(result.status, status);
   assert.equal(result.coordinator_id, next);
+  assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=1')).coordinator_id, next);
   assert.deepEqual(await counts(), next === ids.c1 ? [1, 0, 0] : [0, 1, 0]);
   const messages = await notes();
   assert.deepEqual(messages.map(r => r.recipient_id).sort(), [current, next].sort());
