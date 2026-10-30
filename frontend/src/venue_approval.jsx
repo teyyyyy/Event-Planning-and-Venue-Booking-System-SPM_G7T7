@@ -56,6 +56,9 @@ function RequestDetail({
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [alternativeVenueId, setAlternativeVenueId] = useState("");
+  const [alternativeAvailability, setAlternativeAvailability] = useState({});
+  const [alternativeAvailabilityLoading, setAlternativeAvailabilityLoading] = useState(false);
+  const [alternativeAvailabilityError, setAlternativeAvailabilityError] = useState("");
   const [placingHold, setPlacingHold] = useState(false);
   const [holdUntil, setHoldUntil] = useState("");
   const [showHistory, setShowHistory] = useState(false);
@@ -67,6 +70,33 @@ function RequestDetail({
   );
   // A held request is still awaiting a decision: approval confirms it, rejection releases it.
   const decidable = pending || held;
+
+  useEffect(() => {
+    if (!rejecting || !decidable) return undefined;
+    let active = true;
+    setAlternativeAvailabilityLoading(true);
+    setAlternativeAvailabilityError("");
+    request(`/venue-booking-requests/${booking.request_id}/alternative-venue-availability`)
+      .then((rows) => {
+        if (!Array.isArray(rows) || rows.some((row) => typeof row.available !== "boolean")) {
+          throw new Error("Venue availability could not be verified.");
+        }
+        if (active) {
+          setAlternativeAvailability(
+            Object.fromEntries(rows.map((row) => [String(row.venue_id), row])),
+          );
+        }
+      })
+      .catch((error) => {
+        if (active) setAlternativeAvailabilityError(error.message);
+      })
+      .finally(() => {
+        if (active) setAlternativeAvailabilityLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [booking.request_id, decidable, rejecting]);
 
   // We can approve if there is no overlap, OR if the only overlap is with another pending request
   const canApprove =
@@ -299,21 +329,40 @@ function RequestDetail({
             Alternative venue (optional)
             <select
               value={alternativeVenueId}
+              disabled={busy || alternativeAvailabilityLoading || Boolean(alternativeAvailabilityError)}
               onChange={(e) => setAlternativeVenueId(e.target.value)}
             >
               <option value="">No alternative venue</option>
+              {alternativeAvailabilityLoading && (
+                <option disabled>Checking venue availability…</option>
+              )}
               {venues
                 .filter(
                   (venue) =>
-                    venue.venue_id !== booking.venue_id &&
-                    venue.is_available !== false,
+                    String(venue.venue_id) !== String(booking.venue_id),
                 )
-                .map((venue) => (
-                  <option key={venue.venue_id} value={venue.venue_id}>
-                    {venue.name}{venue.location ? ` (${venue.location})` : ""}
-                  </option>
-                ))}
+                .map((venue) => {
+                  const availability = alternativeAvailability[String(venue.venue_id)];
+                  const unavailableReason = availability?.available === false
+                    ? availability.reason || "Unavailable for this event."
+                    : venue.is_available === false
+                      ? venue.unavailability_reason || "Venue is marked unavailable."
+                      : null;
+                  const unavailable = alternativeAvailabilityError || !availability || Boolean(unavailableReason);
+                  return (
+                    <option key={venue.venue_id} value={venue.venue_id} disabled={unavailable}>
+                      {venue.name}{venue.location ? ` (${venue.location})` : ""} — {unavailable
+                        ? `Unavailable: ${alternativeAvailabilityError || unavailableReason || "Availability could not be verified."}`
+                        : "Available"}
+                    </option>
+                  );
+                })}
             </select>
+            {alternativeAvailabilityError && (
+              <span className="field-error" role="alert">
+                {alternativeAvailabilityError} No alternative can be offered until availability is verified.
+              </span>
+            )}
           </label>
           <div className="decision-actions">
             <button type="submit" className="btn-reject" disabled={busy}>

@@ -305,6 +305,8 @@ describe("VenueApproval", () => {
         if (url === "/venues")
           return [{ venue_id: 2, name: "Hall B", location: "Jurong" }];
         if (url === "/venue-booking-requests") return [booking()];
+        if (url === "/venue-booking-requests/1/alternative-venue-availability")
+          return [{ venue_id: 2, available: true, reason: null }];
         if (url === "/venue-booking-requests/1/reject")
           return booking({
             status: "Alternative Offered",
@@ -336,6 +338,49 @@ describe("VenueApproval", () => {
         reason: "Double booked",
         alternative_venue_id: 2,
       });
+    },
+  );
+
+  tc(
+    "FE-VENUE-028",
+    "VenueApproval (alternative venue availability)",
+    "Staff opens the optional alternative venue selector.",
+    "Unavailable catalogue venues, confirmed overlaps and active holds are disabled with reasons; a clear venue is labeled Available.",
+    { steps: "1. Open a pending request. 2. Open Reject. 3. Inspect alternative venue options." },
+    async () => {
+      const venues = [
+        { venue_id: 1, name: "Hall A", location: "Campus" },
+        { venue_id: 2, name: "Renovation Hall", location: "West", is_available: false, unavailability_reason: "Renovation" },
+        { venue_id: 3, name: "Confirmed Hall", location: "East" },
+        { venue_id: 4, name: "Held Hall", location: "North" },
+        { venue_id: 5, name: "Available Hall", location: "South" },
+      ];
+      request.mockImplementation(async (url) => {
+        if (url === "/venues") return venues;
+        if (url === "/venue-booking-requests") return [booking()];
+        if (url === "/venue-booking-requests/1/alternative-venue-availability") {
+          return [
+            { venue_id: 1, available: true, reason: null },
+            { venue_id: 2, available: false, reason: "Renovation" },
+            { venue_id: 3, available: false, reason: "A confirmed booking overlaps this event, including setup/teardown time." },
+            { venue_id: 4, available: false, reason: "Venue is on hold until 2026-10-30 20:00 SGT." },
+            { venue_id: 5, available: true, reason: null },
+          ];
+        }
+        return [];
+      });
+      render(<VenueApproval />);
+      const panel = within(await open());
+      fireEvent.click(panel.getByRole("button", { name: "Reject…" }));
+
+      const renovation = await screen.findByRole("option", { name: /Renovation Hall.*Unavailable: Renovation/ });
+      const confirmed = screen.getByRole("option", { name: /Confirmed Hall.*A confirmed booking overlaps/ });
+      const held = screen.getByRole("option", { name: /Held Hall.*Venue is on hold until/ });
+      const available = screen.getByRole("option", { name: /Available Hall.*Available/ });
+      expect(renovation).toBeDisabled();
+      expect(confirmed).toBeDisabled();
+      expect(held).toBeDisabled();
+      expect(available).toBeEnabled();
     },
   );
 

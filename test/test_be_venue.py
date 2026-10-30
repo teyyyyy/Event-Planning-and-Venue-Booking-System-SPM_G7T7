@@ -246,6 +246,37 @@ def test_alternative_offer_requires_event_window(use_db):
     assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
 
 
+@tc("BE-VENUE-036", "alternative_venue_availability", "Staff opens the alternative selector.", "The catalogue marks unavailable venues, overlapping confirmed bookings and active holds with reasons; a pending overlap remains available.", steps="1. Query alternatives for request 1.")
+def test_alternative_venue_availability_reasons(use_db):
+    on_hold_expiry = "2099-02-01T10:00:00+00:00"
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Approved"},
+        {**BOOKING, "request_id": 3, "event_id": 12, "venue_id": 7, "status": "On Hold", "hold_expires_at": on_hold_expiry},
+        {**BOOKING, "request_id": 4, "event_id": 13, "venue_id": 8, "status": "Pending"},
+    ]
+    events = (EVENT, {**EVENT, "id": 11}, {**EVENT, "id": 12}, {**EVENT, "id": 13})
+    venues = (
+        VENUE,
+        {"venue_id": 6, "name": "Confirmed Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 7, "name": "Held Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 8, "name": "Pending Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 9, "name": "Closed Hall", "is_available": False, "unavailability_reason": "Renovation"},
+    )
+    use_db(world(bookings, events=events, venues=venues), va)
+
+    statuses = {row["venue_id"]: row for row in va.alternative_venue_availability(1, STAFF)}
+
+    assert statuses[6] == {
+        "venue_id": 6,
+        "available": False,
+        "reason": "A confirmed booking overlaps this event, including setup/teardown time.",
+    }
+    assert statuses[7]["available"] is False and statuses[7]["reason"].startswith("Venue is on hold until")
+    assert statuses[8] == {"venue_id": 8, "available": True, "reason": None}
+    assert statuses[9] == {"venue_id": 9, "available": False, "reason": "Renovation"}
+
+
 @tc("BE-VENUE-029", "reject_request", "Staff rejects with no body.", "Still rejected; reason and alternative are None.", data="details = None", steps="1. Call reject_request(1, None, STAFF).", kind="Edge")
 def test_reject_no_body(use_db):
     use_db(world(), va)

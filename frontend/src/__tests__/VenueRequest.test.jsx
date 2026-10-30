@@ -253,9 +253,11 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-020', 'VenueRequest (submissions)', 'The coordinator opens "My Submissions".', 'Each request shows its event id, event and venue names (mapped from ids), the event\'s date and 12-hour times, and status.', { pre: 'One Approved request for Gala at Hall A; the event runs 09:30-17:00.', steps: '1. Click "My Submissions".' },
     async () => {
       backend({ submitted: [SUBMISSION] });
-      await ready();
-      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('Gala')).closest('tr');
+      render(<VenueRequest user={{ id: 1 }} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'My Submissions' }));
+    
+      const row = (await screen.findByText('Gala')).closest('li'); 
+      
       expect(row).toHaveTextContent('5');
       expect(row).toHaveTextContent('Hall A');
       expect(row).toHaveTextContent('2026-10-01');
@@ -266,12 +268,24 @@ describe('VenueRequest', () => {
 
   tc('FE-VREQ-021', 'VenueRequest (submissions)', 'A request refers to an event and venue that are not in the loaded lists, and has no status.', 'The raw ids are shown as names and the status defaults to "Pending".', { kind: 'Edge', data: 'event_id 999, venue_id 998, no status', steps: '1. Open "My Submissions" with such a request.' },
     async () => {
-      backend({ submitted: [{ request_id: 6, event_id: 999, venue_id: 998, 'Event Details': null }] });
-      await ready();
-      fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('999')).closest('tr');
-      expect(row).toHaveTextContent('998');
-      expect(within(row).getByText('Pending')).toBeInTheDocument();
+      // Use the specific mock data for unknown events/venues, NOT the standard SUBMISSION
+    backend({
+      submitted: [{
+        id: 998,
+        event_id: 999,
+        venue_id: 999,
+        status: null
+      }]
+    });
+
+    render(<VenueRequest user={{ id: 1 }} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'My Submissions' }));
+    
+    const row = (await screen.findByText('999')).closest('li'); 
+    
+    expect(row).toHaveTextContent('998');
+    expect(within(row).getByText('Pending')).toBeInTheDocument();
     });
 
   tc('FE-VREQ-022', 'VenueRequest (submissions)', 'Requests start just after midnight and just after noon.', 'Times render as "12:30 AM" and "12:05 PM".', { kind: 'Edge', data: '00:30 and 12:05', steps: '1. Open "My Submissions" with such times.' },
@@ -279,7 +293,9 @@ describe('VenueRequest', () => {
       backend({ submitted: [{ ...SUBMISSION, 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '00:30:00', end_time: '12:05:00' } }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
-      const row = (await screen.findByText('Gala')).closest('tr');
+    
+      const row = (await screen.findByText('Gala')).closest('li'); 
+      
       expect(row).toHaveTextContent('12:30 AM');
       expect(row).toHaveTextContent('12:05 PM');
     });

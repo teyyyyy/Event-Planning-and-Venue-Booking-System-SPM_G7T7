@@ -181,6 +181,45 @@ def get_request(request_id: int, staff: dict[str, Any] = Depends(require_venue_s
     return enrich(client, [owned_booking(client, request_id, staff)])[0]
 
 
+@router.get("/api/venue-booking-requests/{request_id}/alternative-venue-availability")
+def alternative_venue_availability(
+    request_id: int,
+    staff: dict[str, Any] = Depends(require_venue_staff),
+):
+    client = db()
+    booking = owned_booking(client, request_id, staff)
+    event = (
+        client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"])
+        .maybe_single().execute().data
+    )
+    if not event:
+        raise HTTPException(404, "Event not found.")
+
+    window = booking_window(event)
+    venues = client.table(VENUE_TABLE).select("*").execute().data or []
+    result = []
+    for venue in venues:
+        reason = None
+        if venue.get("is_available") is False:
+            reason = venue.get("unavailability_reason") or "Venue is marked unavailable."
+        elif not window:
+            reason = "Event date, start time, and end time are required to check availability."
+        else:
+            conflict = find_conflict(
+                client, venue["venue_id"], venue, window, request_id,
+            )
+            if conflict and conflict.get("status") == ON_HOLD:
+                reason = f"Venue is on hold until {to_sgt(conflict.get('hold_expires_at'))}."
+            elif conflict:
+                reason = "A confirmed booking overlaps this event, including setup/teardown time."
+        result.append({
+            "venue_id": venue["venue_id"],
+            "available": reason is None,
+            "reason": reason,
+        })
+    return result
+
+
 @router.post("/api/venue-booking-requests/{request_id}/approve")
 def approve_request(request_id: int, staff: dict[str, Any] = Depends(require_venue_staff)):
     return decide(request_id, staff, {

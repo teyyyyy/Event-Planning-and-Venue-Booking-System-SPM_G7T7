@@ -69,6 +69,7 @@ ROLE_PATHS = {
     "Safety Officer": (),
     "Venue Staff": (
         "/api/venue-booking-requests",
+        "/api/venue-booking-requests/1/alternative-venue-availability",
         "/api/venue-catalogue",
         "/api/venues",
         "/api/venue-booking-requests/venues/1",
