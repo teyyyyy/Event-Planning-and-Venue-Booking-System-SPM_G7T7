@@ -140,19 +140,15 @@ describe('CoordinatorAssignment', () => {
       expect(await screen.findByText(/Backend returned 500/)).toBeInTheDocument();
     });
 
-  tc('FE-COORD-006', 'CoordinatorAssignment', 'An event has no coordinator and the organiser clicks "Assign coordinator".', 'POST /events/<id>/assign-coordinator is sent, "<event> assigned to <coordinator>." stays on screen and the list reloads showing the assigned coordinator.',
-    { pre: 'Event unassigned.', steps: '1. Render. 2. Click "Assign coordinator".', kind: 'Regression' },
+  tc('FE-COORD-006', 'CoordinatorAssignment (organiser status)', 'An event has no assigned coordinator.', 'The Event Coordinator column shows "-" and does not offer an assignment action.',
+    { pre: 'Event unassigned.', steps: '1. Render as organiser. 2. Inspect the event row.' },
     async () => {
-      let assigned = false;
-      const f = mockFetch((url) => {
-        if (url.includes('assign-coordinator')) { assigned = true; return json({ event_title: 'Gala', coordinator_name: 'Amy' }); }
-        return json([ev(assigned ? { coordinator_name: 'Amy', coordinator_email: 'a@x' } : {})]);
-      });
+      const f = mockFetch(() => json([ev()]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Assign coordinator' }));
-      await waitFor(() => expect(callsTo(f, 'assign-coordinator', 'POST')).toHaveLength(1));
-      expect(await screen.findByText('a@x')).toBeInTheDocument();
-      expect(screen.getByText('Gala assigned to Amy.')).toBeInTheDocument();
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(within(row).getByText('-')).toBeInTheDocument();
+      expect(within(row).queryByRole('button', { name: 'Assign coordinator' })).not.toBeInTheDocument();
+      expect(callsTo(f, 'assign-coordinator', 'POST')).toHaveLength(0);
     });
 
   tc('FE-COORD-007', 'CoordinatorAssignment', 'The organiser clicks the "Event status" tab.', 'The organiser\'s requests are fetched again.',
@@ -165,13 +161,16 @@ describe('CoordinatorAssignment', () => {
       await waitFor(() => expect(callsTo(f, '/event-organisers/o1/requests')).toHaveLength(2));
     });
 
-  tc('FE-COORD-020', 'CoordinatorAssignment', 'Assignment is rejected by the backend after clicking "Assign coordinator".', 'The backend\'s detail message is displayed and stays on screen.',
-    { kind: 'Negative', data: '500 "Exactly 3 event coordinators are required."', steps: '1. Return 500 with a detail for assign-coordinator. 2. Click "Assign coordinator".' },
+  tc('FE-COORD-020', 'CoordinatorAssignment (organiser status)', 'An event already has an assigned coordinator.', 'The organiser sees the coordinator name and email without an assignment button.',
+    { steps: '1. Render as organiser with an assigned coordinator. 2. Inspect the event row.' },
     async () => {
-      mockFetch((url) => url.includes('assign-coordinator') ? json({ detail: 'Exactly 3 event coordinators are required.' }, 500) : json([ev()]));
+      const f = mockFetch(() => json([ev({ coordinator_name: 'Amy', coordinator_email: 'amy@example.test' })]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Assign coordinator' }));
-      expect(await screen.findByText('Exactly 3 event coordinators are required.')).toBeInTheDocument();
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(within(row).getByText('Amy')).toBeInTheDocument();
+      expect(within(row).getByText('amy@example.test')).toBeInTheDocument();
+      expect(within(row).queryByRole('button', { name: 'Assign coordinator' })).not.toBeInTheDocument();
+      expect(callsTo(f, 'assign-coordinator', 'POST')).toHaveLength(0);
     });
 
   tc('FE-COORD-008', 'CoordinatorAssignment', 'Assigned coordinator without an email.', 'The name is shown with "Email unavailable".', { kind: 'Edge', steps: '1. Render an event whose coordinator has no email.' },
