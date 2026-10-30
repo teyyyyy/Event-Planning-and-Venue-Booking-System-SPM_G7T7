@@ -914,4 +914,35 @@ describe("VenueApproval", () => {
       expect(approveBtn).toBeDisabled();
     },
   );
+
+  tc(
+    "FE-VENUE-029",
+    "VenueApproval (alternative venue availability)",
+    "An alternative venue has an active request for the same event.",
+    "The venue is marked unavailable with the active request reason and is disabled.",
+    { steps: "1. Open a pending request. 2. Open Reject. 3. Inspect alternative venue options for an active request conflict." },
+    async () => {
+      const venues = [
+        { venue_id: 1, name: "Hall A", location: "Campus" },
+        { venue_id: 6, name: "Hall B", location: "Jurong" },
+      ];
+      request.mockImplementation(async (url) => {
+        if (url === "/venues") return venues;
+        if (url === "/venue-booking-requests") return [booking()];
+        if (url === "/venue-booking-requests/1/alternative-venue-availability") {
+          return [
+            { venue_id: 1, available: true, reason: null },
+            { venue_id: 6, available: false, reason: "This event already has an active request for this venue." },
+          ];
+        }
+        return [];
+      });
+      render(<VenueApproval />);
+      const panel = within(await open());
+      fireEvent.click(panel.getByRole("button", { name: "Reject…" }));
+
+      const activeRequestVenue = await screen.findByRole("option", { name: /Hall B.*This event already has an active request for this venue./ });
+      expect(activeRequestVenue).toBeDisabled();
+    },
+  );
 });

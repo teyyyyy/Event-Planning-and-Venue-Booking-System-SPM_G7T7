@@ -163,6 +163,7 @@ def decide_alternative_venue(
             client.table(VENUES_TABLE).select("*").eq("venue_id", alternative_id)
             .maybe_single().execute().data
         )
+        
         if not venue or venue.get("is_available") is False:
             raise HTTPException(409, "The suggested venue is no longer available.")
         window = booking_window(event)
@@ -185,7 +186,9 @@ def decide_alternative_venue(
             .execute().data
         )
     except APIError as error:
-        if error.code in {"23505", "23514"}:
+        if error.code == "23505":
+            raise HTTPException(409, "This event already has an active request for the suggested alternative venue.") from error
+        if error.code == "23514":
             raise HTTPException(409, "The suggested venue is no longer available.") from error
         raise
     if not updated:
