@@ -109,10 +109,10 @@ class DecisionTests(unittest.TestCase):
 
     def test_reject_stores_optional_fields(self):
         with mock.patch.object(venue_approval, "decide") as decide:
-            venue_approval.reject_request(1, venue_approval.RejectionDetails(reason="  Double booked ", alternative_venue=" "), STAFF)
+            venue_approval.reject_request(1, venue_approval.RejectionDetails(reason="  Double booked ", alternative_venue_id=6), STAFF)
         changes = decide.call_args.args[2]
         self.assertEqual(changes["rejection_reason"], "Double booked")
-        self.assertIsNone(changes["alternative_venue"])
+        self.assertEqual(changes["alternative_venue_id"], 6)
 
     def test_reject_without_body_is_allowed(self):
         with mock.patch.object(venue_approval, "decide") as decide:

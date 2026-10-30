@@ -184,17 +184,19 @@ def test_decide_race(use_db):
 @tc("BE-VENUE-027", "approve_request", "Staff approves a pending request.", "Status Approved; rejection reason and alternative venue are cleared.", pre="Booking has stale rejection fields.",
     steps="1. Call approve_request(1, STAFF).")
 def test_approve(use_db):
-    client = use_db(world([{**BOOKING, "rejection_reason": "old", "alternative_venue": "old"}]), va)
+    client = use_db(world([{**BOOKING, "rejection_reason": "old", "alternative_venue_id": 6}]), va)
     out = va.approve_request(1, STAFF)
-    assert out["status"] == "Approved" and out["rejection_reason"] is None and out["alternative_venue"] is None and client.tables[va.BOOKING_TABLE][0]["rejection_reason"] is None
+    assert out["status"] == "Approved" and out["rejection_reason"] is None and out["alternative_venue_id"] is None and client.tables[va.BOOKING_TABLE][0]["rejection_reason"] is None
 
 
-@tc("BE-VENUE-028", "reject_request", "Staff rejects with reason and alternative venue.", "Status Rejected; both values trimmed and stored.", data="reason \"  Double booked \", alternative \" Hall B\"",
+@tc("BE-VENUE-028", "reject_request", "Staff rejects with reason and alternative venue.", "Status Rejected; reason and linked alternative venue are stored.", data="reason \"  Double booked \", alternative venue_id 6",
     steps="1. Call reject_request(1, RejectionDetails(...), STAFF).")
 def test_reject_details(use_db):
-    use_db(world(), va)
-    out = va.reject_request(1, va.RejectionDetails(reason="  Double booked ", alternative_venue=" Hall B"), STAFF)
-    assert (out["status"], out["rejection_reason"], out["alternative_venue"]) == ("Rejected", "Double booked", "Hall B")
+    client = use_db(world(venues=(VENUE, {"venue_id": 6, "name": "Hall B"})), va)
+    out = va.reject_request(1, va.RejectionDetails(reason="  Double booked ", alternative_venue_id=6), STAFF)
+    saved = client.tables[va.BOOKING_TABLE][0]
+    assert (out["status"], out["rejection_reason"], out["alternative_venue_id"]) == ("Alternative Offered", "Double booked", 6)
+    assert saved["alternative_venue_id"] == 6
 
 
 @tc("BE-VENUE-029", "reject_request", "Staff rejects with no body.", "Still rejected; reason and alternative are None.", data="details = None", steps="1. Call reject_request(1, None, STAFF).", kind="Edge")
@@ -253,3 +255,80 @@ def test_decide_superseded(use_db):
 def test_view_single_day_end_date():
     out = va.view(BOOKING, {**EVENT, "event_end_date": None, "end_time": "12:00:00"}, VENUE, {})
     assert (out["event_date"], out["event_end_date"], out["end_time"]) == ("2026-10-03", "2026-10-03", "12:00:00")
+
+@tc("BE-VENUE-037", "reject_request", "An approved booking overlaps the suggested venue.", "HTTP 409 and no alternative offer is saved.", steps="1. Offer Hall B while another event has an overlapping approved booking.", kind="Negative")
+def test_alternative_offer_blocked_by_approved_overlap(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Approved"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(alternative_venue_id=6), STAFF) == (
+        409,
+        "The suggested venue is already booked during this event time.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-038", "reject_request", "A pending booking overlaps the suggested venue.", "The suggestion is accepted because pending requests do not reserve the venue.", steps="1. Offer Hall B while another event has an overlapping pending request.")
+def test_alternative_offer_ignores_pending_overlap(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Pending"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    out = va.reject_request(1, va.RejectionDetails(alternative_venue_id=6), STAFF)
+    assert out["status"] == "Alternative Offered"
+    assert out["alternative_venue_id"] == 6
+    assert len(client.tables[va.BOOKING_TABLE]) == 2
+
+
+@tc("BE-VENUE-039", "reject_request", "Event timing is missing when staff proposes an alternative venue.", "HTTP 409; no unchecked alternative is offered.", steps="1. Propose Hall B for an event without a complete date/time window.", kind="Negative")
+def test_alternative_offer_requires_event_window(use_db):
+    client = use_db(world(events=({"id": 10, "coordinator_id": "c1"},), venues=(VENUE, {"venue_id": 6, "name": "Hall B"})), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(alternative_venue_id=6), STAFF) == (
+        409,
+        "The event needs a date, start time, and end time before an alternative venue can be offered.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-040", "alternative_venue_availability", "Staff opens the alternative selector.", "The catalogue marks unavailable venues, overlapping confirmed bookings and active holds with reasons; a pending overlap remains available.", steps="1. Query alternatives for request 1.")
+def test_alternative_venue_availability_reasons(use_db):
+    on_hold_expiry = "2099-02-01T10:00:00+00:00"
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "Approved"},
+        {**BOOKING, "request_id": 3, "event_id": 12, "venue_id": 7, "status": "On Hold", "hold_expires_at": on_hold_expiry},
+        {**BOOKING, "request_id": 4, "event_id": 13, "venue_id": 8, "status": "Pending"},
+    ]
+    events = (EVENT, {**EVENT, "id": 11}, {**EVENT, "id": 12}, {**EVENT, "id": 13})
+    venues = (
+        VENUE,
+        {"venue_id": 6, "name": "Confirmed Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 7, "name": "Held Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 8, "name": "Pending Hall", "setup_time": 0, "teardown_time": 0},
+        {"venue_id": 9, "name": "Closed Hall", "is_available": False, "unavailability_reason": "Renovation"},
+    )
+    use_db(world(bookings, events=events, venues=venues), va)
+
+    statuses = {row["venue_id"]: row for row in va.alternative_venue_availability(1, STAFF)}
+
+    assert statuses[6] == {
+        "venue_id": 6,
+        "available": False,
+        "reason": "A confirmed booking overlaps this event, including setup/teardown time.",
+    }
+    assert statuses[7]["available"] is False and statuses[7]["reason"].startswith("Venue is on hold until")
+    assert statuses[8] == {"venue_id": 8, "available": True, "reason": None}
+    assert statuses[9] == {"venue_id": 9, "available": False, "reason": "Renovation"}

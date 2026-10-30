@@ -344,7 +344,7 @@ describe("Venue holds — event coordinator", () => {
       expect(await screen.findByText("Held until 2026-10-02 18:00 SGT")).toBeInTheDocument();
       expect(screen.getByText("Hold expired — submit a new request to continue.")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByText("Held until 2026-10-02 18:00 SGT").closest("tr"));
+      fireEvent.click(screen.getByText("Held until 2026-10-02 18:00 SGT").closest("li"));
       let dialog = screen.getByRole("alertdialog");
       expect(dialog).toHaveTextContent("Hold expires: 2026-10-02 18:00 SGT");
       fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));

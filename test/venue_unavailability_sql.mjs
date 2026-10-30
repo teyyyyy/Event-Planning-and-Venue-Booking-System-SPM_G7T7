@@ -17,7 +17,7 @@ create table "Event Details"(id bigint primary key, event_name text, event_type 
 create table "Venue Booking Requests"(request_id bigint generated always as identity primary key,
   created_at timestamptz not null default now(), event_id bigint unique, venue_id bigint not null,
   venue_staff_id uuid, coordinator_id uuid not null, status text not null,
-  rejection_reason text, alternative_venue text, decided_at timestamptz);
+  rejection_reason text, alternative_venue_id bigint, decided_at timestamptz);
 create table "Equipment Request"(request_id bigint generated always as identity primary key, event_id bigint not null,
   status text default 'Draft', created_by uuid, updated_by uuid, created_at timestamptz default now(),
   updated_at timestamptz default now(), latest_update_summary text);
