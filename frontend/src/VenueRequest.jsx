@@ -109,6 +109,7 @@ export default function VenueRequest({ user }) {
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [alternativeDecisionBusy, setAlternativeDecisionBusy] = useState(false);
+  const [alternativeDecisionError, setAlternativeDecisionError] = useState("");
   const [replacementRequestBusy, setReplacementRequestBusy] = useState(null);
 
   const handleViewDetails = (submission) => {
@@ -119,9 +120,11 @@ export default function VenueRequest({ user }) {
   const closeModal = () => {
     setSelectedSubmission(null);
     setIsModalOpen(false);
+    setAlternativeDecisionError("");
   };
 
   async function decideAlternativeVenue(submission, decision) {
+    setAlternativeDecisionError("");
     setAlternativeDecisionBusy(true);
     try {
       const requestId = submission.request_id || submission.id;
@@ -153,10 +156,7 @@ export default function VenueRequest({ user }) {
             : "Alternative venue declined. The request remains rejected.",
       });
     } catch (error) {
-      setNotice({
-        type: "error",
-        text: error.message || "Unable to save your decision.",
-      });
+      setAlternativeDecisionError(error.message || "Unable to save your decision.");
     } finally {
       setAlternativeDecisionBusy(false);
     }
@@ -1168,6 +1168,11 @@ export default function VenueRequest({ user }) {
             <div>
               <h2 style={{ marginTop: 0 }}>Booking Request Details</h2>
               <div style={{ marginTop: "16px", lineHeight: "1.6" }}>
+                {alternativeDecisionError && (
+                  <p className="page-error" role="alert">
+                    {alternativeDecisionError}
+                  </p>
+                )}
                 <p>
                   <strong>Status:</strong> {selectedSubmission.status}
                 </p>

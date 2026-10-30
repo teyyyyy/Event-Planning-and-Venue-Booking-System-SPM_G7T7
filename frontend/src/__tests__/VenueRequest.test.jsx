@@ -502,3 +502,19 @@ tc('FE-VREQ-038', 'VenueRequest (alternative venue)', 'The coordinator declines 
   const [, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/alternative', 'POST')[0];
   expect(JSON.parse(options.body)).toEqual({ decision: 'decline' });
 });
+
+tc('FE-VREQ-039', 'VenueRequest (alternative venue)', 'Accepting the suggested venue fails availability validation.', 'The error is shown inside the open details dialog above the decision buttons so the coordinator can retry or decline.', { steps: 'Open an alternative offer and accept it while the API returns 409.' }, async () => {
+  backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ detail: 'The suggested venue is no longer available.' }, 409),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  const dialog = screen.getByRole('alertdialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Accept alternative' }));
+  const alert = await within(dialog).findByRole('alert');
+  expect(alert).toHaveTextContent('The suggested venue is no longer available.');
+  expect(within(dialog).getByRole('button', { name: 'Accept alternative' })).toBeEnabled();
+  expect(within(dialog).getByRole('button', { name: 'Decline alternative' })).toBeEnabled();
+});
