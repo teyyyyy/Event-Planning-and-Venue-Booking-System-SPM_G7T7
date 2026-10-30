@@ -375,5 +375,17 @@ def test_by_coordinator_selects_split_event_times(monkeypatch):
     assert all(field in columns for field in ("event_date", "event_end_date", "start_time", "end_time"))
     assert "datetime" not in columns
 
-
+@tc("BE-VREQ-032", "decide_alternative_venue", "The database refuses accepting an alternative venue because the event already has an active request for that venue (23505).", "HTTP 409 with an appropriate error message; the database text is not exposed.", pre="The event already has an active request for the alternative venue.", steps="1. Make the update raise APIError 23505. 2. Call decide_alternative_venue.", kind="Negative")
+def test_accept_alternative_venue_duplicate_active_request(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [alternative_offer()],
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"}],
+        "Venues": [{"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}],
+    })
+    client.fail_tables.add((BOOKING, "update"))
+    client.fail_error = APIError({"code": "23505", "message": 'duplicate key value violates unique constraint "Venue Booking Requests_active_event_venue_key"', "details": None, "hint": None})
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "This event already has an active request for the suggested alternative venue."
 
