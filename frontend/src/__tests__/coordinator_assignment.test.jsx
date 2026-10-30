@@ -70,10 +70,32 @@ describe('CoordinatorAssignment', () => {
       expect(within(dialog).getByDisplayValue('Microphone, Projector')).toBeInTheDocument();
       expect(within(dialog).getByDisplayValue('Projector at the stage.')).toBeInTheDocument();
       expect(within(dialog).getByDisplayValue('Keep the center aisle clear.')).toBeInTheDocument();
-      fireEvent.change(within(dialog).getByRole('combobox', { name: 'Assign event coordinator' }), { target: { value: 'c1' } });
+      const coordinatorSelect = within(dialog).getByRole('combobox', { name: 'Assign event coordinator' });
+      expect(within(coordinatorSelect).getByRole('option', { name: 'Bob — 1 active event' })).toBeInTheDocument();
+      fireEvent.change(coordinatorSelect, { target: { value: 'c1' } });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Assign coordinator' }));
       await waitFor(() => expect(callsTo(f, 'event-coordinator-lead/events/1/coordinator', 'PATCH')).toHaveLength(1));
       expect(await screen.findByText('Gala assigned to Bob.')).toBeInTheDocument();
+    });
+
+  tc('FE-COORD-066', 'CoordinatorAssignment (lead assignment)', 'The lead assignment request fails.', 'The dialog displays the backend error and keeps the event details open.',
+    { kind: 'Negative', steps: '1. Open event details. 2. Select a coordinator. 3. Return an error for assignment.' },
+    async () => {
+      const f = mockFetch((url, options = {}) => {
+        if (url.includes('unassigned-queue')) return json([ev()]);
+        if (url.includes('coordinator-workloads')) return json([{ id: 'c1', name: 'Bob', active_event_count: 1 }]);
+        if (url.includes('event-coordinator-lead/events/1/coordinator') && options.method === 'PATCH') {
+          return json({ detail: 'No coordinator is available.' }, 409);
+        }
+        return json([{ id: 'c1', name: 'Bob' }]);
+      });
+      render(<CoordinatorAssignment user={LEAD} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View details' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Review event request' });
+      fireEvent.change(within(dialog).getByRole('combobox', { name: 'Assign event coordinator' }), { target: { value: 'c1' } });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Assign coordinator' }));
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('No coordinator is available.');
+      expect(callsTo(f, 'event-coordinator-lead/events/1/coordinator', 'PATCH')).toHaveLength(1);
     });
 
   tc('FE-COORD-001', 'CoordinatorAssignment (organiser view)', 'An organiser opens the page.', 'Their events are fetched from /event-organisers/<id>/requests and shown with title, date and status; the heading is "Event status".',
