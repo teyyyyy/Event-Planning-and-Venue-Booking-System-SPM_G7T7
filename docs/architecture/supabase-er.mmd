@@ -93,7 +93,7 @@ erDiagram
         uuid coordinator_id FK "NOT NULL"
         uuid venue_staff_id FK "nullable"
         text rejection_reason "nullable"
-        text alternative_venue "nullable"
+        bigint alternative_venue_id FK "nullable"
         timestamptz decided_at "nullable"
     }
     EQUIPMENT {
