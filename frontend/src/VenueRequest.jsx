@@ -39,7 +39,9 @@ function VenueStatus({ status }) {
           : status.status}
       </span>
       {status.status === "Expired" && (
-        <small style={{ display: "block" }}>Hold lapsed — venue available</small>
+        <small style={{ display: "block" }}>
+          Hold lapsed — venue available
+        </small>
       )}
       {status.own_event && status.status !== "Expired" && (
         <small style={{ display: "block" }}>Your request</small>
@@ -242,10 +244,14 @@ export default function VenueRequest({ user }) {
     if (!eventId) return undefined;
     (async () => {
       try {
-        const res = await fetch(`${API}/venue-availability?event_id=${eventId}`);
+        const res = await fetch(
+          `${API}/venue-availability?event_id=${eventId}`,
+        );
         const data = await res.json();
         if (active && res.ok && Array.isArray(data)) {
-          setVenueStatuses(Object.fromEntries(data.map((row) => [row.venue_id, row])));
+          setVenueStatuses(
+            Object.fromEntries(data.map((row) => [row.venue_id, row])),
+          );
         }
       } catch {
         // Statuses are a guide only; the venue is checked again when the request is submitted.
@@ -285,19 +291,27 @@ export default function VenueRequest({ user }) {
       // 1. Fetch approved bookings and venue details to check availability & buffer constraints
       const [checkResponse, venueResponse] = await Promise.all([
         fetch(`${API}/venue-booking-requests/venues/${selectedVenueId}`),
-        fetch(`${API}/venue-catalogue/${selectedVenueId}`)
+        fetch(`${API}/venue-catalogue/${selectedVenueId}`),
       ]);
 
       if (!checkResponse.ok || !venueResponse.ok) {
-        throw new Error("Unable to verify venue availability or buffer constraints.");
+        throw new Error(
+          "Unable to verify venue availability or buffer constraints.",
+        );
       }
 
       const existingBookings = await checkResponse.json();
       const venueDetails = await venueResponse.json();
       if (venueDetails.is_available === false) {
-        setVenues((current) => current.map((item) => item.venue_id === venueDetails.venue_id ? venueDetails : item));
+        setVenues((current) =>
+          current.map((item) =>
+            item.venue_id === venueDetails.venue_id ? venueDetails : item,
+          ),
+        );
         setSelectedVenueId(null);
-        throw new Error('This venue is unavailable. Please select another venue.');
+        throw new Error(
+          "This venue is unavailable. Please select another venue.",
+        );
       }
 
       const setupMins = parseInt(venueDetails.setup_time || 0, 10);
@@ -442,7 +456,10 @@ export default function VenueRequest({ user }) {
           <div className="form-heading">
             <div>
               <h2>Venue Availability Calendar</h2>
-              <p>Select a venue to view confirmed bookings, holds and pending requests.</p>
+              <p>
+                Select a venue to view confirmed bookings, holds and pending
+                requests.
+              </p>
             </div>
           </div>
           <VenueCalendar venues={venues} events={events} apiBaseUrl={API} />
@@ -494,11 +511,8 @@ export default function VenueRequest({ user }) {
                   <p>Information for the selected event.</p>
                 </div>
               </div>
-              <div
-                className="request-table-wrapper"
-                style={{ width: "100%", overflowX: "auto" }}
-              >
-                <table className="request-table" style={{ width: "100%" }}>
+              <div className="request-table-wrapper venue-responsive-table-wrapper">
+                <table className="request-table venue-responsive-table event-details-table">
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left" }}>Event Name</th>
@@ -512,36 +526,36 @@ export default function VenueRequest({ user }) {
                   </thead>
                   <tbody>
                     <tr>
-                      <td>
+                      <td data-label="Event Name">
                         <strong>{selectedEvent.event_name}</strong>
                       </td>
-                      <td>{selectedEvent.event_date}</td>
-                      <td>
-                        {selectedEvent.start_time &&
-                        selectedEvent.end_time ? (
+                      <td data-label="Date">{selectedEvent.event_date}</td>
+                      <td data-label="Timing">
+                        {selectedEvent.start_time && selectedEvent.end_time ? (
                           <>
-                            {format12HourTime(selectedEvent.start_time)}{" "}
-                            -{" "}
+                            {format12HourTime(selectedEvent.start_time)} -{" "}
                             {format12HourTime(selectedEvent.end_time)}
                           </>
                         ) : (
                           "—"
                         )}
                       </td>
-                      <td>
+                      <td data-label="Capacity">
                         {selectedEvent.event_capacity ||
                           selectedEvent.event_capacity ||
                           "—"}
                       </td>
-                      <td>{selectedEvent.layout_required}</td>
-                      <td>
+                      <td data-label="Layout">
+                        {selectedEvent.layout_required}
+                      </td>
+                      <td data-label="Facilities">
                         {selectedEvent.facilities_required?.map(
                           (facility, index) => (
                             <li key={index}>{facility}</li>
                           ),
                         )}
                       </td>
-                      <td>
+                      <td data-label="Accessibility">
                         {Number(selectedEvent.accessibility_required) === 1
                           ? "Yes"
                           : "No"}
@@ -766,11 +780,8 @@ export default function VenueRequest({ user }) {
               </div>
 
               {/* --- Venue Table --- */}
-              <div
-                className="request-table-wrapper"
-                style={{ width: "100%", overflowX: "auto" }}
-              >
-                <table className="request-table" style={{ width: "100%" }}>
+              <div className="request-table-wrapper venue-responsive-table-wrapper">
+                <table className="request-table venue-responsive-table venue-catalogue-table">
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left" }}>Venue</th>
@@ -787,37 +798,45 @@ export default function VenueRequest({ user }) {
                     {filteredVenues.length ? (
                       filteredVenues.map((item) => (
                         <tr key={item.venue_id}>
-                          <td>
+                          <td data-label="Venue">
                             <strong>{item.name}</strong>
-                            {item.is_available === false && <p>Unavailable — {item.unavailability_reason}</p>}
+                            {item.is_available === false && (
+                              <p>Unavailable — {item.unavailability_reason}</p>
+                            )}
                           </td>
-                          <td>{item.location}</td>
-                          <td>{item.capacity}</td>
-                          <td>
+                          <td data-label="Location">{item.location}</td>
+                          <td data-label="Capacity">{item.capacity}</td>
+                          <td data-label="Supported Layouts">
                             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                               {item.layouts?.map((layout, index) => (
                                 <li key={index}>{layout}</li>
                               ))}
                             </ul>
                           </td>
-                          <td>
+                          <td data-label="Facilities">
                             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                               {item.facilities?.map((facility, index) => (
                                 <li key={index}>{facility}</li>
                               ))}
                             </ul>
                           </td>
-                          <td>{item.accessible === 1 ? "Yes" : "No"}</td>
-                          <td>
-                            <VenueStatus status={venueStatuses[item.venue_id]} />
+                          <td data-label="Accessibility">
+                            {item.accessible === 1 ? "Yes" : "No"}
                           </td>
-                          <td>
+                          <td data-label="Status">
+                            <VenueStatus
+                              status={venueStatuses[item.venue_id]}
+                            />
+                          </td>
+                          <td data-label="Action">
                             <button
                               type="button"
                               className="primary"
                               disabled={
                                 item.is_available === false ||
-                                BLOCKING_STATUSES.includes(venueStatuses[item.venue_id]?.status)
+                                BLOCKING_STATUSES.includes(
+                                  venueStatuses[item.venue_id]?.status,
+                                )
                               }
                               onClick={() => setSelectedVenueId(item.venue_id)}
                             >
@@ -876,100 +895,130 @@ export default function VenueRequest({ user }) {
           </div>
 
           {submittedRequests.length > 0 ? (
-            <div
-              className="request-table-wrapper"
-              style={{ width: "100%", overflowX: "auto" }}
+            <ol
+              className="change-history"
+              aria-label="Venue request submissions"
             >
-              <table className="request-table" style={{ width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left" }}>Event ID</th>
-                    <th style={{ textAlign: "left" }}>Event Name</th>
-                    <th style={{ textAlign: "left" }}>Venue</th>
-                    <th style={{ textAlign: "left" }}>Start</th>
-                    <th style={{ textAlign: "left" }}>End</th>
-                    <th style={{ textAlign: "left" }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {submittedRequests.map((req) => {
-                    const [statusBackground, statusColour] =
-                      SUBMISSION_COLOURS[req.status] || ["#fff3cd", "#856404"];
-                    // Map IDs to names just in case the backend only sends IDs
-                    const eventName =
-                      events.find((e) => String(e.id) === String(req.event_id))
-                        ?.event_name || req.event_id;
-                    const venueName =
-                      venues.find(
-                        (v) => String(v.venue_id) === String(req.venue_id),
-                      )?.name || req.venue_id;
+              {submittedRequests.map((req) => {
+                const [statusBackground, statusColour] = SUBMISSION_COLOURS[
+                  req.status
+                ] || ["#fff3cd", "#856404"];
+                const eventName =
+                  events.find((e) => String(e.id) === String(req.event_id))
+                    ?.event_name || req.event_id;
+                const venueName =
+                  venues.find(
+                    (v) => String(v.venue_id) === String(req.venue_id),
+                  )?.name || req.venue_id;
 
-                    return (
-                      <tr
-                        key={req.request_id || req.id}
-                        onClick={() => handleViewDetails(req)}
-                        style={{ cursor: "pointer" }}
-                        className="hoverable-row"
+                return (
+                  <li
+                    key={req.request_id || req.id}
+                    className="change-entry hoverable-row"
+                    onClick={() => handleViewDetails(req)}
+                    style={{ cursor: "pointer", position: "relative" }}
+                  >
+                    <div className="change-entry-head">
+                      <span
+                        className="change-badge"
+                        style={{
+                          backgroundColor: statusBackground,
+                          color: statusColour,
+                        }}
                       >
-                        <td>{req.request_id || req.id}</td>
-                        <td>
-                          <strong>{eventName}</strong>
-                        </td>
-                        <td>{venueName}</td>
-                        <td>
-                          {req["Event Details"]?.event_date ?? ""}{" "}
-                          <br />
-                          <small style={{ color: "var(--text-muted, #666)" }}>
-                            {format12HourTime(req["Event Details"]?.start_time)}
-                          </small>
-                        </td>
-                        <td>
-                          {/* A blank end date means a single-day event */}
-                          {req["Event Details"]?.event_end_date ||
-                            req["Event Details"]?.event_date ||
-                            ""}{" "}
-                          <br />
-                          <small style={{ color: "var(--text-muted, #666)" }}>
-                            {format12HourTime(req["Event Details"]?.end_time)}
-                          </small>
-                        </td>
-                        <td>
-                          <span
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: "12px",
-                              fontSize: "0.85em",
-                              fontWeight: "bold",
-                              backgroundColor: statusBackground,
-                              color: statusColour,
-                            }}
-                          >
-                            {req.status || "Pending"}
-                          </span>
-                          {req.status === "On Hold" && (
-                            <small style={{ display: "block" }}>
-                              Held until {formatSgt(req.hold_expires_at)}
-                            </small>
-                          )}
-                          {req.status === "Expired" && <div>
-                            <p>Hold expired — submit a new request to continue.</p>
-                            <button type="button" className="secondary" onClick={(event) => {
-                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
-                            }}>Submit new request</button>
-                          </div>}
-                          {req.replacement_required && <div>
-                            <p>Replacement venue required</p>
-                            <button type="button" className="secondary" onClick={(event) => {
-                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
-                            }}>Request replacement venue</button>
-                          </div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        {req.status || "Pending"}
+                      </span>
+                      <small>
+                        Request #{req.request_id || req.id} · {venueName}
+                      </small>
+                    </div>
+
+                    <table
+                      className="change-diff"
+                      style={{ width: "100%", marginTop: "12px" }}
+                    >
+                      <tbody>
+                        <tr>
+                          <th scope="row" style={{ width: "25%" }}>
+                            Event
+                          </th>
+                          <td>
+                            <strong>{eventName}</strong>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">Start</th>
+                          <td>
+                            {req["Event Details"]?.event_date ?? ""}
+                            {req["Event Details"]?.start_time &&
+                              ` · ${format12HourTime(req["Event Details"].start_time)}`}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">End</th>
+                          <td>
+                            {req["Event Details"]?.event_end_date ||
+                              req["Event Details"]?.event_date ||
+                              ""}
+                            {req["Event Details"]?.end_time &&
+                              ` · ${format12HourTime(req["Event Details"].end_time)}`}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {req.status === "On Hold" && (
+                      <p
+                        className="change-reopened"
+                        style={{ marginTop: "12px", marginBottom: 0 }}
+                      >
+                        Held until {formatSgt(req.hold_expires_at)}
+                      </p>
+                    )}
+
+                    {req.status === "Expired" && (
+                      <div style={{ marginTop: "12px" }}>
+                        <p style={{ margin: "0 0 8px 0", color: "#721c24" }}>
+                          Hold expired — submit a new request to continue.
+                        </p>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEventId(String(req.event_id));
+                            setSelectedVenueId(null);
+                            setActiveTab("request");
+                          }}
+                        >
+                          Submit new request
+                        </button>
+                      </div>
+                    )}
+
+                    {req.replacement_required && (
+                      <div style={{ marginTop: "12px" }}>
+                        <p style={{ margin: "0 0 8px 0", color: "#721c24" }}>
+                          Replacement venue required
+                        </p>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEventId(String(req.event_id));
+                            setSelectedVenueId(null);
+                            setActiveTab("request");
+                          }}
+                        >
+                          Request replacement venue
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
           ) : (
             <p className="empty-state">
               No venue requests have been submitted yet.
@@ -1028,14 +1077,27 @@ export default function VenueRequest({ user }) {
 
                 {["On Hold", "Expired"].includes(selectedSubmission.status) && (
                   <p>
-                    <strong>{selectedSubmission.status === "On Hold" ? "Hold expires" : "Hold expired"}:</strong>{" "}
+                    <strong>
+                      {selectedSubmission.status === "On Hold"
+                        ? "Hold expires"
+                        : "Hold expired"}
+                      :
+                    </strong>{" "}
                     {formatSgt(selectedSubmission.hold_expires_at)}
                   </p>
                 )}
                 {selectedSubmission.status === "Expired" && (
-                  <p>The venue hold expired. Submit a new venue request for this event to continue.</p>
+                  <p>
+                    The venue hold expired. Submit a new venue request for this
+                    event to continue.
+                  </p>
                 )}
-                {selectedSubmission.replacement_required && <p>The original venue became unavailable. Please submit a request for a replacement venue for this event.</p>}
+                {selectedSubmission.replacement_required && (
+                  <p>
+                    The original venue became unavailable. Please submit a
+                    request for a replacement venue for this event.
+                  </p>
+                )}
                 {selectedSubmission.status === "Rejected" &&
                   selectedSubmission.rejection_reason && (
                     <p>

@@ -59,12 +59,15 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-004', 'VenueRequest', 'Loading the coordinator\'s events fails.', 'The backend detail is shown as a page error.', { kind: 'Negative', data: '500 "Assigned events unavailable"', steps: '1. Return 500 with a detail for events.' },
     async () => { backend({ events: () => json({ detail: 'Assigned events unavailable' }, 500) }); await ready(); expect(screen.getByText('Assigned events unavailable')).toBeInTheDocument(); });
 
-  tc('FE-VREQ-005', 'VenueRequest (event details)', 'The coordinator selects an event.', 'An Event Details table shows name, date, 12-hour timing, capacity, layout, facilities and accessibility.', { steps: '1. Select "Gala".' },
+  tc('FE-VREQ-005', 'VenueRequest (event details)', 'The coordinator selects an event.', 'An Event Details table shows name, date, 12-hour timing, capacity, layout, facilities and accessibility with labels for narrow layouts.', { steps: '1. Select "Gala".' },
     async () => {
       backend();
       await ready();
       pickEvent(1);
       const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
+      expect(row.closest('table')).toHaveClass('venue-responsive-table', 'event-details-table');
+      expect(row.querySelector('td[data-label="Event Name"]')).toHaveTextContent('Gala');
+      expect(row.querySelector('td[data-label="Facilities"]')).toHaveTextContent('Wi-Fi');
       expect(within(row).getByText('Gala')).toBeInTheDocument();
       expect(row).toHaveTextContent('9:00 AM - 5:00 PM');
       expect(row).toHaveTextContent('50');
@@ -88,7 +91,7 @@ describe('VenueRequest', () => {
     });
 
   tc('FE-VREQ-007', 'VenueRequest (auto-filter)', 'An event with no requirements is selected.', 'All venues are listed.', { kind: 'Edge', steps: '1. Select "Workshop".' },
-    async () => { backend(); await ready(); pickEvent(2); expect(await screen.findByText('Hall A')).toBeInTheDocument(); expect(screen.getByText('Hall B')).toBeInTheDocument(); });
+    async () => { backend(); await ready(); pickEvent(2); expect(await screen.findByText('Hall A')).toBeInTheDocument(); expect(screen.getByText('Hall B')).toBeInTheDocument(); const row = screen.getByText('Hall A').closest('tr'); expect(row.closest('table')).toHaveClass('venue-responsive-table', 'venue-catalogue-table'); expect(row.querySelector('td[data-label="Venue"]')).toHaveTextContent('Hall A'); expect(row.querySelector('td[data-label="Action"]')).toHaveTextContent('Select Venue'); });
 
   tc('FE-VREQ-008', 'VenueRequest (manual filters)', 'The coordinator opens Manual Filtering and sets a minimum capacity above every venue.', '"No venues match your current filters." appears; "Clear Filters" restores the list.', { data: 'minimum capacity 200', steps: '1. Select "Workshop". 2. Click "Manual Filtering". 3. Enter 200. 4. Click "Clear Filters".' },
     async () => {
