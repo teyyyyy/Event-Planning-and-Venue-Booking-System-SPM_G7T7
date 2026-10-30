@@ -286,7 +286,6 @@ export default function CoordinatorAssignment({ user }) {
   const leadLoadId = useRef(0);
   const [leadSelectedCoordinator, setLeadSelectedCoordinator] = useState('');
   const [isAssigningLeadEvent, setIsAssigningLeadEvent] = useState(false);
-  const [leadAssignmentError, setLeadAssignmentError] = useState('');
   const [message, setMessage] = useState('');
   const [changeRequestEvent, setChangeRequestEvent] = useState(null);
   const [changeProposal, setChangeProposal] = useState(EMPTY_PROPOSAL);
