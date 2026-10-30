@@ -72,7 +72,7 @@ tc('FE-COORD-072', 'Confirmed repeated reassignment', 'The Lead reviews an assig
     const fetch = backend();
     await openActive();
     let dialog = await review();
-    expect(within(dialog).getByRole('option', { name: 'Bob — 1 active events' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('option', { name: 'Bob — 1 active event' })).toBeInTheDocument();
     expect(within(dialog).getByRole('option', { name: 'Amy — 0 active events' })).toBeInTheDocument();
     expect(within(dialog).getByRole('status')).toHaveTextContent('Reassign Gala from Bob to Amy?');
     expect(callsTo(fetch, '/coordinator', 'PATCH')).toHaveLength(0);
