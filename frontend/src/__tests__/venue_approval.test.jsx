@@ -193,22 +193,29 @@ describe("VenueApproval", () => {
     "No Approve/Reject buttons; a Rejected request shows its reason and alternative venue.",
     {
       kind: "State",
-      data: 'status Rejected, reason "Double booked", alternative "Hall B"',
+      data: 'status Alternative Offered, reason "Double booked", alternative_venue_id 2',
       steps: "1. Open a rejected booking.",
     },
     async () => {
-      request.mockResolvedValue([
-        booking({
-          status: "Rejected",
-          rejection_reason: "Double booked",
-          alternative_venue: "Hall B",
-        }),
-      ]);
+      request.mockImplementation(async (url) =>
+        url === "/venues"
+          ? [{ venue_id: 2, name: "Hall B", location: "Jurong" }]
+          : [
+              booking({
+                status: "Alternative Offered",
+                rejection_reason: "Double booked",
+                alternative_venue_id: 2,
+              }),
+            ],
+      );
       render(<VenueApproval />);
       const p = within(await open());
       expect(p.queryByRole("button", { name: "Approve" })).toBeNull();
       expect(p.getByText("Double booked")).toBeInTheDocument();
       expect(p.getByText("Hall B")).toBeInTheDocument();
+      expect(
+        p.getByText(/awaiting the event coordinator's decision/i),
+      ).toBeInTheDocument();
     },
   );
 
@@ -287,7 +294,7 @@ describe("VenueApproval", () => {
     "FE-VENUE-013",
     "VenueApproval (reject)",
     "Staff confirms a rejection with reason and alternative.",
-    'POST /reject is sent with {reason, alternative_venue}; the row shows Rejected and the message "Request for Gala rejected.".',
+    'POST /reject is sent with {reason, alternative_venue_id}; the row shows Alternative Offered and the message "Request for Gala alternative offered.".',
     {
       data: 'reason "Double booked", alternative "Hall B"',
       steps:
@@ -295,13 +302,14 @@ describe("VenueApproval", () => {
     },
     async () => {
       request.mockImplementation(async (url) => {
-        if (url === "/venues") return [];
+        if (url === "/venues")
+          return [{ venue_id: 2, name: "Hall B", location: "Jurong" }];
         if (url === "/venue-booking-requests") return [booking()];
         if (url === "/venue-booking-requests/1/reject")
           return booking({
-            status: "Rejected",
+            status: "Alternative Offered",
             rejection_reason: "Double booked",
-            alternative_venue: "Hall B",
+            alternative_venue_id: 2,
           });
       });
       render(<VenueApproval />);
@@ -312,13 +320,13 @@ describe("VenueApproval", () => {
         target: { value: "Double booked" },
       });
       fireEvent.change(screen.getByLabelText(/Alternative venue/), {
-        target: { value: "Hall B" },
+        target: { value: "2" },
       });
       fireEvent.click(
         screen.getByRole("button", { name: "Confirm rejection" }),
       );
       expect(
-        await screen.findByText("Request for Gala rejected."),
+        await screen.findByText("Request for Gala alternative offered."),
       ).toBeInTheDocument();
       const [path, options] = request.mock.calls.find(
         (call) => call[0] === "/venue-booking-requests/1/reject",
@@ -326,7 +334,7 @@ describe("VenueApproval", () => {
       expect(path).toBe("/venue-booking-requests/1/reject");
       expect(JSON.parse(options.body)).toEqual({
         reason: "Double booked",
-        alternative_venue: "Hall B",
+        alternative_venue_id: 2,
       });
     },
   );
@@ -831,18 +839,34 @@ describe("VenueApproval", () => {
     },
   );
 
-  tc('FE-VENUE-027', 'VenueApproval (decide)', 'Staff attempts to approve when overlapInfo has an error type.', 'Action is blocked and approval is disabled.', { steps: '1. Open a request with invalid times. 2. Inspect Approve button.' },
+  tc(
+    "FE-VENUE-027",
+    "VenueApproval (decide)",
+    "Staff attempts to approve when overlapInfo has an error type.",
+    "Action is blocked and approval is disabled.",
+    {
+      steps: "1. Open a request with invalid times. 2. Inspect Approve button.",
+    },
     async () => {
       request.mockImplementation(async (url) => {
-        if (url === '/venues') return [{ venue_id: 1, setup_time: 10, teardown_time: 10 }];
-        if (url === '/venue-booking-requests') return [
-          booking({ request_id: 1, event_name: 'Bad Dates Event', status: 'Pending', start_time: null, end_time: null })
-        ];
+        if (url === "/venues")
+          return [{ venue_id: 1, setup_time: 10, teardown_time: 10 }];
+        if (url === "/venue-booking-requests")
+          return [
+            booking({
+              request_id: 1,
+              event_name: "Bad Dates Event",
+              status: "Pending",
+              start_time: null,
+              end_time: null,
+            }),
+          ];
         return [];
       });
       render(<VenueApproval />);
       const panel = await open();
-      const approveBtn = within(panel).getByRole('button', { name: 'Approve' });
+      const approveBtn = within(panel).getByRole("button", { name: "Approve" });
       expect(approveBtn).toBeDisabled();
-    });
+    },
+  );
 });

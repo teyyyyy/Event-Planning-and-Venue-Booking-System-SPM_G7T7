@@ -328,7 +328,7 @@ describe('VenueRequest', () => {
   tc('FE-VREQ-027', 'VenueRequest (submissions)', 'The coordinator clicks a rejected submission.', 'A "Booking Request Details" dialog shows the status, rejection reason and decision time; "Close" dismisses it.',
     { pre: 'Request 5 Rejected with reason "Double booked".', steps: '1. Open "My Submissions". 2. Click the row. 3. Click "Close".' },
     async () => {
-      backend({ submitted: [{ ...SUBMISSION, status: 'Rejected', rejection_reason: 'Double booked', decided_at: '2026-09-20T10:00:00Z' }] });
+      backend({ submitted: [{ ...SUBMISSION, status: 'Rejected', rejection_reason: 'Double booked', alternative_venue_id: 2, decided_at: '2026-09-20T10:00:00Z' }] });
       await ready();
       fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
       fireEvent.click((await screen.findByText('Gala')).closest('tr'));
@@ -336,6 +336,7 @@ describe('VenueRequest', () => {
       expect(within(dialog).getByText('Booking Request Details')).toBeInTheDocument();
       expect(dialog).toHaveTextContent('Status: Rejected');
       expect(dialog).toHaveTextContent('Rejection Reason: Double booked');
+      expect(within(dialog).queryByRole('button', { name: /accept alternative|decline alternative/i })).toBeNull();
       expect(dialog).toHaveTextContent(`Decided At: ${new Date('2026-09-20T10:00:00Z').toLocaleString()}`);
       fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('alertdialog')).toBeNull();
@@ -439,12 +440,26 @@ tc('FE-VREQ-034', 'Venue unavailability', 'A blocked venue appears in the catalo
   expect(screen.getByRole('button', { name: 'Select Venue' })).toBeDisabled();
 });
 
-tc('FE-VREQ-035', 'Venue unavailability', 'A request requires replacement.', 'The replacement action opens the same event for a new request.', { steps: 'Open submissions and click Request replacement venue.' }, async () => {
-  backend({ submitted: [{ ...SUBMISSION, status: 'Pending', replacement_required: true }] });
-  await ready(); fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+tc('FE-VREQ-035', 'Venue unavailability', 'A request requires replacement.', 'The original request is rejected via the coordinator endpoint before the same event opens for a new request.', { steps: 'Open submissions and click Request replacement venue.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', replacement_required: true, alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Rejected', replacement_required: false, alternative_venue_id: 2 }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
   fireEvent.click(await screen.findByRole('button', { name: 'Request replacement venue' }));
-  expect(eventSelect()).toHaveValue('1');
   expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
+  expect(eventSelect()).toHaveValue('1');
+  const [url, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/replacement', 'POST')[0];
+  expect(url).toContain('/venue-booking-requests/coordinators/c1/5/replacement');
+  expect(JSON.parse(options.body)).toEqual({});
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('li'));
+  const dialog = screen.getByRole('alertdialog');
+  expect(dialog).toHaveTextContent('Status: Rejected');
+  expect(dialog).not.toHaveTextContent('Alternative venue: Hall B');
+  expect(within(dialog).queryByRole('button', { name: /accept alternative|decline alternative/i })).toBeNull();
+  expect(screen.queryByText('Alternative venue offered: Hall B')).toBeNull();
 });
 
 tc('FE-VREQ-036', 'Venue unavailability', 'The venue is blocked after selection.', 'Submission stops with a clear error before posting.', { steps: 'Select venue, block in the server response, submit.' }, async () => {
@@ -452,4 +467,38 @@ tc('FE-VREQ-036', 'Venue unavailability', 'The venue is blocked after selection.
   await ready(); pickEvent(1); await chooseVenue(); fireEvent.click(submitBtn());
   expect(await screen.findByText('This venue is unavailable. Please select another venue.')).toBeInTheDocument();
   expect(callsTo(f, '/venue-bookings', 'POST')).toHaveLength(0);
+});
+
+tc('FE-VREQ-037', 'VenueRequest (alternative venue)', 'The coordinator reviews and accepts an alternative venue offer.', 'The dialog shows catalogue details; accepting confirms the booking at the alternative venue.', { steps: 'Open submissions, open the rejected request, inspect the alternative, and accept it.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Approved', venue_id: 2, alternative_venue_id: null }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  const dialog = screen.getByRole('alertdialog');
+  expect(dialog).toHaveTextContent('Alternative venue: Hall B');
+  expect(dialog).toHaveTextContent('Location: Jurong');
+  expect(dialog).toHaveTextContent('Capacity: 30');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Accept alternative' }));
+  expect(await screen.findByText('Alternative venue accepted. The booking is confirmed.')).toBeInTheDocument();
+  const [url, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/alternative', 'POST')[0];
+  expect(url).toContain('/venue-booking-requests/coordinators/c1/5/alternative');
+  expect(JSON.parse(options.body)).toEqual({ decision: 'accept' });
+  expect(await screen.findByText('Request #5 · Hall B')).toBeInTheDocument();
+});
+
+tc('FE-VREQ-038', 'VenueRequest (alternative venue)', 'The coordinator declines an alternative venue offer.', 'The decision is sent to the backend and the rejection remains final.', { steps: 'Open the offered alternative and decline it.' }, async () => {
+  const f = backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({ ...SUBMISSION, status: 'Rejected', alternative_venue_id: null }),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Decline alternative' }));
+  expect(await screen.findByText('Alternative venue declined. The request remains rejected.')).toBeInTheDocument();
+  const [, options] = callsTo(f, '/venue-booking-requests/coordinators/c1/5/alternative', 'POST')[0];
+  expect(JSON.parse(options.body)).toEqual({ decision: 'decline' });
 });

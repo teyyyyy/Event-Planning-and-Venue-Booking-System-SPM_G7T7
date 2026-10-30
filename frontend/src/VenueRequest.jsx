@@ -24,6 +24,7 @@ const BLOCKING_STATUSES = ["Confirmed", "On Hold"];
 const SUBMISSION_COLOURS = {
   Approved: ["#d4edda", "#155724"],
   Rejected: ["#f8d7da", "#721c24"],
+  "Alternative Offered": ["#fff3cd", "#856404"],
   "On Hold": ["#ede7f6", "#5b3f99"],
   Expired: ["#eef0f3", "#7b8494"],
 };
@@ -107,6 +108,8 @@ export default function VenueRequest({ user }) {
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [alternativeDecisionBusy, setAlternativeDecisionBusy] = useState(false);
+  const [replacementRequestBusy, setReplacementRequestBusy] = useState(null);
 
   const handleViewDetails = (submission) => {
     setSelectedSubmission(submission);
@@ -118,6 +121,79 @@ export default function VenueRequest({ user }) {
     setIsModalOpen(false);
   };
 
+  async function decideAlternativeVenue(submission, decision) {
+    setAlternativeDecisionBusy(true);
+    try {
+      const requestId = submission.request_id || submission.id;
+      const response = await fetch(
+        `${API}/venue-booking-requests/coordinators/${user.id}/${requestId}/alternative`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to save your decision.");
+      }
+      setSubmittedRequests((current) =>
+        current.map((item) =>
+          String(item.request_id || item.id) === String(requestId)
+            ? { ...item, ...result }
+            : item,
+        ),
+      );
+      closeModal();
+      setNotice({
+        type: "success",
+        text:
+          decision === "accept"
+            ? "Alternative venue accepted. The booking is confirmed."
+            : "Alternative venue declined. The request remains rejected.",
+      });
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error.message || "Unable to save your decision.",
+      });
+    } finally {
+      setAlternativeDecisionBusy(false);
+    }
+  }
+
+  async function startReplacementRequest(submission) {
+    const requestId = submission.request_id || submission.id;
+    setReplacementRequestBusy(String(requestId));
+    try {
+      const response = await fetch(
+        `${API}/venue-booking-requests/coordinators/${user.id}/${requestId}/replacement`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to start a replacement request.");
+      }
+      setSubmittedRequests((current) =>
+        current.map((item) =>
+          String(item.request_id || item.id) === String(requestId)
+            ? { ...item, ...result }
+            : item,
+        ),
+      );
+      setEventId(String(submission.event_id));
+      setSelectedVenueId(null);
+      setActiveTab("request");
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error.message || "Unable to start a replacement request.",
+      });
+    } finally {
+      setReplacementRequestBusy(null);
+    }
+  }
+
   // Derive selected event and venue directly from state
 
   const selectedEvent = events.find(
@@ -125,6 +201,11 @@ export default function VenueRequest({ user }) {
   );
   const selectedVenue = venues.find(
     (item) => item.venue_id === selectedVenueId,
+  );
+  const selectedAlternativeVenue = venues.find(
+    (item) =>
+      String(item.venue_id) ===
+      String(selectedSubmission?.alternative_venue_id),
   );
 
   // Automatically apply event details to filters and forms when an event is selected
@@ -910,6 +991,10 @@ export default function VenueRequest({ user }) {
                   venues.find(
                     (v) => String(v.venue_id) === String(req.venue_id),
                   )?.name || req.venue_id;
+                const alternativeVenue = venues.find(
+                  (v) =>
+                    String(v.venue_id) === String(req.alternative_venue_id),
+                );
 
                 return (
                   <li
@@ -967,6 +1052,17 @@ export default function VenueRequest({ user }) {
                       </tbody>
                     </table>
 
+                    {req.status === "Alternative Offered" &&
+                      !req.replacement_required &&
+                      req.alternative_venue_id && (
+                      <p
+                        className="change-reopened"
+                        style={{ marginTop: "12px", marginBottom: 0 }}
+                      >
+                        Alternative venue offered: {alternativeVenue?.name || `Venue ${req.alternative_venue_id}`}
+                      </p>
+                    )}
+
                     {req.status === "On Hold" && (
                       <p
                         className="change-reopened"
@@ -1004,14 +1100,15 @@ export default function VenueRequest({ user }) {
                         <button
                           type="button"
                           className="secondary"
+                          disabled={replacementRequestBusy === String(req.request_id || req.id)}
                           onClick={(event) => {
                             event.stopPropagation();
-                            setEventId(String(req.event_id));
-                            setSelectedVenueId(null);
-                            setActiveTab("request");
+                            startReplacementRequest(req);
                           }}
                         >
-                          Request replacement venue
+                          {replacementRequestBusy === String(req.request_id || req.id)
+                            ? "Rejecting original request…"
+                            : "Request replacement venue"}
                         </button>
                       </div>
                     )}
@@ -1098,12 +1195,51 @@ export default function VenueRequest({ user }) {
                     request for a replacement venue for this event.
                   </p>
                 )}
-                {selectedSubmission.status === "Rejected" &&
+                {["Rejected", "Alternative Offered"].includes(selectedSubmission.status) &&
                   selectedSubmission.rejection_reason && (
                     <p>
                       <strong>Rejection Reason:</strong>{" "}
                       {selectedSubmission.rejection_reason}
                     </p>
+                  )}
+                {selectedSubmission.status === "Alternative Offered" &&
+                  !selectedSubmission.replacement_required &&
+                  selectedSubmission.alternative_venue_id && (
+                    <>
+                      <p>
+                        <strong>Alternative venue:</strong>{" "}
+                        {selectedAlternativeVenue?.name ||
+                          `Venue ${selectedSubmission.alternative_venue_id}`}
+                      </p>
+                      {selectedAlternativeVenue && (
+                        <>
+                          <p><strong>Location:</strong> {selectedAlternativeVenue.location || "—"}</p>
+                          <p><strong>Capacity:</strong> {selectedAlternativeVenue.capacity ?? "—"}</p>
+                          <p><strong>Supported layouts:</strong> {selectedAlternativeVenue.layouts?.join(", ") || "—"}</p>
+                          <p><strong>Facilities:</strong> {selectedAlternativeVenue.facilities?.join(", ") || "None"}</p>
+                          <p><strong>Accessibility:</strong> {selectedAlternativeVenue.accessible === 1 ? "Yes" : "No"}</p>
+                          <p><strong>Setup / teardown:</strong> {selectedAlternativeVenue.setup_time ?? 0} / {selectedAlternativeVenue.teardown_time ?? 0} minutes</p>
+                        </>
+                      )}
+                      <div className="decision-actions" style={{ marginTop: "16px" }}>
+                        <button
+                          className="primary"
+                          type="button"
+                          disabled={alternativeDecisionBusy}
+                          onClick={() => decideAlternativeVenue(selectedSubmission, "accept")}
+                        >
+                          {alternativeDecisionBusy ? "Saving…" : "Accept alternative"}
+                        </button>
+                        <button
+                          className="secondary"
+                          type="button"
+                          disabled={alternativeDecisionBusy}
+                          onClick={() => decideAlternativeVenue(selectedSubmission, "decline")}
+                        >
+                          Decline alternative
+                        </button>
+                      </div>
+                    </>
                   )}
                 {selectedSubmission.decided_at && (
                   <p>

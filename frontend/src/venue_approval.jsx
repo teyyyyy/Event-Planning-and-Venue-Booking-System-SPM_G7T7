@@ -44,6 +44,7 @@ function Detail({ label, children }) {
 
 function RequestDetail({
   booking,
+  venues,
   busy,
   overlapInfo,
   onApprove,
@@ -54,13 +55,16 @@ function RequestDetail({
 }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
-  const [alternativeVenue, setAlternativeVenue] = useState("");
+  const [alternativeVenueId, setAlternativeVenueId] = useState("");
   const [placingHold, setPlacingHold] = useState(false);
   const [holdUntil, setHoldUntil] = useState("");
   const [showHistory, setShowHistory] = useState(false);
   const pending = booking.status === "Pending";
   const held = booking.status === "On Hold";
   const expired = booking.status === "Expired";
+  const alternativeVenue = venues.find(
+    (venue) => String(venue.venue_id) === String(booking.alternative_venue_id),
+  );
   // A held request is still awaiting a decision: approval confirms it, rejection releases it.
   const decidable = pending || held;
 
@@ -151,13 +155,13 @@ function RequestDetail({
             `${booking.coordinator_name}${booking.coordinator_email ? ` (${booking.coordinator_email})` : ""}`}
         </Detail>
         <Detail label="Event description">{booking.event_description}</Detail>
-        {booking.status === "Rejected" && (
+        {["Rejected", "Alternative Offered"].includes(booking.status) && (
           <>
             <Detail label="Reason for rejection">
               {booking.rejection_reason}
             </Detail>
             <Detail label="Alternative venue">
-              {booking.alternative_venue}
+              {alternativeVenue?.name || (booking.alternative_venue_id ? `Venue ${booking.alternative_venue_id}` : null)}
             </Detail>
           </>
         )}
@@ -178,6 +182,12 @@ function RequestDetail({
         <p className="message" role="note">
           This hold expired before a decision was made. The event coordinator
           must submit a new venue request.
+        </p>
+      )}
+
+      {booking.status === "Alternative Offered" && booking.alternative_venue_id && (
+        <p className="message" role="note">
+          Alternative venue offered; awaiting the event coordinator's decision.
         </p>
       )}
 
@@ -269,7 +279,12 @@ function RequestDetail({
           className="reject-form"
           onSubmit={(e) => {
             e.preventDefault();
-            onReject({ reason, alternative_venue: alternativeVenue });
+            onReject({
+              reason,
+              alternative_venue_id: alternativeVenueId
+                ? Number(alternativeVenueId)
+                : null,
+            });
           }}
         >
           <label>
@@ -282,10 +297,23 @@ function RequestDetail({
           </label>
           <label>
             Alternative venue (optional)
-            <input
-              value={alternativeVenue}
-              onChange={(e) => setAlternativeVenue(e.target.value)}
-            />
+            <select
+              value={alternativeVenueId}
+              onChange={(e) => setAlternativeVenueId(e.target.value)}
+            >
+              <option value="">No alternative venue</option>
+              {venues
+                .filter(
+                  (venue) =>
+                    venue.venue_id !== booking.venue_id &&
+                    venue.is_available !== false,
+                )
+                .map((venue) => (
+                  <option key={venue.venue_id} value={venue.venue_id}>
+                    {venue.name}{venue.location ? ` (${venue.location})` : ""}
+                  </option>
+                ))}
+            </select>
           </label>
           <div className="decision-actions">
             <button type="submit" className="btn-reject" disabled={busy}>
@@ -577,6 +605,7 @@ export default function VenueApproval() {
           <RequestDetail
             key={selected.request_id}
             booking={selected}
+            venues={venues}
             busy={busy}
             overlapInfo={overlapInfo}
             onApprove={() => decide("approve")}

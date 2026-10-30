@@ -224,6 +224,121 @@ def test_create_request_duplicate_venue(monkeypatch):
     assert info.value.detail == "This event already has an active request for this venue. Please choose a different venue."
 
 
+def alternative_offer():
+    return {
+        "request_id": 12,
+        "event_id": 10,
+        "venue_id": 5,
+        "coordinator_id": "c1",
+        "status": "Alternative Offered",
+        "alternative_venue_id": 6,
+    }
+
+
+@tc("BE-VREQ-024", "decide_alternative_venue", "The assigned coordinator accepts an alternative venue.", "The request is Approved at the suggested venue and the offer fields are cleared.", steps="1. Accept request 12's alternative venue.")
+def test_accept_alternative_venue(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [
+            {**alternative_offer(), "replacement_required": True},
+            {"request_id": 13, "event_id": 11, "venue_id": 6, "coordinator_id": "c2", "status": "Pending"},
+        ],
+        "Event Details": [
+            {"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+            {"id": 11, "coordinator_id": "c2", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+        ],
+        "Venues": [{"venue_id": 5, "name": "Hall A"}, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}],
+    })
+    result = vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    saved = client.tables[BOOKING][0]
+    assert result["status"] == "Approved" and result["venue_id"] == 6
+    assert saved["alternative_venue_id"] is None
+    assert saved["replacement_required"] is False
+    assert client.tables[BOOKING][1]["status"] == "Pending"
+
+
+@tc("BE-VREQ-030", "decide_alternative_venue", "An approved booking overlaps the suggested venue.", "HTTP 409; the alternative is not accepted.", steps="1. Accept an alternative venue already approved for an overlapping event.", kind="Negative")
+def test_accept_alternative_blocked_by_approved_overlap(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [
+            alternative_offer(),
+            {"request_id": 13, "event_id": 11, "venue_id": 6, "coordinator_id": "c2", "status": "Approved"},
+        ],
+        "Event Details": [
+            {"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+            {"id": 11, "coordinator_id": "c2", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"},
+        ],
+        "Venues": [{"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert info.value.detail == "The suggested venue is already booked for this event time."
+    assert client.tables[BOOKING][0]["status"] == "Alternative Offered"
+
+
+@tc("BE-VREQ-025", "decide_alternative_venue", "The assigned coordinator declines an alternative venue.", "The request remains Rejected at its original venue and the offer fields are cleared.", steps="1. Decline request 12's alternative venue.")
+def test_decline_alternative_venue(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [alternative_offer()],
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+    })
+    result = vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="decline"), {"id": "c1", "role": "Event Coordinator"})
+    saved = client.tables[BOOKING][0]
+    assert result["status"] == "Rejected" and result["venue_id"] == 5
+    assert saved["alternative_venue_id"] is None
+
+
+@tc("BE-VREQ-026", "decide_alternative_venue", "A coordinator tries to decide an offer for another coordinator's event.", "HTTP 403 and no booking update.", steps="1. Call the decision endpoint as c1 for an event assigned to c2.", kind="Security")
+def test_decide_alternative_unassigned_event(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [alternative_offer()],
+        "Event Details": [{"id": 10, "coordinator_id": "c2"}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 403
+    assert not client.writes(BOOKING, "update")
+
+
+@tc("BE-VREQ-027", "decide_alternative_venue", "The booking belongs to another coordinator.", "HTTP 404 before event details are read.", steps="1. Call the decision endpoint as c1 for a request owned by c2.", kind="Security")
+def test_decide_alternative_foreign_booking_not_read_event(monkeypatch):
+    foreign_offer = {**alternative_offer(), "coordinator_id": "c2"}
+    client = use(monkeypatch, {BOOKING: [foreign_offer]})
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="decline"), {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 404
+    assert not [entry for entry in client.log if entry[0] == "Event Details"]
+
+
+@tc("BE-VREQ-028", "start_replacement_request", "The assigned coordinator starts a replacement request.", "The original booking is rejected and its alternative venue fields are preserved.", steps="1. Start a replacement for request 12.")
+def test_start_replacement_preserves_alternative(monkeypatch):
+    original = {
+        **alternative_offer(),
+        "status": "Alternative Offered",
+        "replacement_required": True,
+    }
+    client = use(monkeypatch, {
+        BOOKING: [original],
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+    })
+    result = vr.start_replacement_request("c1", 12, {"id": "c1", "role": "Event Coordinator"})
+    saved = client.tables[BOOKING][0]
+    assert result["status"] == "Rejected" and result["replacement_required"] is False
+    assert saved["alternative_venue_id"] == 6
+
+
+@tc("BE-VREQ-029", "start_replacement_request", "A request without replacement_required is submitted.", "HTTP 409 and no booking update.", steps="1. Call start_replacement_request for a normal pending request.", kind="Negative")
+def test_start_replacement_requires_flag(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [{**alternative_offer(), "status": "Pending", "replacement_required": False}],
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.start_replacement_request("c1", 12, {"id": "c1", "role": "Event Coordinator"})
+    assert info.value.status_code == 409
+    assert not client.writes(BOOKING, "update")
+
+
 @tc("BE-VREQ-023", "create_venue_booking", "The database guard reports the venue became unavailable (23514).", "HTTP 409 asking for a replacement venue.", pre="Venue staff mark the venue unavailable after the form loaded.", steps="1. Make the insert raise APIError 23514. 2. Call create_venue_booking.", kind="Negative")
 def test_create_request_venue_became_unavailable(monkeypatch):
     client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
