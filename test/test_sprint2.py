@@ -76,6 +76,32 @@ def test_link_rechecks_access(world):
     world.tables['event_registrations'] = [{'event_id': 1, 'attendee_id': 'a1'}]
     assert client.get('/api/notifications/1/record').json()['event']['event_name'] == 'Gather'
 
+@tc("BE-SP2-010", "Venue notification link", "A coordinator opens a venue offer notification.", "The linked record contains alternative_venue_id and separately resolved venue details, with no free-text alternative field.", steps="1. Authenticate as the assigned coordinator. 2. Open the venue notification record.")
+def test_venue_notification_resolves_alternative_id(world, monkeypatch):
+    world.tables["Venue Booking Requests"][0].update({
+        "coordinator_id": "c1",
+        "status": "Alternative Offered",
+        "alternative_venue_id": 3,
+    })
+    world.tables["Venues"].append({"venue_id": 3, "name": "Hall B", "location": "North Campus"})
+    world.tables["notifications"].append({
+        "id": 3,
+        "recipient_id": "c1",
+        "record_type": "venue_booking",
+        "record_id": "1",
+        "is_read": False,
+        "created_at": "2026-01-02",
+    })
+    monkeypatch.setitem(main.app.dependency_overrides, auth.current_user, lambda: {"id": "c1", "role": "Event Coordinator"})
+
+    response = client.get("/api/notifications/3/record")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["record"]["alternative_venue_id"] == 3
+    assert "alternative_venue" not in body["record"]
+    assert body["alternative_venue_details"] == {"venue_id": 3, "name": "Hall B", "location": "North Campus"}
+
 @tc("BE-SP2-007", "Sprint 2 authentication", "Caller has no session.", "All attendee and notification endpoints reject the request before database access.", steps="1. GET browse, registrations, inbox and linked record. 2. POST registration. 3. PATCH read status.", kind="Security")
 def test_auth_required():
     for method, path in [('GET','/api/attendee/events'),('GET','/api/attendee/registrations'),('GET','/api/notifications'),('GET','/api/notifications/1/record'),('POST','/api/attendee/events/1/register'),('PATCH','/api/notifications/1/read')]:
