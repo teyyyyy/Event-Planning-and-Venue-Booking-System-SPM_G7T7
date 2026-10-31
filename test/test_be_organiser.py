@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from postgrest.exceptions import APIError
+from pydantic import ValidationError
 
 import event_organiser as eo
 from fake_supabase import FakeClient
@@ -17,7 +18,10 @@ PAST = (date.today() - timedelta(days=1)).isoformat()
 
 def make(**kw):
     base = dict(event_name="Gala", event_type="Workshop", event_date=D1, event_capacity=10,
-                description="d", start_time="09:00", end_time="17:00")
+                description="d", start_time="09:00", end_time="17:00",
+                layout_required="Banquet", equipment_required=["Microphone"],
+                accessibility_required=0, equipment_placement="Near the stage.",
+                crowd_movement="Keep the center aisle clear.", facilities_required=["Aircon"])
     return eo.EventRequest(**{**base, **kw})
 
 def make_change_request(request_text, **kw):
@@ -164,12 +168,56 @@ def test_validate_multi_day_earlier_end_time():
     eo.validate_request(make(event_end_date=D3, end_time="12:00"))
 
 
+@tc("BE-ORG-062", "validate_request", "A request includes an unsupported layout.", "HTTP 400 and the unsupported value is not accepted.",
+    data="layout_required = Cabaret", steps="1. Validate a request with an unsupported layout.", kind="Negative")
+def test_validate_rejects_unknown_layout():
+    assert err(eo.validate_request, make(layout_required="Cabaret")) == (400, "Select a valid event layout.")
+
+
+@tc("BE-ORG-063", "EventRequest", "Accessibility is outside the 0/1 range.", "Request validation rejects the value.",
+    data="accessibility_required = 2", steps="1. Construct an event request with accessibility set to 2.", kind="Negative")
+def test_accessibility_must_be_binary():
+    with pytest.raises(ValidationError):
+        make(accessibility_required=2)
+
+
+@tc("BE-ORG-065", "EventRequest", "A planning requirement is omitted or has an empty selection list.", "Request validation rejects both incomplete payloads.",
+    steps="1. Construct requests without a layout or with no selected equipment.", kind="Negative")
+def test_planning_requirements_are_required():
+    payload = make().model_dump()
+    payload.pop("layout_required")
+    with pytest.raises(ValidationError):
+        eo.EventRequest(**payload)
+    with pytest.raises(ValidationError):
+        make(equipment_required=[])
+
+
+@tc("BE-ORG-064", "validate_request", "A request includes equipment or facilities outside the supplied options.", "HTTP 400.",
+    steps="1. Validate requests with unsupported equipment and facilities.", kind="Negative")
+def test_validate_rejects_unknown_equipment_and_facilities():
+    assert err(eo.validate_request, make(equipment_required=["Forklift"])) == (
+        400, "Select valid required equipment."
+    )
+    assert err(eo.validate_request, make(facilities_required=["Private office"])) == (
+        400, "Select valid required facilities."
+    )
+
+
 @tc("BE-ORG-020", "create_event_request", "Valid draft is saved.", "A Draft row is inserted for the organiser and returned.",
     steps="1. Call create_event_request(\"o1\", make()).")
 def test_create_draft(use_db):
     client = setup(use_db)
-    out = eo.create_event_request("o1", make())
+    planning = {
+        "layout_required": "Banquet",
+        "equipment_required": ["Microphone", "Projector"],
+        "accessibility_required": 1,
+        "equipment_placement": "Projector at the stage.",
+        "crowd_movement": "Keep the center aisle clear.",
+        "facilities_required": ["Aircon", "Stage"],
+    }
+    out = eo.create_event_request("o1", make(**planning))
     assert out["status"] == "Draft" and out["organiser_id"] == "o1" and client.tables["Event Details"][0]["event_end_date"] == D1
+    assert {key: out[key] for key in planning} == planning
 
 
 @tc("BE-ORG-021", "create_event_request", "Draft with invalid schedule.", "HTTP 400 and nothing is inserted.", data="end before start",
@@ -282,6 +330,39 @@ def test_submit_wrong_owner(use_db):
 def test_submit_returns_nothing(use_db):
     setup(use_db, [row()]).empty_updates = True
     assert err(eo.submit_event_request, "o1", 1) == (500, "Event request could not be submitted.")
+
+
+@tc("BE-ORG-058", "discard_event_request", "Owner discards their Draft.", "The draft is removed and a success message is returned.",
+    pre="Draft event 1 is owned by o1.", steps="1. Call discard_event_request(\"o1\", 1).")
+def test_discard_draft(use_db):
+    client = setup(use_db, [row(id="1")])
+    assert eo.discard_event_request("o1", "1") == {"message": "Event draft discarded successfully."}
+    assert client.tables["Event Details"] == []
+
+
+@tc("BE-ORG-059", "discard_event_request", "Event id does not exist.", "HTTP 404 \"Event request not found.\".",
+    steps="1. Call discard_event_request(\"o1\", \"99\").", kind="Negative")
+def test_discard_missing_draft(use_db):
+    setup(use_db, [row()])
+    assert err(eo.discard_event_request, "o1", "99") == (404, "Event request not found.")
+
+
+@tc("BE-ORG-060", "discard_event_request", "A different organiser tries to discard the draft.",
+    "HTTP 403 and the draft remains.", pre="Draft event 1 is owned by o1.",
+    steps="1. Call discard_event_request(\"o2\", \"1\").", kind="Security")
+def test_discard_wrong_owner(use_db):
+    client = setup(use_db, [row(id="1")])
+    assert err(eo.discard_event_request, "o2", "1")[0] == 403
+    assert client.tables["Event Details"] == [row(id="1")]
+
+
+@tc("BE-ORG-061", "discard_event_request", "Owner tries to discard an event that is not a Draft.",
+    "HTTP 400 and the event remains.", pre="Event 1 is Submitted and owned by o1.",
+    steps="1. Call discard_event_request(\"o1\", \"1\").", kind="Negative")
+def test_discard_non_draft(use_db):
+    client = setup(use_db, [row(id="1", status="Submitted")])
+    assert err(eo.discard_event_request, "o1", "1") == (400, "Only draft event requests can be discarded.")
+    assert client.tables["Event Details"] == [row(id="1", status="Submitted")]
 
 
 @tc("BE-ORG-039", "create_event_change_request", "Owner requests changes to a confirmed event assigned to a coordinator.",

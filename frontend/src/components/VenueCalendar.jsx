@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { request } from "../api";
+import { eventWindow } from "../eventTimes";
 
 function format12HourTime(time24) {
   if (!time24) return "";
@@ -212,20 +213,12 @@ export default function VenueCalendar({ venues }) {
                     const dayEnd = new Date(day);
                     dayEnd.setHours(24, 0, 0, 0); // Midnight of the next day
 
-                    // Find bookings that START in this specific hour on this specific day
+                    // Find bookings that START in this specific hour on this specific day.
+                    // Bookings have no times of their own; they come from the linked event.
                     const startingBookings = calendarBookings.filter((b) => {
-                      const startStr =
-                        b.start_datetime || b["Event Details"]?.start_datetime;
-                      const endStr =
-                        b.end_datetime || b["Event Details"]?.end_datetime;
-                      if (!startStr || !endStr) return false;
-
-                      const eventStart = new Date(
-                        startStr.substring(0, 16).replace(" ", "T"),
-                      );
-                      const eventEnd = new Date(
-                        endStr.substring(0, 16).replace(" ", "T"),
-                      );
+                      const times = eventWindow(b["Event Details"]);
+                      if (!times) return false;
+                      const { start: eventStart, end: eventEnd } = times;
 
                       // Expand boundaries by setup and teardown times
                       const overallStart = new Date(
@@ -260,21 +253,11 @@ export default function VenueCalendar({ venues }) {
                         }}
                       >
                         {startingBookings.map((booking, bIdx) => {
-                          const eventDetails = booking["Event Details"] || {};
-                          const startStr =
-                            booking.start_datetime ||
-                            eventDetails.start_datetime;
-                          const endStr =
-                            booking.end_datetime || eventDetails.end_datetime;
+                          const eventDetails = booking["Event Details"];
                           const eventName =
                             eventDetails.event_name || "Unknown Event";
-
-                          const eventStart = new Date(
-                            startStr.substring(0, 16).replace(" ", "T"),
-                          );
-                          const eventEnd = new Date(
-                            endStr.substring(0, 16).replace(" ", "T"),
-                          );
+                          const { start: eventStart, end: eventEnd } =
+                            eventWindow(eventDetails);
 
                           // Calculate overall bounds including setup & teardown
                           const overallStart = new Date(

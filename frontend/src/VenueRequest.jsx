@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import VenueCalendar from "./components/VenueCalendar";
 import { authenticatedFetch as fetch } from "./api";
+import { eventWindow } from "./eventTimes";
 const API = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api";
 
 function format12HourTime(time24) {
@@ -23,6 +24,7 @@ const BLOCKING_STATUSES = ["Confirmed", "On Hold"];
 const SUBMISSION_COLOURS = {
   Approved: ["#d4edda", "#155724"],
   Rejected: ["#f8d7da", "#721c24"],
+  "Alternative Offered": ["#fff3cd", "#856404"],
   "On Hold": ["#ede7f6", "#5b3f99"],
   Expired: ["#eef0f3", "#7b8494"],
 };
@@ -38,7 +40,9 @@ function VenueStatus({ status }) {
           : status.status}
       </span>
       {status.status === "Expired" && (
-        <small style={{ display: "block" }}>Hold lapsed — venue available</small>
+        <small style={{ display: "block" }}>
+          Hold lapsed — venue available
+        </small>
       )}
       {status.own_event && status.status !== "Expired" && (
         <small style={{ display: "block" }}>Your request</small>
@@ -104,6 +108,9 @@ export default function VenueRequest({ user }) {
 
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [alternativeDecisionBusy, setAlternativeDecisionBusy] = useState(false);
+  const [alternativeDecisionError, setAlternativeDecisionError] = useState("");
+  const [replacementRequestBusy, setReplacementRequestBusy] = useState(null);
 
   const handleViewDetails = (submission) => {
     setSelectedSubmission(submission);
@@ -113,7 +120,79 @@ export default function VenueRequest({ user }) {
   const closeModal = () => {
     setSelectedSubmission(null);
     setIsModalOpen(false);
+    setAlternativeDecisionError("");
   };
+
+  async function decideAlternativeVenue(submission, decision) {
+    setAlternativeDecisionError("");
+    setAlternativeDecisionBusy(true);
+    try {
+      const requestId = submission.request_id || submission.id;
+      const response = await fetch(
+        `${API}/venue-booking-requests/coordinators/${user.id}/${requestId}/alternative`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to save your decision.");
+      }
+      setSubmittedRequests((current) =>
+        current.map((item) =>
+          String(item.request_id || item.id) === String(requestId)
+            ? { ...item, ...result }
+            : item,
+        ),
+      );
+      closeModal();
+      setNotice({
+        type: "success",
+        text:
+          decision === "accept"
+            ? "Alternative venue accepted. The booking is confirmed."
+            : "Alternative venue declined. The request remains rejected.",
+      });
+    } catch (error) {
+      setAlternativeDecisionError(error.message || "Unable to save your decision.");
+    } finally {
+      setAlternativeDecisionBusy(false);
+    }
+  }
+
+  async function startReplacementRequest(submission) {
+    const requestId = submission.request_id || submission.id;
+    setReplacementRequestBusy(String(requestId));
+    try {
+      const response = await fetch(
+        `${API}/venue-booking-requests/coordinators/${user.id}/${requestId}/replacement`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+      );
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.detail || "Unable to start a replacement request.");
+      }
+      setSubmittedRequests((current) =>
+        current.map((item) =>
+          String(item.request_id || item.id) === String(requestId)
+            ? { ...item, ...result }
+            : item,
+        ),
+      );
+      setEventId(String(submission.event_id));
+      setSelectedVenueId(null);
+      setActiveTab("request");
+    } catch (error) {
+      setNotice({
+        type: "error",
+        text: error.message || "Unable to start a replacement request.",
+      });
+    } finally {
+      setReplacementRequestBusy(null);
+    }
+  }
 
   // Derive selected event and venue directly from state
 
@@ -122,6 +201,11 @@ export default function VenueRequest({ user }) {
   );
   const selectedVenue = venues.find(
     (item) => item.venue_id === selectedVenueId,
+  );
+  const selectedAlternativeVenue = venues.find(
+    (item) =>
+      String(item.venue_id) ===
+      String(selectedSubmission?.alternative_venue_id),
   );
 
   // Automatically apply event details to filters and forms when an event is selected
@@ -241,10 +325,14 @@ export default function VenueRequest({ user }) {
     if (!eventId) return undefined;
     (async () => {
       try {
-        const res = await fetch(`${API}/venue-availability?event_id=${eventId}`);
+        const res = await fetch(
+          `${API}/venue-availability?event_id=${eventId}`,
+        );
         const data = await res.json();
         if (active && res.ok && Array.isArray(data)) {
-          setVenueStatuses(Object.fromEntries(data.map((row) => [row.venue_id, row])));
+          setVenueStatuses(
+            Object.fromEntries(data.map((row) => [row.venue_id, row])),
+          );
         }
       } catch {
         // Statuses are a guide only; the venue is checked again when the request is submitted.
@@ -270,7 +358,8 @@ export default function VenueRequest({ user }) {
     }
 
     // The overlap check below needs the event's times, so don't submit without them
-    if (!selectedEvent.start_datetime || !selectedEvent.end_datetime) {
+    const requested = eventWindow(selectedEvent);
+    if (!requested) {
       setNotice({
         type: "error",
         text: "This event has no start or end time, so venue availability can't be checked. The event's timing must be set before a venue can be requested.",
@@ -283,55 +372,46 @@ export default function VenueRequest({ user }) {
       // 1. Fetch approved bookings and venue details to check availability & buffer constraints
       const [checkResponse, venueResponse] = await Promise.all([
         fetch(`${API}/venue-booking-requests/venues/${selectedVenueId}`),
-        fetch(`${API}/venue-catalogue/${selectedVenueId}`)
+        fetch(`${API}/venue-catalogue/${selectedVenueId}`),
       ]);
 
       if (!checkResponse.ok || !venueResponse.ok) {
-        throw new Error("Unable to verify venue availability or buffer constraints.");
+        throw new Error(
+          "Unable to verify venue availability or buffer constraints.",
+        );
       }
 
       const existingBookings = await checkResponse.json();
       const venueDetails = await venueResponse.json();
       if (venueDetails.is_available === false) {
-        setVenues((current) => current.map((item) => item.venue_id === venueDetails.venue_id ? venueDetails : item));
+        setVenues((current) =>
+          current.map((item) =>
+            item.venue_id === venueDetails.venue_id ? venueDetails : item,
+          ),
+        );
         setSelectedVenueId(null);
-        throw new Error('This venue is unavailable. Please select another venue.');
+        throw new Error(
+          "This venue is unavailable. Please select another venue.",
+        );
       }
 
       const setupMins = parseInt(venueDetails.setup_time || 0, 10);
       const teardownMins = parseInt(venueDetails.teardown_time || 0, 10);
 
-      // 2. Extract and format the requested dates directly from the selected event and expand with setup/teardown buffers
-      const reqStartStr = selectedEvent.start_datetime
-        .substring(0, 16)
-        .replace(" ", "T");
-      const reqEndStr = selectedEvent.end_datetime
-        .substring(0, 16)
-        .replace(" ", "T");
-      
-      const reqStart = new Date(reqStartStr).getTime() - setupMins * 60000;
-      const reqEnd = new Date(reqEndStr).getTime() + teardownMins * 60000;
+      // 2. Expand the selected event's times with setup/teardown buffers
+      const reqStart = requested.start.getTime() - setupMins * 60000;
+      const reqEnd = requested.end.getTime() + teardownMins * 60000;
 
-      // 3. Check for time overlaps against existing bookings and active holds, including their buffers
+      // 3. Check for time overlaps against existing bookings and active holds, including their buffers.
+      // Bookings have no times of their own; they come from the linked event.
       const clash = existingBookings.find((booking) => {
         if (!["Approved", "On Hold"].includes(booking.status)) return false;
 
-        const bStartStr = booking.start_datetime
-          ? booking.start_datetime.substring(0, 16).replace(" ", "T")
-          : booking["Event Details"]?.start_datetime
-              ?.substring(0, 16)
-              ?.replace(" ", "T");
+        const booked = eventWindow(booking["Event Details"]);
+        if (!booked) return false;
 
-        const bEndStr = booking.end_datetime
-          ? booking.end_datetime.substring(0, 16).replace(" ", "T")
-          : booking["Event Details"]?.end_datetime
-              ?.substring(0, 16)
-              ?.replace(" ", "T");
-
-        if (!bStartStr || !bEndStr) return false;
-
-        const exStart = new Date(bStartStr).getTime() - setupMins * 60000;
-        const exEnd = new Date(bEndStr).getTime() + teardownMins * 60000;
+        const exStart = booked.start.getTime() - setupMins * 60000;
+        const exEnd = booked.end.getTime() + teardownMins * 60000;
 
         return reqStart < exEnd && reqEnd > exStart;
       });
@@ -457,7 +537,10 @@ export default function VenueRequest({ user }) {
           <div className="form-heading">
             <div>
               <h2>Venue Availability Calendar</h2>
-              <p>Select a venue to view confirmed bookings, holds and pending requests.</p>
+              <p>
+                Select a venue to view confirmed bookings, holds and pending
+                requests.
+              </p>
             </div>
           </div>
           <VenueCalendar venues={venues} events={events} apiBaseUrl={API} />
@@ -509,11 +592,8 @@ export default function VenueRequest({ user }) {
                   <p>Information for the selected event.</p>
                 </div>
               </div>
-              <div
-                className="request-table-wrapper"
-                style={{ width: "100%", overflowX: "auto" }}
-              >
-                <table className="request-table" style={{ width: "100%" }}>
+              <div className="request-table-wrapper venue-responsive-table-wrapper">
+                <table className="request-table venue-responsive-table event-details-table">
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left" }}>Event Name</th>
@@ -527,40 +607,36 @@ export default function VenueRequest({ user }) {
                   </thead>
                   <tbody>
                     <tr>
-                      <td>
+                      <td data-label="Event Name">
                         <strong>{selectedEvent.event_name}</strong>
                       </td>
-                      <td>{selectedEvent.event_date}</td>
-                      <td>
-                        {selectedEvent.start_datetime &&
-                        selectedEvent.end_datetime ? (
+                      <td data-label="Date">{selectedEvent.event_date}</td>
+                      <td data-label="Timing">
+                        {selectedEvent.start_time && selectedEvent.end_time ? (
                           <>
-                            {format12HourTime(
-                              selectedEvent.start_datetime.slice(11, 16),
-                            )}{" "}
-                            -{" "}
-                            {format12HourTime(
-                              selectedEvent.end_datetime.slice(11, 16),
-                            )}
+                            {format12HourTime(selectedEvent.start_time)} -{" "}
+                            {format12HourTime(selectedEvent.end_time)}
                           </>
                         ) : (
                           "—"
                         )}
                       </td>
-                      <td>
+                      <td data-label="Capacity">
                         {selectedEvent.event_capacity ||
                           selectedEvent.event_capacity ||
                           "—"}
                       </td>
-                      <td>{selectedEvent.layout_required}</td>
-                      <td>
+                      <td data-label="Layout">
+                        {selectedEvent.layout_required}
+                      </td>
+                      <td data-label="Facilities">
                         {selectedEvent.facilities_required?.map(
                           (facility, index) => (
                             <li key={index}>{facility}</li>
                           ),
                         )}
                       </td>
-                      <td>
+                      <td data-label="Accessibility">
                         {Number(selectedEvent.accessibility_required) === 1
                           ? "Yes"
                           : "No"}
@@ -613,17 +689,9 @@ export default function VenueRequest({ user }) {
                   </p>
                   <p style={{ margin: "0" }}>
                     <strong>Time:</strong>{" "}
-                    {selectedEvent.start_datetime
-                      ? format12HourTime(
-                          selectedEvent.start_datetime.slice(11, 16),
-                        )
-                      : ""}
+                    {format12HourTime(selectedEvent.start_time)}
                     {" - "}
-                    {selectedEvent.end_datetime
-                      ? format12HourTime(
-                          selectedEvent.end_datetime.slice(11, 16),
-                        )
-                      : ""}
+                    {format12HourTime(selectedEvent.end_time)}
                   </p>
                 </div>
               </div>
@@ -793,11 +861,8 @@ export default function VenueRequest({ user }) {
               </div>
 
               {/* --- Venue Table --- */}
-              <div
-                className="request-table-wrapper"
-                style={{ width: "100%", overflowX: "auto" }}
-              >
-                <table className="request-table" style={{ width: "100%" }}>
+              <div className="request-table-wrapper venue-responsive-table-wrapper">
+                <table className="request-table venue-responsive-table venue-catalogue-table">
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left" }}>Venue</th>
@@ -814,37 +879,45 @@ export default function VenueRequest({ user }) {
                     {filteredVenues.length ? (
                       filteredVenues.map((item) => (
                         <tr key={item.venue_id}>
-                          <td>
+                          <td data-label="Venue">
                             <strong>{item.name}</strong>
-                            {item.is_available === false && <p>Unavailable — {item.unavailability_reason}</p>}
+                            {item.is_available === false && (
+                              <p>Unavailable — {item.unavailability_reason}</p>
+                            )}
                           </td>
-                          <td>{item.location}</td>
-                          <td>{item.capacity}</td>
-                          <td>
+                          <td data-label="Location">{item.location}</td>
+                          <td data-label="Capacity">{item.capacity}</td>
+                          <td data-label="Supported Layouts">
                             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                               {item.layouts?.map((layout, index) => (
                                 <li key={index}>{layout}</li>
                               ))}
                             </ul>
                           </td>
-                          <td>
+                          <td data-label="Facilities">
                             <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                               {item.facilities?.map((facility, index) => (
                                 <li key={index}>{facility}</li>
                               ))}
                             </ul>
                           </td>
-                          <td>{item.accessible === 1 ? "Yes" : "No"}</td>
-                          <td>
-                            <VenueStatus status={venueStatuses[item.venue_id]} />
+                          <td data-label="Accessibility">
+                            {item.accessible === 1 ? "Yes" : "No"}
                           </td>
-                          <td>
+                          <td data-label="Status">
+                            <VenueStatus
+                              status={venueStatuses[item.venue_id]}
+                            />
+                          </td>
+                          <td data-label="Action">
                             <button
                               type="button"
                               className="primary"
                               disabled={
                                 item.is_available === false ||
-                                BLOCKING_STATUSES.includes(venueStatuses[item.venue_id]?.status)
+                                BLOCKING_STATUSES.includes(
+                                  venueStatuses[item.venue_id]?.status,
+                                )
                               }
                               onClick={() => setSelectedVenueId(item.venue_id)}
                             >
@@ -903,115 +976,146 @@ export default function VenueRequest({ user }) {
           </div>
 
           {submittedRequests.length > 0 ? (
-            <div
-              className="request-table-wrapper"
-              style={{ width: "100%", overflowX: "auto" }}
+            <ol
+              className="change-history"
+              aria-label="Venue request submissions"
             >
-              <table className="request-table" style={{ width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left" }}>Event ID</th>
-                    <th style={{ textAlign: "left" }}>Event Name</th>
-                    <th style={{ textAlign: "left" }}>Venue</th>
-                    <th style={{ textAlign: "left" }}>Start</th>
-                    <th style={{ textAlign: "left" }}>End</th>
-                    <th style={{ textAlign: "left" }}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {submittedRequests.map((req) => {
-                    const [statusBackground, statusColour] =
-                      SUBMISSION_COLOURS[req.status] || ["#fff3cd", "#856404"];
-                    // Map IDs to names just in case the backend only sends IDs
-                    const eventName =
-                      events.find((e) => String(e.id) === String(req.event_id))
-                        ?.event_name || req.event_id;
-                    const venueName =
-                      venues.find(
-                        (v) => String(v.venue_id) === String(req.venue_id),
-                      )?.name || req.venue_id;
+              {submittedRequests.map((req) => {
+                const [statusBackground, statusColour] = SUBMISSION_COLOURS[
+                  req.status
+                ] || ["#fff3cd", "#856404"];
+                const eventName =
+                  events.find((e) => String(e.id) === String(req.event_id))
+                    ?.event_name || req.event_id;
+                const venueName =
+                  venues.find(
+                    (v) => String(v.venue_id) === String(req.venue_id),
+                  )?.name || req.venue_id;
+                const alternativeVenue = venues.find(
+                  (v) =>
+                    String(v.venue_id) === String(req.alternative_venue_id),
+                );
 
-                    return (
-                      <tr
-                        key={req.request_id || req.id}
-                        onClick={() => handleViewDetails(req)}
-                        style={{ cursor: "pointer" }}
-                        className="hoverable-row"
+                return (
+                  <li
+                    key={req.request_id || req.id}
+                    className="change-entry hoverable-row"
+                    onClick={() => handleViewDetails(req)}
+                    style={{ cursor: "pointer", position: "relative" }}
+                  >
+                    <div className="change-entry-head">
+                      <span
+                        className="change-badge"
+                        style={{
+                          backgroundColor: statusBackground,
+                          color: statusColour,
+                        }}
                       >
-                        <td>{req.request_id || req.id}</td>
-                        <td>
-                          <strong>{eventName}</strong>
-                        </td>
-                        <td>{venueName}</td>
-                        <td>
-                          {req["Event Details"]?.start_datetime
-                            ? req["Event Details"].start_datetime.slice(0, 10)
-                            : ""}{" "}
-                          <br />
-                          <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req["Event Details"]?.start_datetime
-                              ? format12HourTime(
-                                  req["Event Details"].start_datetime.slice(
-                                    11,
-                                    16,
-                                  ),
-                                )
-                              : ""}
-                          </small>
-                        </td>
-                        <td>
-                          {req["Event Details"]?.end_datetime
-                            ? req["Event Details"].end_datetime.slice(0, 10)
-                            : ""}{" "}
-                          <br />
-                          <small style={{ color: "var(--text-muted, #666)" }}>
-                            {req["Event Details"]?.end_datetime
-                              ? format12HourTime(
-                                  req["Event Details"].end_datetime.slice(
-                                    11,
-                                    16,
-                                  ),
-                                )
-                              : ""}
-                          </small>
-                        </td>
-                        <td>
-                          <span
-                            style={{
-                              padding: "4px 8px",
-                              borderRadius: "12px",
-                              fontSize: "0.85em",
-                              fontWeight: "bold",
-                              backgroundColor: statusBackground,
-                              color: statusColour,
-                            }}
-                          >
-                            {req.status || "Pending"}
-                          </span>
-                          {req.status === "On Hold" && (
-                            <small style={{ display: "block" }}>
-                              Held until {formatSgt(req.hold_expires_at)}
-                            </small>
-                          )}
-                          {req.status === "Expired" && <div>
-                            <p>Hold expired — submit a new request to continue.</p>
-                            <button type="button" className="secondary" onClick={(event) => {
-                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
-                            }}>Submit new request</button>
-                          </div>}
-                          {req.replacement_required && <div>
-                            <p>Replacement venue required</p>
-                            <button type="button" className="secondary" onClick={(event) => {
-                              event.stopPropagation(); setEventId(String(req.event_id)); setSelectedVenueId(null); setActiveTab('request');
-                            }}>Request replacement venue</button>
-                          </div>}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        {req.status || "Pending"}
+                      </span>
+                      <small>
+                        Request #{req.request_id || req.id} · {venueName}
+                      </small>
+                    </div>
+
+                    <table
+                      className="change-diff"
+                      style={{ width: "100%", marginTop: "12px" }}
+                    >
+                      <tbody>
+                        <tr>
+                          <th scope="row" style={{ width: "25%" }}>
+                            Event
+                          </th>
+                          <td>
+                            <strong>{eventName}</strong>
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">Start</th>
+                          <td>
+                            {req["Event Details"]?.event_date ?? ""}
+                            {req["Event Details"]?.start_time &&
+                              ` · ${format12HourTime(req["Event Details"].start_time)}`}
+                          </td>
+                        </tr>
+                        <tr>
+                          <th scope="row">End</th>
+                          <td>
+                            {req["Event Details"]?.event_end_date ||
+                              req["Event Details"]?.event_date ||
+                              ""}
+                            {req["Event Details"]?.end_time &&
+                              ` · ${format12HourTime(req["Event Details"].end_time)}`}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    {req.status === "Alternative Offered" &&
+                      !req.replacement_required &&
+                      req.alternative_venue_id && (
+                      <p
+                        className="change-reopened"
+                        style={{ marginTop: "12px", marginBottom: 0 }}
+                      >
+                        Alternative venue offered: {alternativeVenue?.name || `Venue ${req.alternative_venue_id}`}
+                      </p>
+                    )}
+
+                    {req.status === "On Hold" && (
+                      <p
+                        className="change-reopened"
+                        style={{ marginTop: "12px", marginBottom: 0 }}
+                      >
+                        Held until {formatSgt(req.hold_expires_at)}
+                      </p>
+                    )}
+
+                    {req.status === "Expired" && (
+                      <div style={{ marginTop: "12px" }}>
+                        <p style={{ margin: "0 0 8px 0", color: "#721c24" }}>
+                          Hold expired — submit a new request to continue.
+                        </p>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            setEventId(String(req.event_id));
+                            setSelectedVenueId(null);
+                            setActiveTab("request");
+                          }}
+                        >
+                          Submit new request
+                        </button>
+                      </div>
+                    )}
+
+                    {req.replacement_required && (
+                      <div style={{ marginTop: "12px" }}>
+                        <p style={{ margin: "0 0 8px 0", color: "#721c24" }}>
+                          Replacement venue required
+                        </p>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={replacementRequestBusy === String(req.request_id || req.id)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startReplacementRequest(req);
+                          }}
+                        >
+                          {replacementRequestBusy === String(req.request_id || req.id)
+                            ? "Rejecting original request…"
+                            : "Request replacement venue"}
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
           ) : (
             <p className="empty-state">
               No venue requests have been submitted yet.
@@ -1064,26 +1168,83 @@ export default function VenueRequest({ user }) {
             <div>
               <h2 style={{ marginTop: 0 }}>Booking Request Details</h2>
               <div style={{ marginTop: "16px", lineHeight: "1.6" }}>
+                {alternativeDecisionError && (
+                  <p className="page-error" role="alert">
+                    {alternativeDecisionError}
+                  </p>
+                )}
                 <p>
                   <strong>Status:</strong> {selectedSubmission.status}
                 </p>
 
                 {["On Hold", "Expired"].includes(selectedSubmission.status) && (
                   <p>
-                    <strong>{selectedSubmission.status === "On Hold" ? "Hold expires" : "Hold expired"}:</strong>{" "}
+                    <strong>
+                      {selectedSubmission.status === "On Hold"
+                        ? "Hold expires"
+                        : "Hold expired"}
+                      :
+                    </strong>{" "}
                     {formatSgt(selectedSubmission.hold_expires_at)}
                   </p>
                 )}
                 {selectedSubmission.status === "Expired" && (
-                  <p>The venue hold expired. Submit a new venue request for this event to continue.</p>
+                  <p>
+                    The venue hold expired. Submit a new venue request for this
+                    event to continue.
+                  </p>
                 )}
-                {selectedSubmission.replacement_required && <p>The original venue became unavailable. Please submit a request for a replacement venue for this event.</p>}
-                {selectedSubmission.status === "Rejected" &&
+                {selectedSubmission.replacement_required && (
+                  <p>
+                    The original venue became unavailable. Please submit a
+                    request for a replacement venue for this event.
+                  </p>
+                )}
+                {["Rejected", "Alternative Offered"].includes(selectedSubmission.status) &&
                   selectedSubmission.rejection_reason && (
                     <p>
                       <strong>Rejection Reason:</strong>{" "}
                       {selectedSubmission.rejection_reason}
                     </p>
+                  )}
+                {selectedSubmission.status === "Alternative Offered" &&
+                  !selectedSubmission.replacement_required &&
+                  selectedSubmission.alternative_venue_id && (
+                    <>
+                      <p>
+                        <strong>Alternative venue:</strong>{" "}
+                        {selectedAlternativeVenue?.name ||
+                          `Venue ${selectedSubmission.alternative_venue_id}`}
+                      </p>
+                      {selectedAlternativeVenue && (
+                        <>
+                          <p><strong>Location:</strong> {selectedAlternativeVenue.location || "—"}</p>
+                          <p><strong>Capacity:</strong> {selectedAlternativeVenue.capacity ?? "—"}</p>
+                          <p><strong>Supported layouts:</strong> {selectedAlternativeVenue.layouts?.join(", ") || "—"}</p>
+                          <p><strong>Facilities:</strong> {selectedAlternativeVenue.facilities?.join(", ") || "None"}</p>
+                          <p><strong>Accessibility:</strong> {selectedAlternativeVenue.accessible === 1 ? "Yes" : "No"}</p>
+                          <p><strong>Setup / teardown:</strong> {selectedAlternativeVenue.setup_time ?? 0} / {selectedAlternativeVenue.teardown_time ?? 0} minutes</p>
+                        </>
+                      )}
+                      <div className="decision-actions" style={{ marginTop: "16px" }}>
+                        <button
+                          className="primary"
+                          type="button"
+                          disabled={alternativeDecisionBusy}
+                          onClick={() => decideAlternativeVenue(selectedSubmission, "accept")}
+                        >
+                          {alternativeDecisionBusy ? "Saving…" : "Accept alternative"}
+                        </button>
+                        <button
+                          className="secondary"
+                          type="button"
+                          disabled={alternativeDecisionBusy}
+                          onClick={() => decideAlternativeVenue(selectedSubmission, "decline")}
+                        >
+                          Decline alternative
+                        </button>
+                      </div>
+                    </>
                   )}
                 {selectedSubmission.decided_at && (
                   <p>

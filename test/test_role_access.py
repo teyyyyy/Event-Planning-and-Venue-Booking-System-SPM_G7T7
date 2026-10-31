@@ -69,6 +69,7 @@ ROLE_PATHS = {
     "Safety Officer": (),
     "Venue Staff": (
         "/api/venue-booking-requests",
+        "/api/venue-booking-requests/1/alternative-venue-availability",
         "/api/venue-catalogue",
         "/api/venues",
         "/api/venue-booking-requests/venues/1",
@@ -98,12 +99,20 @@ ROLE_ACTIONS = (
             "description": "Authorization matrix test",
             "start_time": "09:00",
             "end_time": "17:00",
+            "layout_required": "Banquet",
+            "equipment_required": ["Microphone", "Projector"],
+            "accessibility_required": 1,
+            "equipment_placement": "Projector at the stage.",
+            "crowd_movement": "Keep the center aisle clear.",
+            "facilities_required": ["Aircon", "Stage"],
         },
         {200},
     ),
+    ("Event Organiser", "DELETE", "/api/event-organisers/{user_id}/requests/2", None, {200}),
     ("Event Coordinator", "POST", "/api/events/1/clarification-requests",
      {"coordinator_comments": "Please clarify the schedule.", "amendments": "Update the venue setup."}, {200}),
     ("Event Coordinator", "PATCH", "/api/events/1/status", {"event_status": "Approved"}, {200}),
+    ("Event Coordinator", "POST", "/api/venue-booking-requests/coordinators/{user_id}/1/alternative", {"decision": "decline"}, {409}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/hold", {"expires_at": "2099-01-01T09:00"}, {200}),
     ("Venue Staff", "DELETE", "/api/venue-booking-requests/1/hold", None, {200}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
@@ -149,14 +158,14 @@ def client_for_role(monkeypatch, role):
     }
     fake = FakeClient({
         "users": users,
-        "Event Details": [event_row, {**event_row, "id": "1"}],
+        "Event Details": [event_row, {**event_row, "id": "1"}, {
+            **event_row, "id": "2", "status": "Draft",
+        }],
         "Venue Booking Requests": [{
             "request_id": 1, "venue_id": 1, "event_id": 1,
             "coordinator_id": USER_IDS["Event Coordinator"],
             "venue_staff_id": USER_IDS["Venue Staff"], "status": "Pending",
             "created_at": "2026-09-01T00:00:00+00:00",
-            "start_datetime": "2026-10-10T09:00:00+00:00",
-            "end_datetime": "2026-10-10T17:00:00+00:00",
         }],
         "Venues": [{"venue_id": 1, "name": "Hall A"}],
         "Equipment Request": [{"request_id": 1, "event_id": 1, "status": "Submitted", "created_by": USER_IDS["Event Coordinator"]}],
@@ -244,6 +253,7 @@ def assert_role_access(client, role, user_id):
 
     assert client.get(f"/api/users/{user_id}-other/role").status_code == 403
     assert client.get(f"/api/event-organisers/{user_id}-other/submitted-requests").status_code == 403
+    assert client.delete(f"/api/event-organisers/{user_id}-other/requests/2").status_code == 403
     assert client.get(f"/api/event-coordinators/{user_id}-other/events").status_code == 403
 
     for owner, method, path_template, body, allowed_statuses in ROLE_ACTIONS:
@@ -422,6 +432,25 @@ def test_coordinator_cannot_list_another_coordinators_venue_requests(monkeypatch
     assert not [name for name, _, _ in fake.log if name == "Venue Booking Requests"]
 
 
+@tc("BE-ROLE-013", "Coordinator alternative venue decisions", "A coordinator tries to decide an offer using another coordinator's path identity.",
+    "HTTP 403; the venue booking table is not read.",
+    steps="1. Authenticate as coordinator-1. 2. POST to coordinator-2's alternative decision path.", kind="Security")
+def test_coordinator_cannot_decide_alternative_for_another_path_user(monkeypatch):
+    client, _ = client_for_role(monkeypatch, "Event Coordinator")
+    fake = vr.get_supabase()
+    response = client.post(
+        "/api/venue-booking-requests/coordinators/coordinator-2/1/alternative",
+        json={"decision": "decline"},
+    )
+    assert response.status_code == 403
+    assert not [name for name, _, _ in fake.log if name == "Venue Booking Requests"]
+    replacement_response = client.post(
+        "/api/venue-booking-requests/coordinators/coordinator-2/1/replacement",
+    )
+    assert replacement_response.status_code == 403
+    assert not [name for name, _, _ in fake.log if name == "Venue Booking Requests"]
+
+
 @tc("BE-ROLE-011", "Role access matrix", "An Event Coordinator Lead requests permitted and restricted route families.",
     "Coordinator event, change history, change-request processing, equipment, venue-planning (including the coordinator's own venue booking submissions) and profile routes are accessible; unrelated routes are denied.",
     steps="1. Authenticate as an Event Coordinator Lead. 2. Request each route in the role matrix.", kind="Security")
@@ -436,4 +465,3 @@ def test_event_coordinator_lead_access(monkeypatch):
 def test_safety_officer_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Safety Officer")
     assert_role_access(client, "Safety Officer", user_id)
-

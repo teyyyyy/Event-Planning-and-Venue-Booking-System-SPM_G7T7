@@ -328,7 +328,7 @@ function CoordinatorWorkspace({ user, logout }) {
               }
               onClick={openEventManagement}
             >
-              {isCoordinatorLead ? "Unassigned Events" : "Event Management"}
+              {isCoordinatorLead ? "Coordinator Assignments" : "Event Management"}
             </button>
 
             {!isCoordinatorLead && <button

@@ -15,7 +15,13 @@ D = [(date.today() + timedelta(days=n)).isoformat() for n in (1, 2, 3)]
 
 
 def make(**overrides):
-    fields = dict(event_name="x", event_type="Workshop", event_date=D[0], event_capacity=10, description="x", start_time="09:00", end_time="17:00")
+    fields = dict(
+        event_name="x", event_type="Workshop", event_date=D[0], event_capacity=10,
+        description="x", start_time="09:00", end_time="17:00",
+        layout_required="Banquet", equipment_required=["Microphone"],
+        accessibility_required=0, equipment_placement="Near the stage.",
+        crowd_movement="Keep the center aisle clear.", facilities_required=["Aircon"],
+    )
     return eo.EventRequest(**{**fields, **overrides})
 
 

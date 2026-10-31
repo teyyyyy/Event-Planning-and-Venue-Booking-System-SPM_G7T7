@@ -71,4 +71,8 @@ def linked_record(notification_id: int, user=Depends(current_user)):
     else:
         venue = client.table("Venues").select("venue_id,name,location").eq("venue_id", record["venue_id"]).maybe_single().execute()
         details["venue"] = venue.data if venue else None
+        alternative_id = record.get("alternative_venue_id")
+        if alternative_id is not None:
+            alternative = client.table("Venues").select("venue_id,name,location").eq("venue_id", alternative_id).maybe_single().execute()
+            details["alternative_venue_details"] = alternative.data if alternative else None
     return details

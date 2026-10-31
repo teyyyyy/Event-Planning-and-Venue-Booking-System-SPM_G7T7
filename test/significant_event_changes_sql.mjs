@@ -11,6 +11,7 @@ create schema auth;
 create function auth.role() returns text language sql as $$ select 'service_role'::text $$;
 create function auth.uid() returns uuid language sql as $$ select null::uuid $$;
 create table users(id uuid primary key, name text, role text);
+create table "Venues"(venue_id bigint primary key, name text);
 create table "Event Details"(id bigint primary key, event_name text, event_type text, description text,
   event_date date, event_end_date date, start_time time, end_time time, event_capacity integer, status text,
   organiser_id uuid, coordinator_id uuid, layout_required text, facilities_required text[], accessibility_required bigint);
@@ -33,11 +34,20 @@ create table event_change_requests(
   request_text text not null check (length(trim(request_text)) between 1 and 5000),
   created_at timestamptz not null default now()
 );
+insert into public."Venues" values (8, 'Hall B');
+insert into public."Venue Booking Requests"(event_id, venue_id, coordinator_id, status, alternative_venue)
+  values (999, 7, '00000000-0000-0000-0000-000000000001', 'Rejected', ' Hall B ');
 `);
 const sql = async (name) => readFile(new URL(`../backend/sql/${name}`, import.meta.url), 'utf8');
 for (const name of ['sprint2_registration_notifications.sql', 'event_change_requests.sql', 'significant_event_changes.sql']) {
   await db.exec(await sql(name));
 }
+await db.exec(await sql('coordinator_alternative_venue.sql'));
+const alternativeColumns = (await db.query(`select column_name from information_schema.columns
+  where table_name = 'Venue Booking Requests' and column_name in ('alternative_venue','alternative_venue_id') order by column_name`)).rows;
+assert.deepEqual(alternativeColumns.map(row => row.column_name), ['alternative_venue_id']);
+const legacyAlternative = (await db.query(`select alternative_venue_id from "Venue Booking Requests" where event_id = 999`)).rows[0];
+assert.equal(Number(legacyAlternative.alternative_venue_id), 8, 'legacy venue text maps to its unique catalogue venue ID');
 await db.exec(await sql('significant_event_changes.sql')); // rerunnable
 await db.exec(await sql('event_change_requests.sql')); // the review RPC keeps its link to the trigger
 await db.exec(await sql('coordinator_clarification_requests.sql'));
