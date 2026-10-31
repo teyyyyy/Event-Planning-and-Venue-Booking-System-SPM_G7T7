@@ -125,7 +125,6 @@
       "layouts",
       "facilities",
       "capacity",
-      "status",
       "location",
       "accessibility_details"
     ],
@@ -161,10 +160,6 @@
       "capacity": {
         "format": "bigint",
         "type": "integer"
-      },
-      "status": {
-        "format": "text",
-        "type": "string"
       },
       "accessible": {
         "format": "bigint",
