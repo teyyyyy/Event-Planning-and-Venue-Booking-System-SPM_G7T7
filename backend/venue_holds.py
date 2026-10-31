@@ -13,11 +13,11 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from auth import require_coordinator
 from coordinator_assignment import EVENT_TABLE, db
+from venue_constants import APPROVED, EXPIRED, ON_HOLD, STATUS_CHECK_CONSTRAINT
 
 router = APIRouter()
 BOOKING_TABLE = "Venue Booking Requests"
 VENUE_TABLE = "Venues"
-PENDING, APPROVED, ON_HOLD, EXPIRED = "Pending", "Approved", "On Hold", "Expired"
 SGT = timezone(timedelta(hours=8))  # Singapore has no DST, so a fixed offset is exact
 
 
@@ -43,6 +43,12 @@ def booking_window(event: dict[str, Any] | None) -> tuple[datetime, datetime] | 
     start = event_datetime(event, "event_date", "start_time")
     end = event_datetime(event, "event_end_date", "end_time")
     return (datetime.fromisoformat(start), datetime.fromisoformat(end)) if start and end else None
+
+
+def venue_guard_refused(error: Any) -> bool:
+    """guard_venue_availability (venue_unavailability.sql) refuses a write with 23514. The status
+    check constraint uses the same code, but that means an invalid status, not an unavailable venue."""
+    return error.code == "23514" and STATUS_CHECK_CONSTRAINT not in (error.message or "")
 
 
 def is_active_hold(booking: dict[str, Any], now: datetime | None = None) -> bool:
