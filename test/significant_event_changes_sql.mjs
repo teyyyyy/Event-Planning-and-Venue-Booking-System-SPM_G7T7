@@ -123,6 +123,13 @@ await q('delete from "Venue Booking Requests" where event_id=99');
 assert.equal(await ensureRule(), 'Created: one active request per event per venue');
 assert.deepEqual((await uniqueRules()).map((r) => r.indexname), ['Venue Booking Requests_active_event_venue_key'],
   'A partial one-request-per-event index is replaced');
+// Rejected and expired requests don't count, so the event can request that venue again (20.1).
+await addEvent(98, 'Confirmed');
+await addBooking(98, 'Rejected');
+await addBooking(98, 'Expired');
+assert.equal(await venueStatus(await addBooking(98, 'Pending')), 'Pending', 'The venue can be requested again after a rejection');
+await blocked(`insert into "Venue Booking Requests"(event_id,venue_id,coordinator_id,status) values(98,7,$1,'Pending')`, [ids.c], '23505');
+await q('delete from "Venue Booking Requests" where event_id=98');
 assert.deepEqual(await one(`select has_table_privilege('authenticated','event_change_log','select') as read,
   has_function_privilege('authenticated','process_event_change_request(bigint,uuid)','execute') as process,
   has_function_privilege('service_role','process_event_change_request(bigint,uuid)','execute') as service,

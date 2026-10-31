@@ -389,3 +389,13 @@ def test_accept_alternative_venue_duplicate_active_request(monkeypatch):
     assert info.value.status_code == 409
     assert info.value.detail == "This event already has an active request for the suggested alternative venue."
 
+
+
+@tc("BE-VREQ-033", "create_venue_booking", "The coordinator requests a venue again after its earlier requests for the event were rejected or expired.", "A new Pending request is saved; the earlier requests are kept and do not block the venue.", pre="Event 10 has a Rejected and an Expired request for venue 5.", steps="1. Call create_venue_booking for event 10 and venue 5.", kind="State")
+def test_create_request_after_rejection(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [{**row(1, 5, "c1", "Rejected"), "event_id": 10}, {**row(2, 5, "c1", "Expired"), "event_id": 10}],
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"}],
+    })
+    out = vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert [(b["request_id"], b["status"]) for b in client.tables[BOOKING]] == [(1, "Rejected"), (2, "Expired"), (out["request_id"], "Pending")]
