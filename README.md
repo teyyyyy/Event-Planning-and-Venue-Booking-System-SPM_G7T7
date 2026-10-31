@@ -404,6 +404,19 @@ it. It is transactional and rerunnable, and drops nothing while any venue's
 file header explains how to resolve each one and how to roll back. Verify it with
 `node test/drop_venue_status_column_sql.mjs`, using the same `PGLITE_MODULE` as above.
 
+## Venue booking request statuses
+
+A venue booking request's `status` is one of `Pending`, `On Hold`, `Approved`,
+`Expired`, `Rejected`, `Alternative Offered`, `Superseded` or `Cancelled`
+(`backend/venue_constants.py`). Run `backend/sql/venue_booking_statuses.sql` after
+the venue migrations above. It enforces that set with a check constraint, cancels
+an event's open venue requests when the event is cancelled (after its staff are
+notified), and stops sending event notifications to staff on Superseded or Expired
+requests. It is transactional and rerunnable, and changes nothing while any request
+has another status; the error lists those request ids, and the file header explains
+how to fix them and how to roll back. Verify it with
+`node test/venue_booking_statuses_sql.mjs`, using the same `PGLITE_MODULE` as above.
+
 ## Event timing columns
 
 An event's timing is stored only on `Event Details`, as `event_date` + `start_time` and

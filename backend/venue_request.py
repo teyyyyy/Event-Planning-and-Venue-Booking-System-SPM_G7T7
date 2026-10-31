@@ -8,7 +8,8 @@ from database import create_client
 from auth import require_coordinator_or_staff, require_coordinator_path
 # Shared, normalised settings: accepts VITE_SUPABASE_URL and strips a /rest/v1 suffix.
 from coordinator_assignment import SUPABASE_SERVICE_ROLE_KEY as SUPABASE_KEY, SUPABASE_URL
-from venue_holds import APPROVED, EXPIRED, ON_HOLD, PENDING, booking_window, find_conflict, hold_fields
+from venue_constants import ALTERNATIVE_OFFERED, APPROVED, EXPIRED, ON_HOLD, PENDING, REJECTED
+from venue_holds import booking_window, find_conflict, hold_fields, venue_guard_refused
 
 router = APIRouter()
 
@@ -75,7 +76,7 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
         "event_id": booking.event_id,
         "venue_id": booking.venue_id,
         "coordinator_id": booking.coordinator_id,
-        "status": "Pending" 
+        "status": PENDING
     }
     
     try:
@@ -91,7 +92,7 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
         # An event may request several venues, but only one active request per venue (story 20.1).
         if e.code == "23505":
             raise HTTPException(409, "This event already has an active request for this venue. Please choose a different venue.") from e
-        if e.code == "23514":
+        if venue_guard_refused(e):
             raise HTTPException(409, "This venue is unavailable. Refresh and select a replacement venue.") from e
         raise HTTPException(503, "Unable to save venue request. Please try again.") from e
     except Exception as e:
@@ -147,13 +148,13 @@ def decide_alternative_venue(
     if not event or str(event.get("coordinator_id")) != str(user["id"]):
         raise HTTPException(403, "You can only decide alternatives for your assigned events.")
     if (
-        booking.get("status") != "Alternative Offered"
+        booking.get("status") != ALTERNATIVE_OFFERED
         or not booking.get("alternative_venue_id")
     ):
         raise HTTPException(409, "This request has no pending alternative venue offer.")
 
     changes = {
-        "status": "Rejected",
+        "status": REJECTED,
         "alternative_venue_id": None,
         "decided_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -181,14 +182,14 @@ def decide_alternative_venue(
             client.table(BOOKING_TABLE).update(changes)
             .eq("request_id", request_id)
             .eq("coordinator_id", user["id"])
-            .eq("status", "Alternative Offered")
+            .eq("status", ALTERNATIVE_OFFERED)
             .eq("alternative_venue_id", booking["alternative_venue_id"])
             .execute().data
         )
     except APIError as error:
         if error.code == "23505":
             raise HTTPException(409, "This event already has an active request for the suggested alternative venue.") from error
-        if error.code == "23514":
+        if venue_guard_refused(error):
             raise HTTPException(409, "The suggested venue is no longer available.") from error
         raise
     if not updated:
@@ -223,7 +224,7 @@ def start_replacement_request(
     updated = (
         client.table(BOOKING_TABLE)
         .update({
-            "status": "Rejected",
+            "status": REJECTED,
             "replacement_required": False,
             "decided_at": datetime.now(timezone.utc).isoformat(),
         })
