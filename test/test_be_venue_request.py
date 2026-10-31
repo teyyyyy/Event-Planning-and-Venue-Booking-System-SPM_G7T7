@@ -399,3 +399,13 @@ def test_create_request_after_rejection(monkeypatch):
     })
     out = vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     assert [(b["request_id"], b["status"]) for b in client.tables[BOOKING]] == [(1, "Rejected"), (2, "Expired"), (out["request_id"], "Pending")]
+
+
+@tc("BE-VREQ-034", "create_venue_booking", "The status check constraint refuses the insert (23514 naming venue_booking_requests_status_check).", "HTTP 503 with a generic message; an invalid status is not reported as an unavailable venue.", pre="Insert raises the status constraint violation.", steps="1. Make the insert raise APIError 23514 for the status constraint. 2. Call create_venue_booking.", kind="Negative")
+def test_create_request_status_constraint_is_not_unavailability(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client.fail_tables.add((BOOKING, "insert"))
+    client.fail_error = APIError({"code": "23514", "message": 'new row for relation "Venue Booking Requests" violates check constraint "venue_booking_requests_status_check"', "details": None, "hint": None})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (503, "Unable to save venue request. Please try again.")
