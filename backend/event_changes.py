@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from postgrest.exceptions import APIError
 
 from auth import current_user, require_coordinator
+from venue_constants import CLOSED_VENUE_STATUSES as VENUE_CLOSED
 
 router = APIRouter()
 EVENT_TABLE = "Event Details"
@@ -30,7 +31,7 @@ TRACKED_FIELDS = (
 )
 # Requests in these states are history, so a significant change neither reopens nor replaces them.
 CLOSED_STATUSES = {"cancelled", "rejected", "superseded"}
-CLOSED_VENUE_STATUSES = CLOSED_STATUSES | {"expired"}  # an expired venue hold needs a new request
+CLOSED_VENUE_STATUSES = {status.lower() for status in VENUE_CLOSED}  # an expired venue hold needs a new request
 CLOSED_EQUIPMENT_STATUSES = CLOSED_STATUSES | {"draft"}
 
 

@@ -7,9 +7,10 @@ from postgrest.exceptions import APIError
 
 from auth import require_venue_staff
 from coordinator_assignment import EVENT_TABLE, db
+from venue_constants import ALTERNATIVE_OFFERED, APPROVED, EXPIRED, ON_HOLD, PENDING, REJECTED
 from venue_holds import (
-    APPROVED, BOOKING_TABLE, EXPIRED, ON_HOLD, PENDING, SGT, VENUE_TABLE,
-    booking_window, effective_status, find_conflict, to_sgt,
+    BOOKING_TABLE, SGT, VENUE_TABLE,
+    booking_window, effective_status, find_conflict, to_sgt, venue_guard_refused,
 )
 
 router = APIRouter()
@@ -158,7 +159,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
             .data
         )
     except APIError as error:
-        if error.code == "23514":
+        if venue_guard_refused(error):
             raise HTTPException(409, "Venue availability changed. Refresh this request before deciding.") from error
         raise
     if not updated:
