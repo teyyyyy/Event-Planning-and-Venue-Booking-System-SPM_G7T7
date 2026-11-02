@@ -172,19 +172,21 @@ def test_update_requirements(use_db):
     assert client.tables["Equipment Request"][0]["latest_update_summary"] == 'Microphone requirements: "wireless" → "HDMI"'
 
 
-@tc("BE-EQUPD-022", "update_event_equipment_requests", "Existing item set to quantity 0.", "Item is deleted and the summary records \"Projector: 1 → 0 (Cancelled)\".", data="PRJ quantity 0", steps="1. Call update_event_equipment_requests with PRJ = 0.")
+@tc("BE-EQUPD-022", "update_event_equipment_requests", "Existing organiser-required item is set to quantity 0.", "HTTP 400 explains that Projector is required and must remain in the final equipment request.", data="PRJ quantity 0", steps="1. Call update_event_equipment_requests with PRJ = 0.", kind="Negative")
 def test_update_cancel(use_db):
     client = use_db(w(), eu)
-    eu.update_event_equipment_requests("t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 0)))
-    assert "PRJ" not in stored(client) and "Projector: 1 → 0 (Cancelled)" in client.tables["Equipment Request"][0]["latest_update_summary"]
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 0))) == (
+        400, "Projector were required by the Event Organiser but are missing from the final equipment request. Add these equipment rows with a quantity greater than 0.")
+    assert stored(client)["PRJ"]["requested_quantity"] == 1
 
 
-@tc("BE-EQUPD-023", "update_event_equipment_requests", "A new equipment type is added.", "New item row inserted with updated_by; summary notes \"Added × n\".", pre="Request holds only MIC.", data="add PRJ x2",
-    steps="1. Remove PRJ from the request. 2. Call update_event_equipment_requests adding PRJ x2.")
+@tc("BE-EQUPD-023", "update_event_equipment_requests", "Technical Support tries to add an equipment type that is not in the Coordinator's request.", "HTTP 400 explains that Technical Support cannot add or remove equipment types.", pre="Request holds only MIC.", data="add PRJ x2",
+    steps="1. Remove PRJ from the request. 2. Call update_event_equipment_requests adding PRJ x2.", kind="Negative")
 def test_update_add(use_db):
     client = use_db(w(**{"Equipment Request Item": [dict(ITEMS[0])]}), eu)
-    eu.update_event_equipment_requests("t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 2)))
-    assert stored(client)["PRJ"]["updated_by"] == "t1" and "Projector: Added × 2" in client.tables["Equipment Request"][0]["latest_update_summary"]
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 2))) == (
+        400, "Technical Support cannot add or remove equipment types. Only the quantity and technical requirements may be changed.")
+    assert "PRJ" not in stored(client)
 
 
 @tc("BE-EQUPD-024", "update_event_equipment_requests", "Submitted values equal the stored values.", "Nothing is written, status stays Submitted and updated_requests is empty.", steps="1. Call update_event_equipment_requests with unchanged items.", kind="Edge")
@@ -219,22 +221,25 @@ def test_update_duplicate(use_db):
     assert "more than once" in err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2), item("MIC", 3), item("PRJ", 1)))[1]
 
 
-@tc("BE-EQUPD-029", "update_event_equipment_requests", "An existing item is omitted from the update.", "HTTP 400 telling the user to set quantity to 0 instead of removing it.", data="PRJ omitted", steps="1. Call the route without PRJ.", kind="Negative")
+@tc("BE-EQUPD-029", "update_event_equipment_requests", "An organiser-required item is omitted from the update.", "HTTP 400 explains that Projector is required and must remain in the final equipment request.", data="PRJ omitted", steps="1. Call the route without PRJ.", kind="Negative")
 def test_update_cannot_remove(use_db):
     use_db(w(), eu)
-    assert "Set its quantity to 0" in err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2)))[1]
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2))) == (
+        400, "Projector were required by the Event Organiser but are missing from the final equipment request. Add these equipment rows with a quantity greater than 0.")
 
 
-@tc("BE-EQUPD-030", "update_event_equipment_requests", "Update references equipment not in the catalogue.", "HTTP 400 \"Equipment GHOST does not exist.\"", data="GHOST added", steps="1. Call the route adding GHOST.", kind="Negative")
+@tc("BE-EQUPD-030", "update_event_equipment_requests", "Technical Support submits an additional unknown equipment id.", "HTTP 400 explains that Technical Support cannot add or remove equipment types.", data="GHOST added", steps="1. Call the route adding GHOST.", kind="Negative")
 def test_update_unknown_equipment(use_db):
     use_db(w(), eu)
-    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 1), item("GHOST", 1)))[1] == "Equipment GHOST does not exist."
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 1), item("GHOST", 1))) == (
+        400, "Technical Support cannot add or remove equipment types. Only the quantity and technical requirements may be changed.")
 
 
-@tc("BE-EQUPD-031", "update_event_equipment_requests", "A new equipment item has quantity 0.", "HTTP 400 \"New equipment must have a quantity greater than 0.\"", data="new PRJ x0", steps="1. Remove PRJ. 2. Call the route adding PRJ x0.", kind="Negative")
+@tc("BE-EQUPD-031", "update_event_equipment_requests", "An organiser-required equipment item is absent from the request and submitted with quantity 0.", "HTTP 400 explains that Projector is required with a quantity greater than 0.", data="PRJ x0", steps="1. Remove PRJ from the stored request. 2. Call the route with PRJ x0.", kind="Negative")
 def test_update_new_zero(use_db):
     use_db(w(**{"Equipment Request Item": [dict(ITEMS[0])]}), eu)
-    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 0)))[1] == "New equipment must have a quantity greater than 0."
+    assert err(eu.update_event_equipment_requests, "t1", 1, payload(item("MIC", 2, "wireless"), item("PRJ", 0))) == (
+        400, "Projector were required by the Event Organiser but are missing from the final equipment request. Add these equipment rows with a quantity greater than 0.")
 
 
 @tc("BE-EQUPD-032", "update_event_equipment_requests", "Quantity exceeds availability.", "HTTP 400 \"Microphone has only 8 available for this event.\"", data="MIC x9", steps="1. Call the route with MIC x9.", kind="Negative")
@@ -304,14 +309,19 @@ def test_update_superseded_rejected(use_db):
     assert stored(client)["MIC"]["requested_quantity"] == 2
 
 
-@tc("BE-EQUPD-039", "update_event_equipment_requests / mark_reservation_for_recheck", "Technical support changes a request that already has reservations.",
-    "Reserved and Modified reservations of that request become Needs Recheck; Cancelled ones are left alone. Quantities on the reservation are not changed.",
-    pre="Request 7 has reservations 1 (Reserved), 2 (Modified) and 3 (Cancelled).", data="MIC 2 -> 4", steps="1. Call update_event_equipment_requests(\"t1\", 1, payload).", kind="State")
-def test_update_marks_reservations_for_recheck(use_db):
-    client = use_db(w(**{"Equipment Reservation": [
-        {"reservation_id": 1, "request_id": 7, "event_id": 1, "status": "Reserved"},
-        {"reservation_id": 2, "request_id": 7, "event_id": 1, "status": "Modified"},
-        {"reservation_id": 3, "request_id": 7, "event_id": 1, "status": "Cancelled"},
-    ]}), eu)
+@tc("BE-EQUPD-039", "update_event_equipment_requests", "Technical support changes a request that already has a reservation.",
+    "The reservation remains Reserved and its reserved quantities are updated to match the changed request.",
+    pre="Request 7 has reservation 1 (Reserved) with MIC x2 and PRJ x1.", data="MIC 2 -> 4", steps="1. Call update_event_equipment_requests(\"t1\", 1, payload).", kind="State")
+def test_update_updates_reservation_quantity(use_db):
+    client = use_db(w(**{
+        "Equipment Reservation": [
+            {"reservation_id": 1, "request_id": 7, "event_id": 1, "status": "Reserved"},
+        ],
+        "Equipment Reservation Item": [
+            {"reservation_item_id": 1, "reservation_id": 1, "equipment_id": "MIC", "reserved_quantity": 2},
+            {"reservation_item_id": 2, "reservation_id": 1, "equipment_id": "PRJ", "reserved_quantity": 1},
+        ],
+    }), eu)
     eu.update_event_equipment_requests("t1", 1, payload(item("MIC", 4, "wireless"), item("PRJ", 1)))
-    assert [r["status"] for r in client.tables["Equipment Reservation"]] == ["Needs Recheck", "Needs Recheck", "Cancelled"]
+    assert client.tables["Equipment Reservation"][0]["status"] == "Reserved"
+    assert [r["reserved_quantity"] for r in client.tables["Equipment Reservation Item"]] == [4, 1]

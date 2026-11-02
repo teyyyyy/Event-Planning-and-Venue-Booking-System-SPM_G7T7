@@ -24,11 +24,17 @@ EVENT = {
     "id": 1, "event_name": "Gala", "event_type": "Workshop", "description": "Plan",
     "event_date": "2026-11-01", "event_end_date": "2026-11-01", "start_time": "10:00:00", "end_time": "12:00:00",
     "event_capacity": 50, "status": "Confirmed", "organiser_id": "o1", "coordinator_id": "c1",
+    "layout_required": "Theatre", "equipment_required": ["Microphone"],
+    "facilities_required": ["WiFi"], "accessibility_required": 1,
+    "equipment_placement": "Stage left", "crowd_movement": "Main aisle",
 }
 
-
 def proposal(**overrides):
-    keys = ("event_name", "event_type", "description", "event_date", "event_end_date", "start_time", "end_time", "event_capacity")
+    keys = (
+        "event_name", "event_type", "description", "event_date", "event_end_date", "start_time", "end_time",
+        "event_capacity", "layout_required", "equipment_required", "facilities_required", "accessibility_required",
+        "equipment_placement", "crowd_movement",
+    )
     return {**{key: EVENT[key] for key in keys}, **overrides}
 
 
@@ -289,3 +295,68 @@ def test_process_unexpected_failures(use_db, monkeypatch):
         ec.process_event_change_request(11, COORDINATOR)
     monkeypatch.setattr(client, "rpc", lambda *_: SimpleNamespace(execute=lambda: SimpleNamespace(data=None)))
     assert err(ec.process_event_change_request, 11, COORDINATOR) == (500, "Event change request could not be processed.")
+
+
+@tc("BE-EVCHG-022", "classify_change", "The required equipment changes.",
+    "The change is Significant, lists equipment_required and affects equipment only.",
+    data="Microphone → Microphone, Projector", steps="1. Classify a proposal with changed equipment requirements.")
+def test_classify_equipment_required_change():
+    out = ec.classify_change(EVENT, proposal(equipment_required=["Microphone", "Projector"]))
+    assert out["change_type"] == "Significant"
+    assert out["significant_fields"] == ["equipment_required"]
+    assert (out["affects_venue"], out["affects_equipment"]) == (False, True)
+
+
+@tc("BE-EVCHG-023", "classify_change", "The required facilities change.",
+    "The change is Significant, lists facilities_required and affects the venue only.",
+    data="WiFi → WiFi, Power", steps="1. Classify a proposal with changed facility requirements.")
+def test_classify_facilities_required_change():
+    out = ec.classify_change(EVENT, proposal(facilities_required=["WiFi", "Power"]))
+    assert out["change_type"] == "Significant"
+    assert out["significant_fields"] == ["facilities_required"]
+    assert (out["affects_venue"], out["affects_equipment"]) == (True, False)
+
+
+@tc("BE-EVCHG-024", "classify_change", "The accessibility requirement changes.",
+    "The change is Significant, lists accessibility_required and affects the venue only.",
+    data="accessibility_required 1 → 0", steps="1. Classify a proposal with a changed accessibility requirement.")
+def test_classify_accessibility_required_change():
+    out = ec.classify_change(EVENT, proposal(accessibility_required=0))
+    assert out["change_type"] == "Significant"
+    assert out["significant_fields"] == ["accessibility_required"]
+    assert (out["affects_venue"], out["affects_equipment"]) == (True, False)
+
+
+@tc("BE-EVCHG-025", "classify_change", "Equipment and facility selections contain the same values in a different order.",
+    "No change is reported because selection order does not matter.",
+    data="Microphone, Projector and WiFi, Power in reversed order",
+    steps="1. Add two equipment and facility selections to the current event. 2. Classify the same selections in reverse order.", kind="Edge")
+def test_classify_ignores_selection_order():
+    current = {
+        **EVENT,
+        "equipment_required": ["Microphone", "Projector"],
+        "facilities_required": ["WiFi", "Power"],
+    }
+    proposed = {
+        **proposal(),
+        "equipment_required": ["Projector", "Microphone"],
+        "facilities_required": ["Power", "WiFi"],
+    }
+    out = ec.classify_change(current, proposed)
+    assert out["change_type"] == "Ordinary"
+    assert out["significant_fields"] == []
+    assert (out["affects_venue"], out["affects_equipment"]) == (False, False)
+
+
+@tc("BE-EVCHG-026", "classify_change", "Only equipment placement and crowd movement information changes.",
+    "The change is Ordinary and does not reopen venue or equipment arrangements.",
+    data="New equipment placement and crowd movement notes",
+    steps="1. Classify a proposal with changed equipment placement and crowd movement.")
+def test_classify_planning_notes_are_ordinary():
+    out = ec.classify_change(EVENT, proposal(
+        equipment_placement="Back of room",
+        crowd_movement="Use both aisles",
+    ))
+    assert out["change_type"] == "Ordinary"
+    assert out["significant_fields"] == []
+    assert (out["affects_venue"], out["affects_equipment"]) == (False, False)

@@ -48,7 +48,7 @@ describe('EquipmentRequest', () => {
       render(<EquipmentRequest user={USER} />);
       expect(screen.getByText('Loading equipment request page…')).toBeInTheDocument();
       expect(await screen.findByText('Submit equipment request')).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Gala — 2026-10-01' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Gala — 01 Oct 2026 · — – —' })).toBeInTheDocument();
       expect(callsTo(f, '/event-coordinators/c1/events')[0][0]).toMatch(/events$/);
     });
 
@@ -431,4 +431,186 @@ describe('EquipmentRequest', () => {
       await openViewTab();
       expect(await screen.findByText('Unable to load equipment requests.')).toBeInTheDocument();
     });
+
+  tc('FE-EQREQ-040', 'EquipmentRequest (pending review)', 'An equipment request is Pending after event requirements changed.', 'The request is labelled Pending review, uses "Review Request", shows the review warning and uses "Resubmit Request" in the edit form.', { kind: 'State', steps: '1. Return a Pending request. 2. Open the request view. 3. Click "Review Request".' },
+    async () => {
+      backend({ requests: [{ ...REQUEST, status: 'Pending' }] });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('Pending review')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Review Request' }));
+      expect(await screen.findByRole('heading', { name: 'Review equipment request #7' })).toBeInTheDocument();
+      expect(screen.getByText(/This request was created because the event requirements changed/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Resubmit Request' })).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-041', 'EquipmentRequest (edit)', 'An editable request contains two equipment items and one is removed.', 'The selected equipment item is removed while the remaining item stays in the edit form.', { kind: 'State', steps: '1. Open a request with two items. 2. Click the second "Remove equipment" button.' },
+    async () => {
+      backend({ requests: [{ ...REQUEST, items: [REQUEST.items[0], { equipment_id: 'PRJ', equipment_name: 'Projector', requested_quantity: 1, technical_requirements: '' }] }] });
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByDisplayValue('Projector');
+      fireEvent.click(screen.getAllByRole('button', { name: 'Remove equipment' })[1]);
+      expect(screen.queryByDisplayValue('Projector')).toBeNull();
+      expect(screen.getByDisplayValue('Microphone')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-042', 'EquipmentRequest (edit)', 'Coordinator adds a new equipment type while editing and saves.', 'The PUT payload contains both the existing and newly added equipment items.', { kind: 'State', steps: '1. Open the edit form. 2. Add Projector. 3. Enter quantity 1. 4. Save.' },
+    async () => {
+      const f = backend();
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByRole('heading', { name: 'Edit equipment request #7' });
+      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.change(selects()[0], { target: { value: 'PRJ' } });
+      const quantities = document.querySelectorAll('input[type=number]');
+      fireEvent.change(quantities[1], { target: { value: '1' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      await screen.findByText('Equipment request #7 was updated successfully.');
+      const body = JSON.parse(callsTo(f, '/equipment-requests/7', 'PUT')[0][1].body);
+      expect(body.items).toEqual([
+        { equipment_id: 'MIC', requested_quantity: 2, technical_requirements: 'wireless' },
+        { equipment_id: 'PRJ', requested_quantity: 1, technical_requirements: '' },
+      ]);
+    });
+
+  tc('FE-EQREQ-043', 'EquipmentRequest (edit)', 'Coordinator changes optional technical requirements and saves.', 'The changed technical requirements are trimmed and included in the PUT payload.', { data: '"  battery powered  "', steps: '1. Open the edit form. 2. Change technical requirements. 3. Save.' },
+    async () => {
+      const f = backend();
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByRole('heading', { name: 'Edit equipment request #7' });
+      const textarea = document.querySelector('textarea');
+      fireEvent.change(textarea, { target: { value: '  battery powered  ' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+      await screen.findByText('Equipment request #7 was updated successfully.');
+      const body = JSON.parse(callsTo(f, '/equipment-requests/7', 'PUT')[0][1].body);
+      expect(body.items[0].technical_requirements).toBe('battery powered');
+    });
+
+  tc('FE-EQREQ-044', 'EquipmentRequest (submit)', 'Submission fails without a backend detail message.', 'The default submission error is shown.', { kind: 'Negative', steps: '1. Return a failed POST without detail. 2. Complete and submit the form.' },
+    async () => {
+      backend({ post: () => json({}, 500) });
+      await ready();
+      await pickEventAndEquipment('MIC', '2');
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Submit request' })).toBeEnabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Submit request' }));
+      expect(await screen.findByText('Equipment request could not be submitted.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-045', 'EquipmentRequest (dates)', 'An assigned event spans multiple days.', 'The event option shows both the start and end dates.', { kind: 'Edge', data: '2026-10-01 to 2026-10-03', steps: '1. Return a multi-day assigned event. 2. Inspect the event option.' },
+    async () => {
+      backend({ events: [{ ...EVENTS[0], event_end_date: '2026-10-03' }] });
+      await ready();
+      expect(screen.getByRole('option', { name: /Gala — .*01 Oct 2026.*03 Oct 2026/ })).toBeInTheDocument();
+    });
+  
+    tc('FE-EQREQ-046', 'EquipmentRequest (edit validation)', 'An edited equipment row has an invalid quantity when the form is submitted.', 'The edit is not submitted and the validation message is shown.', { kind: 'Negative', data: 'Quantity = 0', steps: '1. Open the edit form. 2. Enter quantity 0. 3. Attempt to submit the form.' },
+    async () => {
+      const f = backend();
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByRole('heading', { name: 'Edit equipment request #7' });
+      fireEvent.change(qty(), { target: { value: '0' } });
+      expect(screen.getByText('Quantity must be a positive whole number.')).toBeInTheDocument();
+      fireEvent.submit(screen.getByRole('button', { name: 'Save Changes' }).closest('form'));
+      expect(await screen.findByText('Please complete all equipment fields with valid quantities.')).toBeInTheDocument();
+      expect(callsTo(f, '/equipment-requests/7', 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-EQREQ-047', 'EquipmentRequest (notice)', 'An error notice is open and the coordinator closes it.', 'The notice dialog disappears.', { kind: 'State', steps: '1. Cause an availability error. 2. Click Close.' },
+    async () => {
+      backend({ avail: () => json({ detail: 'Availability failed.' }, 500) });
+      await ready();
+      fireEvent.change(selects()[0], { target: { value: '1' } });
+      expect(await screen.findByText('Availability failed.')).toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+    });
+
+  tc('FE-EQREQ-048', 'EquipmentRequest (initial load)', 'The assigned-events API returns something other than an array.', 'The response is treated as an empty event list.', { kind: 'Edge', steps: '1. Return an object instead of an event array. 2. Wait for the page to load.' },
+    async () => {
+      backend({ events: { unexpected: true } });
+      await ready();
+      expect(screen.getByText(/No assigned events are available for a new equipment request/)).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-049', 'EquipmentRequest (initial load)', 'The equipment catalogue API returns something other than an array.', 'The response is treated as an empty catalogue without crashing the page.', { kind: 'Edge', steps: '1. Return an object instead of an equipment array. 2. Wait for the page to load.' },
+    async () => {
+      backend({ catalogue: { unexpected: true } });
+      await ready();
+      expect(screen.getByText('Submit equipment request')).toBeInTheDocument();
+      expect(screen.queryByRole('option', { name: 'Microphone' })).toBeNull();
+    });
+
+  tc('FE-EQREQ-050', 'EquipmentRequest (availability)', 'Availability checking fails without a backend detail message.', 'The default availability error is shown.', { kind: 'Negative', steps: '1. Return a failed availability response without detail. 2. Select an event.' },
+    async () => {
+      backend({ avail: () => json({}, 500) });
+      await ready();
+      fireEvent.change(selects()[0], { target: { value: '1' } });
+      expect(await screen.findByText('Unable to check equipment availability.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-051', 'EquipmentRequest (edit)', 'Preparing an edit fails without a backend detail message.', 'The default availability error is shown and the edit form does not open.', { kind: 'Negative', steps: '1. Return a failed availability response without detail. 2. Open the request view. 3. Click Edit Request.' },
+    async () => {
+      backend({ avail: () => json({}, 500) });
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      expect(await screen.findByText('Unable to check equipment availability.')).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Edit equipment request #7' })).toBeNull();
+    });
+
+  tc('FE-EQREQ-052', 'EquipmentRequest (edit validation)', 'A new edit row duplicates an equipment type already in the request.', 'The edit cannot be saved because duplicate equipment types are invalid.', { kind: 'Negative', steps: '1. Open a request containing duplicate equipment ids. 2. Verify Save Changes is disabled.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          items: [
+            REQUEST.items[0],
+            { ...REQUEST.items[0], requested_quantity: 1 },
+          ],
+        }],
+      });
+      await ready();
+      await openViewTab();
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit Request' }));
+      await screen.findByRole('heading', { name: 'Edit equipment request #7' });
+      expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
+    });
+
+  tc('FE-EQREQ-053', 'EquipmentRequest (event display)', 'An assigned event contains start and end times.', 'The event option displays the formatted event time range.', { kind: 'Edge', data: '09:00 to 17:00', steps: '1. Return an event with start and end times. 2. Inspect the event option.' },
+    async () => {
+      backend({
+        events: [{
+          ...EVENTS[0],
+          start_time: '09:00:00',
+          end_time: '17:00:00',
+        }],
+      });
+      await ready();
+      expect(screen.getByRole('option', { name: /Gala — 01 Oct 2026.*09:00.*05:00/ })).toBeInTheDocument();
+    });
+
+  tc('FE-EQREQ-054', 'EquipmentRequest (view)', 'A submitted request spans multiple days and contains event times.', 'The request table displays the full event period and formatted times.', { kind: 'Edge', steps: '1. Return a multi-day request with start and end times. 2. Open the request view.' },
+    async () => {
+      backend({
+        requests: [{
+          ...REQUEST,
+          event_end_date: '2026-10-03',
+          start_time: '09:00:00',
+          end_time: '17:00:00',
+        }],
+      });
+      await ready();
+      await openViewTab();
+      expect(await screen.findByText('03 Oct 2026', { exact: false })).toBeInTheDocument();
+      expect(screen.getByText(/09:00.*05:00/)).toBeInTheDocument();
+    });
+
 });
+

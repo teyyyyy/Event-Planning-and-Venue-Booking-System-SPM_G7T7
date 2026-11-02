@@ -36,7 +36,7 @@ async function openActive() {
 
 async function review(target = 'c2') {
   const row = screen.getByText('Gala', { exact: true }).closest('tr');
-  fireEvent.click(within(row).getByRole('button', { name: 'View details' }));
+  fireEvent.click(within(row).getByRole('button', { name: 'Reassign coordinator' }));
   const dialog = screen.getByRole('dialog');
   fireEvent.change(within(dialog).getByRole('combobox'), { target: { value: target } });
   fireEvent.click(within(dialog).getByRole('button', { name: 'Review reassignment' }));
@@ -56,9 +56,7 @@ tc('FE-COORD-071', 'Lead coordinator filter', 'Active events include multiple co
     expect(screen.getByText('Workshop')).toBeInTheDocument();
     expect(screen.queryByText('Gala')).not.toBeInTheDocument();
     fireEvent.change(filter, { target: { value: 'c3' } });
-    expect(screen.getByText('No event requests found.')).toBeInTheDocument();
-    fireEvent.change(filter, { target: { value: 'unassigned' } });
-    expect(screen.getByText('Unassigned gala')).toBeInTheDocument();
+    expect(screen.getByText('No active assigned events found.')).toBeInTheDocument();
     fireEvent.change(filter, { target: { value: '' } });
     expect(screen.getByText('Gala')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Unassigned events', exact: true }));
@@ -96,7 +94,7 @@ tc('FE-COORD-073', 'Reassignment cancellation', 'The Lead selects the current co
   { steps: '1. Open details. 2. Inspect disabled save. 3. Review then change coordinator. 4. Review and cancel.' }, async () => {
     const fetch = backend();
     await openActive();
-    fireEvent.click(within(screen.getByText('Gala').closest('tr')).getByRole('button', { name: 'View details' }));
+    fireEvent.click(within(screen.getByText('Gala').closest('tr')).getByRole('button', { name: 'Reassign coordinator' }));
     let dialog = screen.getByRole('dialog');
     expect(within(dialog).getByRole('button', { name: 'Review reassignment' })).toBeDisabled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
@@ -156,7 +154,7 @@ tc('FE-COORD-076', 'Lead load failure', 'Workload loading fails.',
     mockFetch(() => json({}, 503));
     render(<CoordinatorAssignment user={lead} />);
     expect(await screen.findByText(/Unable to load event assignments/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'View details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Assign coordinator|Reassign coordinator/ })).not.toBeInTheDocument();
     backend();
     fireEvent.click(screen.getByRole('button', { name: 'Refresh events' }));
     await screen.findByText('Unassigned gala');
@@ -195,5 +193,6 @@ tc('FE-COORD-078', 'Saved assignment with refresh failure', 'Reassignment succee
     fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm reassignment' }));
     expect(await screen.findByText(/Gala reassigned to Amy\. Unable to load event assignments/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'View details' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Assign coordinator|Reassign coordinator/ })).not.toBeInTheDocument();
   });
+

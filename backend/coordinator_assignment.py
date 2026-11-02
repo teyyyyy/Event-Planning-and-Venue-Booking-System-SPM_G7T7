@@ -7,7 +7,7 @@ from postgrest.exceptions import APIError
 from supabase import Client
 from database import create_client
 from dotenv import load_dotenv
-from auth import require_coordinator, require_coordinator_lead, require_organiser, require_path_user, require_self
+from auth import require_coordinator, require_coordinator_lead, require_organiser, require_path_user, require_self, require_full_event_details_user
 from event_changes import change_impact, live_arrangements
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -103,6 +103,12 @@ def change_request_view(
             "description": change_request.get("proposed_description"),
             "start_time": change_request.get("proposed_start_time"),
             "end_time": change_request.get("proposed_end_time"),
+            "layout_required": change_request.get("proposed_layout_required"),
+            "equipment_required": change_request.get("proposed_equipment_required") or [],
+            "facilities_required": change_request.get("proposed_facilities_required") or [],
+            "accessibility_required": change_request.get("proposed_accessibility_required"),
+            "equipment_placement": change_request.get("proposed_equipment_placement"),
+            "crowd_movement": change_request.get("proposed_crowd_movement"),
         },
     }
 
@@ -195,11 +201,24 @@ def unassigned_queue(user: dict[str, Any] = Depends(require_coordinator_lead)):
 def lead_active_events(coordinator_id: str | None = None):
     client = db()
     users = {str(item["id"]): item for item in coordinator_records(client)}
+
     def query():
-        result = client.table(EVENT_TABLE).select("*").order("event_date").order("id")
+        result = (
+            client.table(EVENT_TABLE)
+            .select("*")
+            .not_.is_("coordinator_id", "null")
+            .order("event_date")
+            .order("id")
+        )
         return result.eq("coordinator_id", coordinator_id) if coordinator_id else result
+
     events = fetch_all(query)
-    return [view(item, item, users) for item in events if is_active_status(item.get("status"))]
+
+    return [
+        view(item, item, users)
+        for item in events
+        if is_active_status(item.get("status")) and item.get("coordinator_id")
+    ]
 
 
 @router.patch("/api/event-coordinator-lead/events/{event_id}/coordinator")
@@ -249,20 +268,45 @@ def assign_coordinator_endpoint(event_id: str):
 def reassign_coordinator(event_id: str, assignment: CoordinatorAssignment):
     client = db()
     event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
-    if not event: raise HTTPException(404, "Event request not found.")
+    if not event:
+        raise HTTPException(404, "Event request not found.")
+
     coordinator = next((item for item in coordinator_records(client) if item["id"] == assignment.coordinator_id), None)
-    if not coordinator: raise HTTPException(400, "Select an available event coordinator.")
+    if not coordinator:
+        raise HTTPException(400, "Select an available event coordinator.")
+
     previous_id = event.get("coordinator_id")
-    if previous_id != coordinator["id"] and is_active_status(event.get("status")):
-        if previous_id: adjust_workload(client, previous_id, -1)
+
+    if previous_id == coordinator["id"]:
+        return view(event, event, {str(coordinator["id"]): coordinator})
+
+    if is_active_status(event.get("status")):
+        if previous_id:
+            adjust_workload(client, previous_id, -1)
         adjust_workload(client, coordinator["id"], 1)
+
     response = (
         client.table(EVENT_TABLE)
         .update({"coordinator_id": coordinator["id"]})
         .eq("id", event_id)
+        .eq("coordinator_id", previous_id)
         .execute()
     )
+
+    if not response.data:
+        raise HTTPException(409, "The event coordinator changed. Refresh and try again.")
+
     updated = response.data[0]
+
+    # Transfer the existing venue booking and equipment requests to the new coordinator.
+    client.table("Venue Booking Requests").update(
+        {"coordinator_id": coordinator["id"]}
+    ).eq("event_id", event_id).execute()
+
+    client.table("Equipment Request").update(
+        {"created_by": coordinator["id"]}
+    ).eq("event_id", event_id).execute()
+
     return view(updated, updated, {str(coordinator["id"]): coordinator})
 
 @router.patch("/api/events/{event_id}/status", dependencies=[Depends(require_assigned_coordinator_event)])
@@ -395,6 +439,148 @@ def review_event_change_request(
         raise HTTPException(500, "Event change request could not be reviewed.")
     return result.data[0] if isinstance(result.data, list) else result.data
 
+
+@router.get("/api/events/{event_id}/full-details")
+def get_full_event_details(
+    event_id: int,
+    user: dict[str, Any] = Depends(require_full_event_details_user),
+):
+    client = db()
+
+    event = fetch_one(client.table(EVENT_TABLE).select("*").eq("id", event_id))
+    if not event:
+        raise HTTPException(404, "Event not found.")
+
+    role = str(user.get("role", "")).strip().lower()
+    user_id = str(user["id"])
+
+    if role == "event organiser" and str(event.get("organiser_id")) != user_id:
+        raise HTTPException(403, "You can only view full details for your own events.")
+
+    if role == "event coordinator" and str(event.get("coordinator_id")) != user_id:
+        raise HTTPException(403, "You can only view full details for events assigned to you.")
+
+    if str(event.get("status", "")).strip().lower() not in {"planning", "confirmed", "completed"}:
+        raise HTTPException(409, "Full event details are available only for Planning, Confirmed, or Completed events.")
+
+    # Venue planning is optional for this shared view. An event can be viewed
+    # before any venue request exists.
+    venue_bookings = (
+        client.table("Venue Booking Requests")
+        .select("*")
+        .eq("event_id", event_id)
+        .eq("status", "Approved")
+        .execute()
+        .data
+        or []
+    )
+
+    if venue_bookings:
+        venue_ids = list({
+            booking.get("venue_id")
+            for booking in venue_bookings
+            if booking.get("venue_id") is not None
+        })
+        venue_rows = (
+            client.table("Venues")
+            .select("*")
+            .in_("venue_id", venue_ids)
+            .execute()
+            .data
+            or []
+        ) if venue_ids else []
+        venue_map = {str(venue["venue_id"]): venue for venue in venue_rows}
+        venue_bookings = [
+            {
+                **booking,
+                "Venues": venue_map.get(str(booking.get("venue_id")), {}),
+            }
+            for booking in venue_bookings
+        ]
+
+    # Equipment planning is also optional. Only actual Reserved reservations
+    # are shown; no reservation simply produces an empty list.
+    all_reservations = (
+        client.table("Equipment Reservation")
+        .select("*")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+    equipment_reservations = [
+        reservation
+        for reservation in all_reservations
+        if str(reservation.get("status", "")).strip().lower() == "reserved"
+    ]
+
+    reservation_ids = [
+        reservation["reservation_id"]
+        for reservation in equipment_reservations
+        if reservation.get("reservation_id") is not None
+    ]
+    equipment_items = []
+
+    if reservation_ids:
+        reservation_items = (
+            client.table("Equipment Reservation Item")
+            .select("*")
+            .in_("reservation_id", reservation_ids)
+            .execute()
+            .data
+            or []
+        )
+
+        equipment_ids = list({
+            item.get("equipment_id")
+            for item in reservation_items
+            if item.get("equipment_id") is not None
+        })
+        equipment_rows = (
+            client.table("Equipment")
+            .select("equipment_id,equipment_name")
+            .in_("equipment_id", equipment_ids)
+            .execute()
+            .data
+            or []
+        ) if equipment_ids else []
+        equipment_map = {str(row["equipment_id"]): row for row in equipment_rows}
+
+        equipment_items = [
+            {
+                **item,
+                "equipment_name": equipment_map.get(
+                    str(item.get("equipment_id")),
+                    {},
+                ).get(
+                    "equipment_name",
+                    item.get("equipment_id"),
+                ),
+            }
+            for item in reservation_items
+        ]
+
+    safety_status = event.get("safety_decision_status")
+    safety_check = None
+    if safety_status:
+        safety_check = {
+            "event_id": event.get("id"),
+            "safety_officer_id": event.get("safety_officer_id"),
+            "status": safety_status,
+            "comments": event.get("safety_comments"),
+            "affected_arrangements": event.get("safety_affected_arrangements") or [],
+            "decided_at": event.get("safety_decided_at"),
+        }
+
+    return {
+        "event": event,
+        "venue_bookings": venue_bookings,
+        "equipment_reservations": equipment_reservations,
+        "equipment_items": equipment_items,
+        "safety_check": safety_check,
+    }
+
+
 @router.get("/api/coordinators", dependencies=[Depends(require_coordinator)])
 def coordinators(): return sorted(coordinator_records(db()), key=lambda user: user.get("name", "").lower())
 
@@ -410,3 +596,4 @@ def coordinator_workloads():
         if coordinator_id in workloads and is_active_status(event.get("status")):
             workloads[coordinator_id] += 1
     return [{"id": item["id"], "name": item["name"], "role": item["role"], "active_event_count": workloads[str(item["id"])]} for item in coordinators]
+

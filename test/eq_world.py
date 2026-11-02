@@ -5,8 +5,17 @@ from fastapi import HTTPException
 
 from fake_supabase import FakeClient
 
-EVENT = {"id": 1, "event_name": "Gala", "event_date": "2026-10-01", "start_time": "09:00:00", "end_time": "17:00:00",
-         "status": "Approved", "coordinator_id": "c1"}
+EVENT = {
+    "id": 1,
+    "event_name": "Gala",
+    "event_date": "2026-10-01",
+    "start_time": "09:00:00",
+    "end_time": "17:00:00",
+    "status": "Planning",
+    "coordinator_id": "c1",
+    "equipment_required": ["Microphone", "Projector"],
+}
+
 EQUIPMENT = [
     {"equipment_id": "MIC", "equipment_name": "Microphone", "total_quantity": 10, "under_maintenance_count": 2},
     {"equipment_id": "PRJ", "equipment_name": "Projector", "total_quantity": 3, "under_maintenance_count": 0},

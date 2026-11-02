@@ -9,8 +9,8 @@ import VenueRequest from '../VenueRequest';
 const USER = { id: 'c1' };
 const HALL_A = { venue_id: 1, name: 'Hall A', location: 'Singapore', capacity: 100, layouts: ['Theatre', 'Banquet'], facilities: ['Wi-Fi', 'Projector'], accessible: 1 };
 const HALL_B = { venue_id: 2, name: 'Hall B', location: 'Jurong', capacity: 30, layouts: ['Classroom'], facilities: ['Wi-Fi'], accessible: 0 };
-const GALA = { id: 1, event_name: 'Gala', event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:00:00', end_time: '17:00:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
-const WORKSHOP = { id: 2, event_name: 'Workshop', event_date: '2026-10-02', event_end_date: '2026-10-02', start_time: '10:00:00', end_time: '12:00:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
+const GALA = { id: 1, event_name: 'Gala', status: 'Planning', event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:00:00', end_time: '17:00:00', event_capacity: 50, layout_required: 'Theatre', facilities_required: ['Wi-Fi'], accessibility_required: 1 };
+const WORKSHOP = { id: 2, event_name: 'Workshop', status: 'Planning', event_date: '2026-10-02', event_end_date: '2026-10-02', start_time: '10:00:00', end_time: '12:00:00', event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 };
 const SUBMISSION = { request_id: 5, event_id: 1, venue_id: 1, status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '09:30:00', end_time: '17:00:00' } };
 
 function backend(o = {}) {
@@ -21,11 +21,12 @@ function backend(o = {}) {
     if (url.includes('/venue-catalogue/')) return pick(d.catalogue);
     if (url.includes('/venue-booking-requests/venues/')) return pick(d.booked);
     if (url.includes('/venue-booking-requests/coordinators/')) return pick(d.submitted);
-    if (url.includes('/event-coordinators/')) return pick(d.events);
+    if (url.includes('/venue-bookings/coordinators/') && url.endsWith('/events')) return pick(d.events);
     if (url.endsWith('/venues')) return pick(d.venues);
     return json({}, 404);
   });
 }
+
 const ready = async (props = { user: USER }) => { render(<VenueRequest {...props} />); await screen.findByText('Submit venue request'); };
 const eventSelect = () => document.querySelector('select');
 const pickEvent = (id) => fireEvent.change(eventSelect(), { target: { value: String(id) } });
@@ -40,7 +41,7 @@ describe('VenueRequest', () => {
       expect(screen.getByText('Loading venue request page…')).toBeInTheDocument();
       expect(await screen.findByText('Submit venue request')).toBeInTheDocument();
       expect(callsTo(f, '/venues')[0][0]).toMatch(/\/venues$/);
-      expect(callsTo(f, '/event-coordinators/c1/events')).toHaveLength(1);
+      expect(callsTo(f, '/venue-bookings/coordinators/c1/events')).toHaveLength(1);
       expect(callsTo(f, '/venue-booking-requests/coordinators/c1')).toHaveLength(1);
       expect(screen.getByRole('option', { name: 'Gala — 2026-10-01' })).toBeInTheDocument();
     });
@@ -69,7 +70,7 @@ describe('VenueRequest', () => {
       expect(row.querySelector('td[data-label="Event Name"]')).toHaveTextContent('Gala');
       expect(row.querySelector('td[data-label="Facilities"]')).toHaveTextContent('Wi-Fi');
       expect(within(row).getByText('Gala')).toBeInTheDocument();
-      expect(row).toHaveTextContent('9:00 AM - 5:00 PM');
+      expect(row).toHaveTextContent('01 Oct 2026, 9:00 AM – 5:00 PM');
       expect(row).toHaveTextContent('50');
       expect(row).toHaveTextContent('Theatre');
       expect(row).toHaveTextContent('Wi-Fi');
@@ -134,8 +135,7 @@ describe('VenueRequest', () => {
       await chooseVenue();
       expect(await screen.findByText('Venue Booking Details')).toBeInTheDocument();
       const summary = screen.getByText('Event Timing Summary').closest('.equipment-item-card');
-      expect(summary).toHaveTextContent('Date: 2026-10-01');
-      expect(summary).toHaveTextContent('Time: 9:00 AM - 5:00 PM');
+      expect(summary).toHaveTextContent('Event period: 01 Oct 2026, 9:00 AM – 5:00 PM');
       expect(document.querySelector('input[type=datetime-local]')).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Select Different Venue' }));
       expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
@@ -260,9 +260,7 @@ describe('VenueRequest', () => {
       
       expect(row).toHaveTextContent('5');
       expect(row).toHaveTextContent('Hall A');
-      expect(row).toHaveTextContent('2026-10-01');
-      expect(row).toHaveTextContent('9:30 AM');
-      expect(row).toHaveTextContent('5:00 PM');
+      expect(row).toHaveTextContent('01 Oct 2026, 9:30 AM – 5:00 PM');
       expect(within(row).getByText('Approved')).toBeInTheDocument();
     });
 
@@ -435,7 +433,7 @@ describe('VenueRequest', () => {
         if (url.includes('/venue-booking-requests/venues/')) return json([{ status: 'Approved', 'Event Details': { event_date: '2026-10-01', event_end_date: '2026-10-01', start_time: '12:00:00', end_time: '14:00:00' } }]);
         if (url.includes('/venue-catalogue/')) return json({ ...HALL_A, setup_time: 60, teardown_time: 60 });
         if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
-        if (url.includes('/event-coordinators/')) return json([GALA]);
+        if (url.includes('/venue-bookings/coordinators/') && url.endsWith('/events')) return json([GALA]);
         if (url.endsWith('/venues')) return json([HALL_A]);
         return json({}, 404);
       });
@@ -533,4 +531,109 @@ tc('FE-VREQ-039', 'VenueRequest (alternative venue)', 'Accepting the suggested v
   expect(alert).toHaveTextContent('The suggested venue is no longer available.');
   expect(within(dialog).getByRole('button', { name: 'Accept alternative' })).toBeEnabled();
   expect(within(dialog).getByRole('button', { name: 'Decline alternative' })).toBeEnabled();
+});
+
+tc('FE-VREQ-040', 'VenueRequest (event details)', 'The selected event spans more than one day.', 'The event period shows both the start date and end date.', { kind: 'Edge', data: '01 Oct 2026 09:00 to 02 Oct 2026 17:00', steps: '1. Select the multi-day event.' }, async () => {
+  backend({ events: [{ ...GALA, event_end_date: '2026-10-02' }] });
+  await ready();
+  pickEvent(1);
+  const row = (await screen.findByText('Event Details')).closest('.equipment-request-items').querySelector('tbody tr');
+  expect(row).toHaveTextContent('01 Oct 2026, 9:00 AM – 02 Oct 2026, 5:00 PM');
+});
+
+tc('FE-VREQ-041', 'VenueRequest (submissions)', 'A submitted request has no linked event timing details.', 'Both the event period and occupied period fall back to an em dash instead of failing.', { kind: 'Edge', data: 'Event Details = null', steps: '1. Open My Submissions with a request that has no linked event details.' }, async () => {
+  backend({ submitted: [{ ...SUBMISSION, 'Event Details': null }] });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  const row = (await screen.findByText('Gala')).closest('li');
+  const cells = within(row).getAllByRole('cell');
+  expect(cells[1]).toHaveTextContent(/^—$/);
+  expect(cells[3]).toHaveTextContent(/^—$/);
+});
+
+tc('FE-VREQ-042', 'VenueRequest (alternative venue)', 'Saving an alternative venue decision fails without a backend detail.', 'The generic alternative-decision error is shown inside the open dialog.', { kind: 'Negative', data: '500 with no detail', steps: '1. Open an alternative offer. 2. Accept it. 3. Return 500 without detail.' }, async () => {
+  backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', alternative_venue_id: 2 }],
+    post: () => json({}, 500),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click((await screen.findByText('Gala')).closest('tr'));
+  const dialog = screen.getByRole('alertdialog');
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Accept alternative' }));
+  expect(await within(dialog).findByText('Unable to save your decision.')).toBeInTheDocument();
+});
+
+tc('FE-VREQ-043', 'VenueRequest (replacement venue)', 'Starting a replacement request fails without a backend detail.', 'The generic replacement-request error is shown and the coordinator remains on submissions.', { kind: 'Negative', data: '500 with no detail', steps: '1. Open My Submissions. 2. Click Request replacement venue. 3. Return 500 without detail.' }, async () => {
+  backend({
+    submitted: [{ ...SUBMISSION, status: 'Alternative Offered', replacement_required: true, alternative_venue_id: 2 }],
+    post: () => json({}, 500),
+  });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Request replacement venue' }));
+  expect(await screen.findByText('Unable to start a replacement request.')).toBeInTheDocument();
+  expect(screen.getByText('Venue request submissions')).toBeInTheDocument();
+});
+
+tc('FE-VREQ-044', 'VenueRequest (availability status)', 'The venue-status lookup throws while an event is selected.', 'The catalogue remains usable because status lookup is only advisory.', { kind: 'Negative', steps: '1. Select an event. 2. Reject the venue-availability request. 3. Confirm the catalogue remains visible.' }, async () => {
+  mockFetch((url) => {
+    if (url.includes('/venue-availability?event_id=')) return Promise.reject(new Error('Status service unavailable'));
+    if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
+    if (url.includes('/venue-bookings/coordinators/') && url.endsWith('/events')) return json([GALA]);
+    if (url.endsWith('/venues')) return json([HALL_A]);
+    return json({}, 404);
+  });
+  await ready();
+  pickEvent(1);
+  expect(await screen.findByText('Hall A')).toBeInTheDocument();
+  expect(screen.queryByText('Status service unavailable')).toBeNull();
+});
+
+tc('FE-VREQ-045', 'VenueRequest (expired hold)', 'A submission has an expired venue hold.', 'The coordinator can start a fresh request for the same event using "Submit new request".', { kind: 'State', steps: '1. Open My Submissions. 2. Click Submit new request on the expired hold.' }, async () => {
+  backend({ submitted: [{ ...SUBMISSION, status: 'Expired' }] });
+  await ready();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  expect(await screen.findByText('Hold expired — submit a new request to continue.')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Submit new request' }));
+  expect(await screen.findByText('Venue Catalogue')).toBeInTheDocument();
+  expect(eventSelect()).toHaveValue('1');
+});
+
+tc('FE-VREQ-046', 'VenueRequest (venue status)', 'Availability marks a venue as held for the coordinator\'s event.', 'The catalogue shows the hold expiry, identifies it as the coordinator\'s request and disables venue selection.', { kind: 'State', steps: '1. Select an event. 2. Return an On Hold availability status for Hall A.' }, async () => {
+  mockFetch((url) => {
+    if (url.includes('/venue-availability?event_id=1')) return json([{ venue_id: 1, status: 'On Hold', hold_expires_at: '2026-11-10T12:00:00+08:00', own_event: true }]);
+    if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
+    if (url.includes('/venue-bookings/coordinators/') && url.endsWith('/events')) return json([GALA]);
+    if (url.endsWith('/venues')) return json([HALL_A]);
+    return json({}, 404);
+  });
+  await ready();
+  pickEvent(1);
+  expect(await screen.findByText(/On Hold until 2026-11-10 12:00 SGT/)).toBeInTheDocument();
+  expect(screen.getByText('Your request')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Select Venue' })).toBeDisabled();
+});
+
+tc('FE-VREQ-047', 'VenueRequest (venue status)', 'Availability reports that a previous hold has expired.', 'The venue is shown as expired but available, and the coordinator can still select it.', { kind: 'State', steps: '1. Select an event. 2. Return Expired for Hall A.' }, async () => {
+  mockFetch((url) => {
+    if (url.includes('/venue-availability?event_id=1')) return json([{ venue_id: 1, status: 'Expired', own_event: true }]);
+    if (url.includes('/venue-booking-requests/coordinators/')) return json([]);
+    if (url.includes('/venue-bookings/coordinators/') && url.endsWith('/events')) return json([GALA]);
+    if (url.endsWith('/venues')) return json([HALL_A]);
+    return json({}, 404);
+  });
+  await ready();
+  pickEvent(1);
+  expect(await screen.findByText('Hold lapsed — venue available')).toBeInTheDocument();
+  expect(screen.queryByText('Your request')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Select Venue' })).toBeEnabled();
+});
+
+tc('FE-VREQ-048', 'VenueRequest (initial data)', 'The backend returns non-array values for events and submissions.', 'The page treats both values as empty lists instead of failing.', { kind: 'Edge', data: 'events = {}, submissions = {}', steps: '1. Load the page with non-array event and submission payloads.' }, async () => {
+  backend({ events: {}, submitted: {} });
+  await ready();
+  expect(screen.queryByRole('option', { name: /Gala/ })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'My Submissions' }));
+  expect(await screen.findByText('No venue requests have been submitted yet.')).toBeInTheDocument();
 });

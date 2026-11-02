@@ -26,6 +26,13 @@ function formatDate(value) {
   });
 }
 
+
+function formatEventDateRange(startDate, endDate) {
+  if (!startDate) return '—';
+  if (!endDate || endDate === startDate) return formatDate(startDate);
+  return `${formatDate(startDate)} – ${formatDate(endDate)}`;
+}
+
 function normalizeStatus(value) {
   return String(value || '').trim().toLowerCase();
 }
@@ -156,8 +163,7 @@ function ReservationList({ user, onOpenEvent, onCheckAvailability }) {
               <thead>
                 <tr>
                   <th>Event</th>
-                  <th>Date</th>
-                  <th>Time</th>
+                  <th>Event Period</th>
                   <th>Request</th>
                   <th>Reserved Equipment</th>
                   <th>Status</th>
@@ -179,23 +185,15 @@ function ReservationList({ user, onOpenEvent, onCheckAvailability }) {
                         </span>
                       </td>
 
-                      <td>{formatDate(reservation.event_date)}</td>
-
                       <td>
-                        {formatTime(reservation.start_time)}
+                        {formatDate(reservation.event_date)}, {formatTime(reservation.start_time)}
                         {' – '}
-                        {formatTime(reservation.end_time)}
+                        {formatDate(reservation.event_end_date || reservation.event_date)}, {formatTime(reservation.end_time)}
                       </td>
 
                       <td>#{reservation.request_id}</td>
 
                       <td>
-                        <strong>
-                          {reservation.equipment_count}{' '}
-                          {reservation.equipment_count === 1
-                            ? 'equipment type'
-                            : 'equipment types'}
-                        </strong>
 
                         {reservation.equipment_description && (
                           <span className="reservation-equipment-description">
@@ -288,7 +286,9 @@ function ReservationDetails({ user, eventId, onBack }) {
 
   const needsRecheck =
     existing &&
-    normalizeStatus(reservation?.status) === 'needs recheck';
+    ['needs recheck', 'modified'].includes(
+      normalizeStatus(reservation?.status)
+    );
 
   const hasRequestDifferences = useMemo(() => {
     if (!needsRecheck) return false;
@@ -299,33 +299,6 @@ function ReservationDetails({ user, eventId, onBack }) {
         Number(item.requested_quantity || 0)
     );
   }, [items, needsRecheck]);
-
-  function updateQuantity(index, value) {
-    if (!existing) return;
-
-    setItems((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index
-          ? { ...item, reserved_quantity: value }
-          : item
-      )
-    );
-  }
-
-  function applyRequestedQuantity(index) {
-    if (!existing) return;
-
-    setItems((current) =>
-      current.map((item, itemIndex) =>
-        itemIndex === index
-          ? {
-              ...item,
-              reserved_quantity: String(item.requested_quantity ?? 0)
-            }
-          : item
-      )
-    );
-  }
 
   function useAllRequestedQuantities() {
     if (!existing) return;
@@ -395,21 +368,19 @@ function ReservationDetails({ user, eventId, onBack }) {
       const isExisting = reservation.mode === 'existing';
 
       const url = isExisting
-        ? `${API}/equipment-reservation/${user.id}/${reservation.reservation_id}`
+        ? `${API}/equipment-reservation/${user.id}/${reservation.reservation_id}/confirm`
         : `${API}/equipment-reservation/${user.id}`;
 
-      const body = isExisting
-        ? { items: payloadItems }
-        : {
-            event_id: reservation.event_id,
-            request_id: reservation.request_id,
-            items: payloadItems
-          };
+      const body = {
+        event_id: reservation.event_id,
+        request_id: reservation.request_id,
+        items: payloadItems
+      };
 
       const response = await fetch(url, {
         method: isExisting ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        ...(isExisting ? {} : { body: JSON.stringify(body) })
       });
 
       const result = await response.json();
@@ -606,7 +577,7 @@ function ReservationDetails({ user, eventId, onBack }) {
         <div className="reservation-event-details">
           <div>
             <span>Date</span>
-            <strong>{formatDate(event.event_date)}</strong>
+            <strong>{formatEventDateRange(event.event_date, event.event_end_date)}</strong>
           </div>
 
           <div>
@@ -640,8 +611,8 @@ function ReservationDetails({ user, eventId, onBack }) {
               {!existing
                 ? 'The full requested quantities are taken from the event request and cannot be changed during the initial reservation.'
                 : needsRecheck
-                  ? 'Review the latest requested quantities against what is currently reserved. You may adjust the reservation before confirming.'
-                  : 'Change the reserved quantities or set a quantity to 0 to release that equipment.'}
+                  ? 'Review the current reservation against the latest equipment request. Confirming will synchronise the reservation to the request exactly.'
+                  : 'Reserved quantities follow the equipment request and cannot be edited here.'}
             </p>
           </div>
         </div>
@@ -675,14 +646,11 @@ function ReservationDetails({ user, eventId, onBack }) {
                   <th>Technical Requirements</th>
                 )}
 
-                {existing && needsRecheck && (
-                  <th>Action</th>
-                )}
               </tr>
             </thead>
 
             <tbody>
-              {items.map((item, index) => {
+              {items.map((item) => {
                 const reservedQuantity =
                   Number(item.reserved_quantity || 0);
 
@@ -769,22 +737,12 @@ function ReservationDetails({ user, eventId, onBack }) {
                         </>
                       ) : (
                         <>
-                          <input
-                            className="reservation-quantity-input"
-                            type="number"
-                            min="0"
-                            step="1"
-                            value={item.reserved_quantity}
-                            onChange={(event) =>
-                              updateQuantity(
-                                index,
-                                event.target.value
-                              )
-                            }
-                          />
+                          <strong className="reservation-fixed-quantity">
+                            {item.reserved_quantity}
+                          </strong>
 
                           <small className="reservation-quantity-help">
-                            Set to 0 to release this equipment.
+                            Reservation quantities follow the equipment request.
                           </small>
                         </>
                       )}
@@ -793,27 +751,6 @@ function ReservationDetails({ user, eventId, onBack }) {
                     {!existing && (
                       <td>
                         {item.technical_requirements || '—'}
-                      </td>
-                    )}
-
-                    {existing && needsRecheck && (
-                      <td>
-                        {quantityChanged ? (
-                          <button
-                            type="button"
-                            className="secondary reservation-use-requested"
-                            disabled={saving}
-                            onClick={() =>
-                              applyRequestedQuantity(index)
-                            }
-                          >
-                            Use Requested
-                          </button>
-                        ) : (
-                          <span className="reservation-match">
-                            ✓ Matches
-                          </span>
-                        )}
                       </td>
                     )}
                   </tr>
@@ -835,20 +772,20 @@ function ReservationDetails({ user, eventId, onBack }) {
             </button>
           )}
 
-          <button
-            type="button"
-            className="primary"
-            disabled={saving}
-            onClick={saveReservation}
-          >
-            {saving
-              ? 'Checking availability…'
-              : !existing
-                ? 'Confirm Reservation'
-                : needsRecheck
-                  ? 'Confirm Reviewed Reservation'
-                  : 'Confirm Reservation Changes'}
-          </button>
+          {(!existing || needsRecheck) && (
+            <button
+              type="button"
+              className="primary"
+              disabled={saving}
+              onClick={saveReservation}
+            >
+              {saving
+                ? 'Checking availability…'
+                : !existing
+                  ? 'Confirm Reservation'
+                  : 'Confirm Reviewed Reservation'}
+            </button>
+          )}
         </div>
       </div>
     </section>

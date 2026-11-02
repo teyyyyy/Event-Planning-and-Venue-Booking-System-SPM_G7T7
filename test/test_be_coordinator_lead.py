@@ -12,23 +12,35 @@ import notifications
 from fake_supabase import FakeClient
 from tc import tc
 
-
-@tc("BE-COORD-071", "Active events", "The lead browses events across coordinators.",
-    "All active events, including unassigned events, appear; inactive events are excluded and filtering works.",
-    steps="1. Seed all statuses. 2. List all active events. 3. Filter c1 and an unknown coordinator.")
+@tc("BE-COORD-071", "Active events",
+    "The Lead browses active events that have already been assigned to coordinators.",
+    "Only assigned active events appear; unassigned Submitted events and inactive events are excluded, and coordinator filtering works.",
+    steps="1. Seed assigned and unassigned events across active and inactive statuses. "
+          "2. List all assigned active events. 3. Filter by coordinator c1 and an unknown coordinator.")
 def test_active_events(use_db):
-    statuses = ["Submitted", "Assigned", "Under review", "Approved", "Planning", "Confirmed", "Draft", "Complete", "Completed", " Cancelled ", "Rejected"]
-    use_db(FakeClient({
-        "users": [{"id": "c1", "name": "Bob", "role": "Event Coordinator"}],
-        "Event Details": [{"id": i, "status": status, "event_name": status, "coordinator_id": "c1" if i else None}
-                          for i, status in enumerate(statuses)],
-    }), ca)
-    assert [row["id"] for row in ca.lead_active_events()] == list(range(6))
+    statuses = [
+        "Submitted", "Assigned", "Under review", "Approved", "Planning",
+        "Confirmed", "Draft", "Complete", "Completed", " Cancelled ", "Rejected",
+    ]
+    events = [
+        {
+            "id": i,
+            "status": status,
+            "event_name": status,
+            "coordinator_id": "c1" if i else None,
+        }
+        for i, status in enumerate(statuses)
+    ]
+    users = [{"id": "c1", "name": "Bob", "role": "Event Coordinator"}]
+    use_db(FakeClient({"users": users, "Event Details": events}), ca)
+
+    expected_ids = [1, 2, 3, 4, 5]
+    assert [row["id"] for row in ca.lead_active_events()] == expected_ids
+
     filtered = ca.lead_active_events("c1")
-    assert [row["id"] for row in filtered] == list(range(1, 6))
+    assert [row["id"] for row in filtered] == expected_ids
     assert all(row["coordinator_name"] == "Bob" for row in filtered)
     assert ca.lead_active_events("unknown") == []
-
 
 @tc("BE-COORD-072", "Lead-only endpoints", "Different roles attempt Lead reads and mutations.",
     "Only the Lead can list active events, view the queue or assign/reassign; unauthenticated calls fail.",
@@ -131,17 +143,42 @@ def test_reassignment_notification_access(monkeypatch, use_db):
             assert client.patch("/api/events/1/status", json={"event_status": "Completed"}).status_code == 403
             fake.tables["Event Details"][0]["id"] = 1
 
-
-@tc("BE-COORD-078", "Complete Lead lists and workloads", "Events and users span several database pages.",
-    "The active list, unassigned queue, coordinator choices and counts include records beyond the first page.",
-    steps="1. Seed 1,005 users and events. 2. List active and unassigned events. 3. Inspect coordinator choices and workload.", kind="Edge")
+@tc("BE-COORD-078", "Complete Lead lists and workloads",
+    "Assigned and unassigned events and users span several database pages.",
+    "Lead lists, coordinator choices and workload counts remain complete across pagination.",
+    steps="1. Seed 1,004 unassigned events and one assigned event. "
+          "2. Check Lead lists. 3. Check coordinator choices and workload.",
+    kind="Edge")
 def test_paginated_lead_reads(use_db):
-    users = [{"id": f"u{i:04}", "name": f"User {i}", "role": "Event Organiser"} for i in range(1004)]
-    users.append({"id": "u1004", "name": "Coordinator", "role": "Event Coordinator", "active_event_count": 0})
-    events = [{"id": i, "event_name": f"Event {i}", "status": "Submitted", "coordinator_id": None} for i in range(1004)]
-    events.append({"id": 1004, "event_name": "Last event", "status": "Confirmed", "coordinator_id": "u1004"})
+    users = [
+        {"id": f"u{i:04}", "name": f"User {i}", "role": "Event Organiser"}
+        for i in range(1004)
+    ] + [{"id": "u1004", "name": "Coordinator", "role": "Event Coordinator",
+          "active_event_count": 0}]
+
+    events = [
+        {"id": i, "event_name": f"Event {i}", "status": "Submitted", "coordinator_id": None}
+        for i in range(1004)
+    ] + [{"id": 1004, "event_name": "Last event", "status": "Confirmed",
+          "coordinator_id": "u1004"}]
+
     use_db(FakeClient({"users": users, "Event Details": events}), ca)
-    assert len(ca.lead_active_events()) == 1005
-    assert len(ca.unassigned_queue({"id": "lead"})) == 1004
-    assert ca.coordinators()[0]["id"] == "u1004"
-    assert ca.coordinator_workloads()[0]["active_event_count"] == 1
+
+    active = ca.lead_active_events()
+    assert len(active) == 1
+    assert active[0]["id"] == 1004
+    assert active[0]["assigned_coordinator_id"] == "u1004"
+
+    queue = ca.unassigned_queue({"id": "lead"})
+    assert len(queue) == 1004
+    assert [queue[0]["id"], queue[-1]["id"]] == [0, 1003]
+
+    coordinators = ca.coordinators()
+    assert len(coordinators) == 1
+    assert coordinators[0]["id"] == "u1004"
+
+    workloads = ca.coordinator_workloads()
+    assert len(workloads) == 1
+    assert workloads[0]["id"] == "u1004"
+    assert workloads[0]["active_event_count"] == 1
+

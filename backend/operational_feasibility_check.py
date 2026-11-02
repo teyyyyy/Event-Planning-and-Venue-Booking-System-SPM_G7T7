@@ -15,10 +15,12 @@ EVENTS_TABLE = "Event Details"
 VENUE_BOOKING_TABLE = "Venue Booking Requests"
 VENUES_TABLE = "Venues"
 EQUIPMENT_RESERVATION_TABLE = "Equipment Reservation"
-USERS_TABLE = "users"
-NOTIFICATIONS_TABLE = "notifications"
+EQUIPMENT_RESERVATION_ITEM_TABLE = "Equipment Reservation Item"
+EQUIPMENT_TABLE = "Equipment"
+EVENT_CHANGE_LOG_TABLE = "event_change_log"
 
 ELIGIBLE_EQUIPMENT_STATUSES = {"reserved"}
+SAFETY_INFORMATION_FIELDS = {"equipment_placement", "crowd_movement"}
 
 
 class SafetyDecisionRequest(BaseModel):
@@ -28,31 +30,170 @@ class SafetyDecisionRequest(BaseModel):
 
 
 def get_approved_venue_bookings(client: Client, event_id: int) -> list[dict[str, Any]]:
-    response = (
+    bookings = (
         client.table(VENUE_BOOKING_TABLE)
-        .select(f'*, "{VENUES_TABLE}"(*)')
+        .select("*")
         .eq("event_id", event_id)
         .eq("status", "Approved")
         .execute()
+        .data
+        or []
     )
-    return response.data or []
+
+    if not bookings:
+        return []
+
+    venue_ids = list({
+        booking.get("venue_id")
+        for booking in bookings
+        if booking.get("venue_id") is not None
+    })
+
+    venues = (
+        client.table(VENUES_TABLE)
+        .select("*")
+        .in_("venue_id", venue_ids)
+        .execute()
+        .data
+        or []
+    ) if venue_ids else []
+
+    venue_map = {
+        str(venue["venue_id"]): venue
+        for venue in venues
+    }
+
+    return [
+        {
+            **booking,
+            VENUES_TABLE: venue_map.get(
+                str(booking.get("venue_id")),
+                {}
+            )
+        }
+        for booking in bookings
+    ]
+
+
+def venue_arrangements_are_ready(
+    client: Client,
+    event_id: int
+) -> bool:
+    """
+    Venue arrangements are ready for safety review only when:
+    - there is at least one venue booking request,
+    - no venue booking request is unresolved,
+    - and at least one venue booking request is Approved.
+
+    Rejected requests are considered resolved and do not block safety review.
+    """
+    bookings = (
+        client.table(VENUE_BOOKING_TABLE)
+        .select("request_id,status")
+        .eq("event_id", event_id)
+        .execute()
+        .data
+        or []
+    )
+
+    if not bookings:
+        return False
+
+    statuses = {
+        str(booking.get("status") or "").strip().lower()
+        for booking in bookings
+    }
+
+    unresolved_statuses = {
+        "pending",
+        "on hold",
+        "alternative offered",
+        "expired",
+        "needs recheck",
+    }
+
+    if statuses & unresolved_statuses:
+        return False
+
+    return "approved" in statuses
 
 
 def get_confirmed_equipment_reservations(client: Client, event_id: int) -> list[dict[str, Any]]:
-    response = (
+    reservations = (
         client.table(EQUIPMENT_RESERVATION_TABLE)
         .select("*")
         .eq("event_id", event_id)
         .execute()
+        .data
+        or []
     )
 
-    reservations = response.data or []
-
-    return [
+    confirmed = [
         reservation
         for reservation in reservations
         if str(reservation.get("status", "")).strip().lower()
         in ELIGIBLE_EQUIPMENT_STATUSES
+    ]
+
+    if not confirmed:
+        return []
+
+    reservation_ids = [
+        reservation["reservation_id"]
+        for reservation in confirmed
+        if reservation.get("reservation_id") is not None
+    ]
+
+    reservation_items = (
+        client.table(EQUIPMENT_RESERVATION_ITEM_TABLE)
+        .select("reservation_item_id,reservation_id,equipment_id,reserved_quantity")
+        .in_("reservation_id", reservation_ids)
+        .execute()
+        .data
+        or []
+    ) if reservation_ids else []
+
+    equipment_ids = list({
+        item.get("equipment_id")
+        for item in reservation_items
+        if item.get("equipment_id") is not None
+    })
+
+    equipment = (
+        client.table(EQUIPMENT_TABLE)
+        .select("equipment_id,equipment_name")
+        .in_("equipment_id", equipment_ids)
+        .execute()
+        .data
+        or []
+    ) if equipment_ids else []
+
+    equipment_map = {
+        str(row["equipment_id"]): row.get("equipment_name")
+        for row in equipment
+    }
+
+    items_by_reservation: dict[str, list[dict[str, Any]]] = {}
+
+    for item in reservation_items:
+        reservation_key = str(item.get("reservation_id"))
+        items_by_reservation.setdefault(reservation_key, []).append({
+            **item,
+            "equipment_name": equipment_map.get(
+                str(item.get("equipment_id")),
+                item.get("equipment_id")
+            )
+        })
+
+    return [
+        {
+            **reservation,
+            "items": items_by_reservation.get(
+                str(reservation.get("reservation_id")),
+                []
+            )
+        }
+        for reservation in confirmed
     ]
 
 
@@ -72,50 +213,89 @@ def get_safety_check(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def event_is_ready_for_safety_check(client: Client, event_id: int) -> bool:
-    venue_bookings = get_approved_venue_bookings(client, event_id)
-    equipment_reservations = get_confirmed_equipment_reservations(client, event_id)
-
-    return bool(venue_bookings and equipment_reservations)
-
-
-def notify_users(
+def safety_information_revised_after_rejection(
     client: Client,
-    recipient_ids: list[str],
-    message: str,
-    event_id: int
-) -> None:
-    recipients = list(dict.fromkeys(
-        str(recipient_id)
-        for recipient_id in recipient_ids
-        if recipient_id
-    ))
+    event: dict[str, Any]
+) -> bool:
+    """
+    A rejected safety check means the Safety Officer found the organiser-provided
+    safety information insufficient.
 
-    if not recipients:
-        return
+    Venue and equipment arrangements remain approved/reserved. The event becomes
+    eligible for another Operational Safety Check only after equipment_placement
+    or crowd_movement has actually changed after the rejection.
+    """
+    if str(event.get("safety_decision_status") or "").strip().lower() != "rejected":
+        return True
 
-    rows = [
-        {
-            "recipient_id": recipient_id,
-            "message": message,
-            "record_type": "event",
-            "record_id": str(event_id),
-            "is_read": False
+    decided_at = event.get("safety_decided_at")
+
+    if not decided_at:
+        return False
+
+    changes = (
+        client.table(EVENT_CHANGE_LOG_TABLE)
+        .select("changed_fields,created_at")
+        .eq("event_id", event["id"])
+        .gt("created_at", decided_at)
+        .order("created_at")
+        .execute()
+        .data
+        or []
+    )
+
+    for change in changes:
+        changed_fields = {
+            str(field).strip()
+            for field in (change.get("changed_fields") or [])
         }
-        for recipient_id in recipients
-    ]
 
-    client.table(NOTIFICATIONS_TABLE).insert(rows).execute()
+        if changed_fields & SAFETY_INFORMATION_FIELDS:
+            return True
+
+    return False
 
 
-def technical_support_staff_ids(client: Client) -> list[str]:
-    users = client.table(USERS_TABLE).select("id,role").execute().data or []
+def event_is_ready_for_safety_check(
+    client: Client,
+    event_id: int,
+    event: dict[str, Any] | None = None
+) -> bool:
+    if event is None:
+        event = (
+            client.table(EVENTS_TABLE)
+            .select("*")
+            .eq("id", event_id)
+            .maybe_single()
+            .execute()
+            .data
+        )
 
-    return [
-        str(user["id"])
-        for user in users
-        if str(user.get("role", "")).strip().lower() == "technical support staff"
-    ]
+    if not event:
+        return False
+
+    if not venue_arrangements_are_ready(client, event_id):
+        return False
+
+    equipment_reservations = get_confirmed_equipment_reservations(
+        client,
+        event_id
+    )
+
+    if not equipment_reservations:
+        return False
+
+    safety_status = str(
+        event.get("safety_decision_status") or ""
+    ).strip().lower()
+
+    if safety_status == "approved":
+        return False
+
+    if safety_status == "rejected":
+        return safety_information_revised_after_rejection(client, event)
+
+    return True
 
 
 @router.get(
@@ -134,17 +314,12 @@ def list_events_for_safety_check():
         if event_id is None:
             continue
 
-        if not event_is_ready_for_safety_check(client, event_id):
-            continue
-
-        safety_check = get_safety_check(event)
-
-        if safety_check and safety_check.get("status") in {"Approved", "Rejected"}:
+        if not event_is_ready_for_safety_check(client, event_id, event):
             continue
 
         eligible_events.append({
             **event,
-            "safety_check": safety_check
+            "safety_check": get_safety_check(event)
         })
 
     return eligible_events
@@ -172,14 +347,14 @@ def get_event_for_safety_check(event_id: int):
             detail="Event not found."
         )
 
-    venue_bookings = get_approved_venue_bookings(client, event_id)
-    equipment_reservations = get_confirmed_equipment_reservations(client, event_id)
-
-    if not venue_bookings or not equipment_reservations:
+    if not event_is_ready_for_safety_check(client, event_id, event):
         raise HTTPException(
             status_code=400,
             detail="Event is not ready for an Operational Safety Check."
         )
+
+    venue_bookings = get_approved_venue_bookings(client, event_id)
+    equipment_reservations = get_confirmed_equipment_reservations(client, event_id)
 
     safety_check = get_safety_check(event)
 
@@ -230,14 +405,16 @@ def submit_safety_decision(
             detail="Event not found."
         )
 
-    if not event_is_ready_for_safety_check(client, event_id):
+    if not event_is_ready_for_safety_check(client, event_id, event):
         raise HTTPException(
             status_code=400,
             detail="Event is not ready for an Operational Safety Check."
         )
 
     comments = (request.comments or "").strip()
-    affected_arrangements = list(dict.fromkeys(request.affected_arrangements or []))
+    affected_arrangements = list(
+        dict.fromkeys(request.affected_arrangements or [])
+    )
 
     if request.decision in {"Rejected", "Changes Requested"} and not comments:
         raise HTTPException(
@@ -256,32 +433,19 @@ def submit_safety_decision(
     if request.decision == "Approved":
         event_status = "Confirmed"
         affected_arrangements = []
-    else:
+
+    elif request.decision == "Rejected":
+        # Rejection means the organiser-provided safety information is
+        # insufficient. Existing venue/equipment approvals remain valid.
         event_status = "Planning"
+        affected_arrangements = []
 
-        if request.decision == "Rejected":
-            affected_arrangements = []
-
-    if request.decision == "Changes Requested":
-        if "Venue" in affected_arrangements:
-            (
-                client.table(VENUE_BOOKING_TABLE)
-                .update({"status": "Needs Recheck"})
-                .eq("event_id", event_id)
-                .eq("status", "Approved")
-                .execute()
-            )
-
-        if "Equipment" in affected_arrangements:
-            reservations = get_confirmed_equipment_reservations(client, event_id)
-
-            for reservation in reservations:
-                (
-                    client.table(EQUIPMENT_RESERVATION_TABLE)
-                    .update({"status": "Needs Recheck"})
-                    .eq("reservation_id", reservation["reservation_id"])
-                    .execute()
-                )
+    else:
+        # Changes Requested returns the event to Planning so the organiser can
+        # submit an Event Change Request. Existing approved venue bookings and
+        # reserved equipment reservations remain unchanged. Any venue/equipment
+        # impact is handled later by the normal Event Change Request workflow.
+        event_status = "Planning"
 
     safety_data = {
         "status": event_status,
@@ -304,26 +468,6 @@ def submit_safety_decision(
         raise HTTPException(
             status_code=500,
             detail="Operational Safety Check could not be saved."
-        )
-
-    coordinator_id = event.get("coordinator_id")
-
-    if coordinator_id:
-        notify_users(
-            client,
-            [str(coordinator_id)],
-            f'Operational Safety Check for "{event.get("event_name", "Event")}" was {request.decision.lower()}.'
-            + (f" Comments: {comments}" if comments else ""),
-            event_id
-        )
-
-    if request.decision == "Changes Requested" and "Equipment" in affected_arrangements:
-        notify_users(
-            client,
-            technical_support_staff_ids(client),
-            f'Equipment arrangements for "{event.get("event_name", "Event")}" require recheck following the Operational Safety Check.'
-            + (f" Comments: {comments}" if comments else ""),
-            event_id
         )
 
     return {

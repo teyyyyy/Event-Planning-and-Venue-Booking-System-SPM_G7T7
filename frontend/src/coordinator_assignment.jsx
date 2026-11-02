@@ -1,15 +1,28 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { authenticatedFetch as fetch } from './api';
-import { capacityOptions, eventTypes, timeOptions } from './event_organiser';
+import { capacityOptions, eventTypes, timeOptions, layoutOptions, equipmentOptions, facilityOptions } from './event_organiser';
 import EventChangeHistory from './EventChangeHistory';
 import { arrangementLabel, classifyChange, fieldLabels } from './eventChanges';
+import FullEventDetails from './components/FullEventDetails';
 
 const API = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api';
 const EVENT_STATUSES = ['Assigned', 'Under review', 'Approved', 'Planning', 'Confirmed', 'Completed', 'Cancelled', 'Rejected'];
-const EMPTY_PROPOSAL = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '' };
+const EMPTY_PROPOSAL = { event_name: '', event_type: '', event_date: '', event_end_date: '', event_capacity: '', description: '', start_time: '', end_time: '', layout_required: '', equipment_required: [], accessibility_required: '', equipment_placement: '', crowd_movement: '', facilities_required: [] };
 
 const formatTime = (value) => String(value ?? '').slice(0, 5);
 const PROCESSING_LABELS = { 'Awaiting processing': 'awaiting coordinator processing', Processed: 'processed', 'Not required': 'no processing needed' };
+
+function proposalSelections(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const serialized = value.trim();
+  const hasArrayBrackets = (serialized.startsWith('{') && serialized.endsWith('}'))
+    || (serialized.startsWith('[') && serialized.endsWith(']'));
+  return (hasArrayBrackets ? serialized.slice(1, -1) : serialized)
+    .split(',')
+    .map((item) => item.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+}
 
 function requestList({ venue_requests: venue = [], equipment_requests: equipment = [] }) {
   return [...venue.map(({ request_id: id }) => `venue booking #${id}`), ...equipment.map(({ request_id: id }) => `equipment request #${id}`)].join(', ');
@@ -173,7 +186,7 @@ function LeadEventDetailsDialog({ event, coordinators, workloads, selectedCoordi
   </section></div>;
 }
 
-function EventRows({ events, emptyMessage = 'Loading Event Request...', onAssign, onStatusChange, onSubmit, onRequestChanges, onEditChangeRequest, onCancelChangeRequest, onRequestClarification, onViewFeedbackLog, onViewDetails, coordinators, canManage = false, isLead = false, isOrganiser = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
+function EventRows({ events, emptyMessage = 'Loading Event Request...', onAssign, onStatusChange, onSubmit, onRequestChanges, onEditChangeRequest, onCancelChangeRequest, onRequestClarification, onViewFeedbackLog, onViewDetails, onViewFullDetails, coordinators, canManage = false, isLead = false, isOrganiser = false, showChangeDecision = false, showCoordinatorFeedback = false, historyEventId = null, onToggleHistory }) {
   const columnCount = 6 + (showChangeDecision ? 1 : 0);
   return events.length ? events.map((event) => <React.Fragment key={event.id}><tr>
     <td>{event.event_title}</td><td>{event.event_end_date && event.event_end_date !== event.event_date ? `${event.event_date} to ${event.event_end_date}` : event.event_date}</td>
@@ -183,8 +196,8 @@ function EventRows({ events, emptyMessage = 'Loading Event Request...', onAssign
     {showCoordinatorFeedback && <td>{event.coordinator_comments || event.amendments
       ? <button className="assign" type="button" onClick={() => onViewFeedbackLog(event)}>View clarification/amendments</button>
       : '—'}</td>}
-    {!canManage && <td>{String(event.event_status).trim().toLowerCase() === 'draft' && <button className="assign" onClick={() => onSubmit(event.id)}>Submit</button>}{!['draft', 'completed', 'cancelled', 'rejected'].includes(String(event.event_status).trim().toLowerCase()) && (event.has_pending_change_request ? <span className="pill">Pending change request</span> : <button className="assign" onClick={() => onRequestChanges(event)}>Request changes</button>)}</td>}
-    {canManage && <td>{isLead ? <button className="assign" type="button" onClick={() => onViewDetails(event)}>View details</button> : ['submitted', 'under review'].includes(String(event.event_status || '').trim().toLowerCase()) && <button className="assign" type="button" onClick={() => onRequestClarification(event)}>Request clarification/amendments</button>}</td>}
+    {!canManage && <td>{String(event.event_status).trim().toLowerCase() === 'draft' && <button className="assign" onClick={() => onSubmit(event.id)}>Submit</button>}{['planning', 'confirmed', 'completed'].includes(String(event.event_status || '').trim().toLowerCase()) && <button className="assign" type="button" onClick={() => onViewFullDetails(event)}>View full event details</button>}{!['draft', 'completed', 'cancelled', 'rejected'].includes(String(event.event_status).trim().toLowerCase()) && (event.has_pending_change_request ? <span className="pill">Pending change request</span> : <button className="assign" onClick={() => onRequestChanges(event)}>Request changes</button>)}</td>}
+    {canManage && <td>{isLead ? <button className="assign" type="button" onClick={() => onViewDetails(event)}>{event.assigned_coordinator_id ? 'Reassign coordinator' : 'Assign coordinator'}</button> : <>{['submitted', 'under review'].includes(String(event.event_status || '').trim().toLowerCase()) && <button className="assign" type="button" onClick={() => onRequestClarification(event)}>Request clarification/amendments</button>}{['planning', 'confirmed', 'completed'].includes(String(event.event_status || '').trim().toLowerCase()) && <button className="assign" type="button" onClick={() => onViewFullDetails(event)}>View full event details</button>}</>}</td>}
     <td><button className="assign" type="button" aria-label={`Change history for ${event.event_title}`} aria-expanded={historyEventId === event.id} onClick={() => onToggleHistory(event.id)}>{historyEventId === event.id ? 'Hide history' : 'History'}</button></td>
   </tr>
   {historyEventId === event.id && <tr><td className="change-history-cell" colSpan={columnCount}><EventChangeHistory eventId={event.id} /></td></tr>}
@@ -253,6 +266,24 @@ function ChangeRequestDetail({ request, onReview, isReviewing, reviewError, onPr
       <ChangeRequestField label="End time" originalValue={formatTime(current.end_time)} proposedValue={formatTime(proposal.end_time)}>
         <input aria-label="End time" value={formatTime(proposal.end_time)} readOnly />
       </ChangeRequestField>
+      <ChangeRequestField label="Layout required" originalValue={current.layout_required} proposedValue={proposal.layout_required}>
+        <input aria-label="Layout required" value={proposal.layout_required || ''} readOnly />
+      </ChangeRequestField>
+      <ChangeRequestField label="Equipment required" originalValue={displayEventDetail(current.equipment_required)} proposedValue={displayEventDetail(proposal.equipment_required)} wide>
+        <textarea aria-label="Equipment required" value={displayEventDetail(proposal.equipment_required)} readOnly rows="3" />
+      </ChangeRequestField>
+      <ChangeRequestField label="Facilities required" originalValue={displayEventDetail(current.facilities_required)} proposedValue={displayEventDetail(proposal.facilities_required)} wide>
+        <textarea aria-label="Facilities required" value={displayEventDetail(proposal.facilities_required)} readOnly rows="3" />
+      </ChangeRequestField>
+      <ChangeRequestField label="Accessibility required" originalValue={Number(current.accessibility_required) === 1 ? 'Yes' : 'No'} proposedValue={Number(proposal.accessibility_required) === 1 ? 'Yes' : 'No'}>
+        <input aria-label="Accessibility required" value={Number(proposal.accessibility_required) === 1 ? 'Yes' : 'No'} readOnly />
+      </ChangeRequestField>
+      <ChangeRequestField label="Equipment placement" originalValue={current.equipment_placement} proposedValue={proposal.equipment_placement} wide>
+        <textarea aria-label="Equipment placement" value={proposal.equipment_placement || ''} readOnly rows="4" />
+      </ChangeRequestField>
+      <ChangeRequestField label="Crowd movement" originalValue={current.crowd_movement} proposedValue={proposal.crowd_movement} wide>
+        <textarea aria-label="Crowd movement" value={proposal.crowd_movement || ''} readOnly rows="4" />
+      </ChangeRequestField>
       <ChangeRequestField label="Description and planning requirements" originalValue={current.description} proposedValue={proposal.description} wide>
         <textarea aria-label="Description and planning requirements" value={proposal.description || ''} readOnly rows="5" />
       </ChangeRequestField>
@@ -305,6 +336,9 @@ export default function CoordinatorAssignment({ user }) {
   const [feedbackError, setFeedbackError] = useState('');
   const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
   const [feedbackLogEvent, setFeedbackLogEvent] = useState(null);
+  const [fullDetails, setFullDetails] = useState(null);
+  const [fullDetailsLoading, setFullDetailsLoading] = useState(false);
+  const [fullDetailsError, setFullDetailsError] = useState('');
   const changeRequestFormRef = useRef(null);
   const changeCapacityOptions = capacityOptions.some(({ value }) => String(value) === String(changeProposal.event_capacity))
     ? capacityOptions
@@ -436,17 +470,23 @@ export default function CoordinatorAssignment({ user }) {
         } : null,
         event: decision === 'Approved' && request.event
           ? {
-            ...request.event,
-            event_title: request.proposal?.event_name,
-            event_name: request.proposal?.event_name,
-            event_type: request.proposal?.event_type,
-            event_date: request.proposal?.event_date,
-            event_end_date: request.proposal?.event_end_date,
-            event_capacity: request.proposal?.event_capacity,
-            description: request.proposal?.description,
-            start_time: request.proposal?.start_time,
-            end_time: request.proposal?.end_time,
-          }
+              ...request.event,
+              event_title: request.proposal?.event_name,
+              event_name: request.proposal?.event_name,
+              event_type: request.proposal?.event_type,
+              event_date: request.proposal?.event_date,
+              event_end_date: request.proposal?.event_end_date,
+              event_capacity: request.proposal?.event_capacity,
+              description: request.proposal?.description,
+              start_time: request.proposal?.start_time,
+              end_time: request.proposal?.end_time,
+              layout_required: request.proposal?.layout_required,
+              equipment_required: request.proposal?.equipment_required,
+              facilities_required: request.proposal?.facilities_required,
+              accessibility_required: request.proposal?.accessibility_required,
+              equipment_placement: request.proposal?.equipment_placement,
+              crowd_movement: request.proposal?.crowd_movement,
+            }
           : request.event,
       };
       setCoordinatorChangeRequests((current) => current.map((item) => item.id === request.id ? updatedRequest : item));
@@ -561,6 +601,30 @@ export default function CoordinatorAssignment({ user }) {
     }
   }
 
+  async function openFullEventDetails(event) {
+    setFullDetails({ event });
+    setFullDetailsLoading(true);
+    setFullDetailsError('');
+    try {
+      const response = await fetch(`${API}/events/${event.id}/full-details`);
+      const result = await response.json();
+      if (!response.ok) {
+        setFullDetailsError(result.detail || 'Unable to load full event details.');
+        return;
+      }
+      setFullDetails(result);
+    } catch (error) {
+      setFullDetailsError(`Unable to load full event details. (${error.message})`);
+    } finally {
+      setFullDetailsLoading(false);
+    }
+  }
+
+  function closeFullEventDetails() {
+    setFullDetails(null);
+    setFullDetailsError('');
+  }
+
   async function submitEvent(eventId) {
     const response = await fetch(`${API}/event-organisers/${user.id}/requests/${eventId}/submit`, { method: 'POST' });
     const result = await response.json();
@@ -581,6 +645,12 @@ export default function CoordinatorAssignment({ user }) {
       description: event.description ?? '',
       start_time: String(event.start_time ?? '').slice(0, 5),
       end_time: String(event.end_time ?? '').slice(0, 5),
+      layout_required: event.layout_required ?? '',
+      equipment_required: proposalSelections(event.equipment_required),
+      facilities_required: proposalSelections(event.facilities_required),
+      accessibility_required: Number(event.accessibility_required) === 1 ? 1 : 0,
+      equipment_placement: event.equipment_placement ?? '',
+      crowd_movement: event.crowd_movement ?? '',
     });
     setChangeRequestText('');
   }
@@ -590,7 +660,22 @@ export default function CoordinatorAssignment({ user }) {
     setEditingChangeRequestId(request.id);
     setChangeRequestEvent(event);
     setChangeRequestMessage('');
-    setChangeProposal({ event_name: request.proposed_event_name ?? event.event_name ?? '', event_type: request.proposed_event_type ?? '', event_date: request.proposed_event_date ?? event.event_date ?? '', event_end_date: request.proposed_event_end_date ?? request.proposed_event_date ?? event.event_date ?? '', event_capacity: request.proposed_event_capacity ?? '', description: request.proposed_description ?? '', start_time: formatTime(request.proposed_start_time), end_time: formatTime(request.proposed_end_time) });
+    setChangeProposal({
+      event_name: request.proposed_event_name ?? event.event_name ?? '',
+      event_type: request.proposed_event_type ?? event.event_type ?? '',
+      event_date: request.proposed_event_date ?? event.event_date ?? '',
+      event_end_date: request.proposed_event_end_date ?? request.proposed_event_date ?? event.event_date ?? '',
+      event_capacity: request.proposed_event_capacity ?? event.event_capacity ?? '',
+      description: request.proposed_description ?? event.description ?? '',
+      start_time: formatTime(request.proposed_start_time ?? event.start_time),
+      end_time: formatTime(request.proposed_end_time ?? event.end_time),
+      layout_required: request.proposed_layout_required ?? event.layout_required ?? '',
+      equipment_required: proposalSelections(request.proposed_equipment_required ?? event.equipment_required),
+      facilities_required: proposalSelections(request.proposed_facilities_required ?? event.facilities_required),
+      accessibility_required: Number(request.proposed_accessibility_required ?? event.accessibility_required) === 1 ? 1 : 0,
+      equipment_placement: request.proposed_equipment_placement ?? event.equipment_placement ?? '',
+      crowd_movement: request.proposed_crowd_movement ?? event.crowd_movement ?? '',
+    });
     setChangeRequestText(request.request_text || '');
   }
 
@@ -642,7 +727,20 @@ export default function CoordinatorAssignment({ user }) {
   }
 
   function updateProposal(event) {
-    setChangeProposal((current) => ({ ...current, [event.target.name]: event.target.value }));
+    const { name, type, value, checked } = event.target;
+    setChangeProposal((current) => {
+      if (type === 'checkbox' && (name === 'equipment_required' || name === 'facilities_required')) {
+        const selected = Array.isArray(current[name]) ? current[name] : [];
+        return {
+          ...current,
+          [name]: checked ? [...selected, value] : selected.filter((item) => item !== value),
+        };
+      }
+      if (type === 'radio' && name === 'accessibility_required') {
+        return { ...current, [name]: Number(value) };
+      }
+      return { ...current, [name]: value };
+    });
   }
 
   async function loadManagement() {
@@ -674,9 +772,9 @@ export default function CoordinatorAssignment({ user }) {
       {activeTab !== 'change-requests' && <>
         {isLead && <div className="message">{coordinatorWorkloads.length ? <div>{coordinatorWorkloads.map((coordinator) => <div key={coordinator.id}><strong>{coordinator.name}</strong>: {coordinator.active_event_count} active event{coordinator.active_event_count === 1 ? '' : 's'}</div>)}</div> : 'No coordinator workload data available.'}</div>}
         <h2>{isLead ? leadView === 'active' ? 'Active events by coordinator' : 'Submitted and unassigned events' : 'Event status'}</h2>
-        {isLead && leadView === 'active' && <label>View events by coordinator<select aria-label="View events by coordinator" value={coordinatorFilter} onChange={(event) => setCoordinatorFilter(event.target.value)}><option value="">All coordinators</option><option value="unassigned">Unassigned</option>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select></label>}
+        {isLead && leadView === 'active' && <label>View events by coordinator<select aria-label="View events by coordinator" value={coordinatorFilter} onChange={(event) => setCoordinatorFilter(event.target.value)}><option value="">All coordinators</option>{coordinators.map((coordinator) => <option key={coordinator.id} value={coordinator.id}>{coordinator.name}</option>)}</select></label>}
         {isLead && leadLoading && <p role="status">Loading events and workloads...</p>}
-        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={isLead && leadView === 'active' && coordinatorFilter ? events.filter((event) => coordinatorFilter === 'unassigned' ? !event.assigned_coordinator_id : event.assigned_coordinator_id === coordinatorFilter) : events} emptyMessage={isLead && leadView === 'active' && coordinatorFilter && !leadLoading ? 'No event requests found.' : 'Loading Event Request...'} onAssign={activeTab === 'management' ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onEditChangeRequest={editChangeRequest} onCancelChangeRequest={cancelSubmittedChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} onViewDetails={(event) => { setLeadAssignmentError(''); setLeadDetailEvent(event); setLeadSelectedCoordinator(event.assigned_coordinator_id || ''); }} coordinators={coordinators} canManage={activeTab === 'management'} isLead={isLead} isOrganiser={isOrganiser} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
+        <div className="table-wrap"><table><thead><tr><th>Event Title</th><th>Event Date</th><th>Event Status</th><th>Event Coordinator</th>{isOrganiser && <th>Change request decision</th>}{isOrganiser && <th>Clarification/amendments from coordinator</th>}{isCoordinator && <th>Actions</th>}{!isCoordinator && <th>Action</th>}<th>Changes</th></tr></thead><tbody><EventRows events={isLead && leadView === 'active' && coordinatorFilter ? events.filter((event) => event.assigned_coordinator_id === coordinatorFilter) : events} emptyMessage={isLead ? leadLoading ? 'Loading events...' : leadView === 'active' ? 'No active assigned events found.' : 'No submitted unassigned events found.' : 'No event requests found.'} onAssign={isLead ? (eventId) => { const event = events.find((item) => item.id === eventId); if (!event) return; setLeadDetailEvent(event); setLeadSelectedCoordinator(event.assigned_coordinator_id || ''); setLeadAssignmentError(''); } : isCoordinator ? reassign : assign} onStatusChange={updateStatus} onSubmit={submitEvent} onRequestChanges={startChangeRequest} onEditChangeRequest={editChangeRequest} onCancelChangeRequest={cancelSubmittedChangeRequest} onRequestClarification={startCoordinatorFeedback} onViewFeedbackLog={setFeedbackLogEvent} onViewDetails={(event) => { setLeadDetailEvent(event); setLeadSelectedCoordinator(event.assigned_coordinator_id || ''); setLeadAssignmentError(''); }} onViewFullDetails={openFullEventDetails} coordinators={coordinators} canManage={isCoordinator} isLead={isLead} isOrganiser={isOrganiser} showChangeDecision={isOrganiser} showCoordinatorFeedback={isOrganiser} historyEventId={historyEventId} onToggleHistory={toggleHistory} /></tbody></table></div>
       </>}
       {isCoordinator && activeTab === 'change-requests' && <>
         <h2>Submitted change requests</h2>
@@ -693,6 +791,24 @@ export default function CoordinatorAssignment({ user }) {
           <label>Capacity<select name="event_capacity" value={changeProposal.event_capacity} onChange={updateProposal} required><option value="">Select capacity</option>{changeCapacityOptions.map(({ label, value }) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label>Start time<select name="start_time" value={changeProposal.start_time} onChange={updateProposal} required><option value="">Select start time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
           <label>End time<select name="end_time" value={changeProposal.end_time} onChange={updateProposal} required><option value="">Select end time</option>{timeOptions.map((time) => <option key={time} value={time}>{time}</option>)}</select></label>
+          <label>Layout required<select name="layout_required" value={changeProposal.layout_required} onChange={updateProposal} required><option value="">Select a layout</option>{!layoutOptions.includes(changeProposal.layout_required) && changeProposal.layout_required && <option value={changeProposal.layout_required}>{changeProposal.layout_required}</option>}{layoutOptions.map((layout) => <option key={layout} value={layout}>{layout}</option>)}</select></label>
+          <fieldset className="choice-group">
+            <legend>Equipment required <span aria-hidden="true">*</span></legend>
+            <div className="checkbox-options">{equipmentOptions.map((equipment) => <label className="checkbox-option" key={equipment}><input type="checkbox" name="equipment_required" value={equipment} checked={(changeProposal.equipment_required || []).includes(equipment)} onChange={updateProposal} />{equipment}</label>)}</div>
+          </fieldset>
+          <fieldset className="choice-group">
+            <legend>Facilities required <span aria-hidden="true">*</span></legend>
+            <div className="checkbox-options">{facilityOptions.map((facility) => <label className="checkbox-option" key={facility}><input type="checkbox" name="facilities_required" value={facility} checked={(changeProposal.facilities_required || []).includes(facility)} onChange={updateProposal} />{facility}</label>)}</div>
+          </fieldset>
+          <fieldset className="choice-group">
+            <legend>Accessibility required <span aria-hidden="true">*</span></legend>
+            <div className="radio-options">
+              <label className="radio-option"><input name="accessibility_required" type="radio" value="1" checked={changeProposal.accessibility_required === 1} onChange={updateProposal} required />Yes</label>
+              <label className="radio-option"><input name="accessibility_required" type="radio" value="0" checked={changeProposal.accessibility_required === 0} onChange={updateProposal} required />No</label>
+            </div>
+          </fieldset>
+          <label className="wide">Equipment placement<textarea name="equipment_placement" value={changeProposal.equipment_placement} onChange={updateProposal} required rows="4" placeholder="Describe where equipment should be placed." /></label>
+          <label className="wide">Crowd movement<textarea name="crowd_movement" value={changeProposal.crowd_movement} onChange={updateProposal} required rows="4" placeholder="Describe the planned crowd flow." /></label>
           <label className="wide">Description and planning requirements<textarea name="description" value={changeProposal.description} onChange={updateProposal} required rows="5" /></label>
           <label className="wide">Summary for the event coordinator<textarea aria-label="Change summary for the event coordinator" value={changeRequestText} onChange={(event) => setChangeRequestText(event.target.value)} maxLength={5000} required rows="3" /></label>
         </div>
@@ -702,6 +818,8 @@ export default function CoordinatorAssignment({ user }) {
       {isCoordinator && feedbackEvent && <CoordinatorFeedbackDialog event={feedbackEvent} clarification={feedbackClarification} amendments={feedbackAmendments} error={feedbackError} isSubmitting={isSubmittingFeedback} onChange={changeCoordinatorFeedback} onClose={closeCoordinatorFeedback} onSubmit={submitCoordinatorFeedback} />}
       {isLead && leadDetailEvent && <LeadEventDetailsDialog event={leadDetailEvent} coordinators={coordinators} workloads={coordinatorWorkloads} selectedCoordinator={leadSelectedCoordinator} onCoordinatorChange={setLeadSelectedCoordinator} onAssign={assignLeadEvent} onClose={() => setLeadDetailEvent(null)} assigning={isAssigningLeadEvent} error={leadAssignmentError} />}
       {isOrganiser && feedbackLogEvent && <CoordinatorFeedbackLogDialog event={feedbackLogEvent} onClose={() => setFeedbackLogEvent(null)} />}
+      {fullDetails && <FullEventDetails details={fullDetails} loading={fullDetailsLoading} error={fullDetailsError} onClose={closeFullEventDetails} />}
     </section>
   </main>;
 }
+

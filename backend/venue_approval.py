@@ -98,18 +98,17 @@ def enrich(client, bookings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [view(b, events.get(b["event_id"]), venues.get(b["venue_id"]), users) for b in bookings]
 
 
-def owned_booking(client, request_id: int, staff: dict[str, Any]) -> dict[str, Any]:
+def get_booking(client, request_id: int) -> dict[str, Any]:
+    """All authenticated Venue Staff share the same venue-booking work queue."""
     booking = client.table(BOOKING_TABLE).select("*").eq("request_id", request_id).maybe_single().execute()
     if not booking or not booking.data:
         raise HTTPException(404, "Venue booking request not found.")
-    if str(booking.data.get("venue_staff_id")) != str(staff["id"]):
-        raise HTTPException(403, "This venue booking request is assigned to another venue staff member.")
     return booking.data
 
 
 def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
     client = db()
-    booking = owned_booking(client, request_id, staff)
+    booking = get_booking(client, request_id)
     status = effective_status(booking)
     if status == EXPIRED:
         raise HTTPException(409, "This hold has expired. The event coordinator must submit a new venue request.")
@@ -148,7 +147,7 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
         if conflict:
             raise HTTPException(409, "Cannot approve: Venue is already booked during this time (including setup/teardown buffers).")
 
-    # Guard on status so two staff deciding at once can't overwrite each other.
+    # Guard on status so two Venue Staff deciding at once cannot overwrite each other.
     try:
         updated = (
             client.table(BOOKING_TABLE)
@@ -163,23 +162,21 @@ def decide(request_id: int, staff: dict[str, Any], changes: dict[str, Any]) -> d
             raise HTTPException(409, "Venue availability changed. Refresh this request before deciding.") from error
         raise
     if not updated:
-        raise HTTPException(409, "This request was just decided by someone else.")
+        raise HTTPException(409, "This request was just decided by another venue staff member.")
     return enrich(client, updated)[0]
 
 
 @router.get("/api/venue-booking-requests")
 def list_requests(staff: dict[str, Any] = Depends(require_venue_staff)):
     client = db()
-    bookings = (
-        client.table(BOOKING_TABLE).select("*").eq("venue_staff_id", staff["id"]).order("created_at", desc=True).execute().data or []
-    )
+    bookings = client.table(BOOKING_TABLE).select("*").order("created_at", desc=True).execute().data or []
     return enrich(client, bookings)
 
 
 @router.get("/api/venue-booking-requests/{request_id}")
 def get_request(request_id: int, staff: dict[str, Any] = Depends(require_venue_staff)):
     client = db()
-    return enrich(client, [owned_booking(client, request_id, staff)])[0]
+    return enrich(client, [get_booking(client, request_id)])[0]
 
 
 @router.get("/api/venue-booking-requests/{request_id}/alternative-venue-availability")
@@ -188,7 +185,7 @@ def alternative_venue_availability(
     staff: dict[str, Any] = Depends(require_venue_staff),
 ):
     client = db()
-    booking = owned_booking(client, request_id, staff)
+    booking = get_booking(client, request_id)
     event = (
         client.table(EVENT_TABLE).select("*").eq("id", booking["event_id"])
         .maybe_single().execute().data
@@ -198,6 +195,15 @@ def alternative_venue_availability(
 
     window = booking_window(event)
     venues = client.table(VENUE_TABLE).select("*").execute().data or []
+    active_requests = (
+        client.table(BOOKING_TABLE)
+        .select("request_id,event_id,venue_id,status")
+        .eq("event_id", event["id"])
+        .in_("status", [APPROVED, PENDING, ON_HOLD])
+        .execute()
+        .data or []
+    )
+
     result = []
     for venue in venues:
         reason = None
@@ -209,21 +215,18 @@ def alternative_venue_availability(
             conflict = find_conflict(
                 client, venue["venue_id"], venue, window, request_id,
             )
-            # Check if this exact event already has an active request for this venue
-            active_request = (
-                client.table(BOOKING_TABLE).select("request_id")
-                .eq("event_id", event["id"])
-                .eq("venue_id", venue["venue_id"])
-                .in_("status", [APPROVED, PENDING, ON_HOLD])
-                .neq("request_id", request_id)  # ignore the current request
-                .maybe_single().execute().data
+            has_other_active_request = any(
+                str(row.get("venue_id")) == str(venue["venue_id"])
+                and str(row.get("request_id")) != str(request_id)
+                for row in active_requests
             )
-            if active_request:
+            if has_other_active_request:
                 reason = "This event already has an active request for this venue."
             elif conflict and conflict.get("status") == ON_HOLD:
                 reason = f"Venue is on hold until {to_sgt(conflict.get('hold_expires_at'))}."
             elif conflict:
                 reason = "A confirmed booking overlaps this event, including setup/teardown time."
+
         result.append({
             "venue_id": venue["venue_id"],
             "available": reason is None,
@@ -256,7 +259,7 @@ def reject_request(request_id: int, details: RejectionDetails | None = None, sta
 
 
 def hold_action(name: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Run a hold RPC; venue_holds.sql checks ownership, status, expiry and conflicts atomically."""
+    """Run a hold RPC; venue_holds.sql checks status, expiry and conflicts atomically."""
     client = db()
     try:
         result = client.rpc(name, params).execute()
@@ -283,3 +286,4 @@ def place_hold(request_id: int, details: HoldDetails, staff: dict[str, Any] = De
 @router.delete("/api/venue-booking-requests/{request_id}/hold")
 def remove_hold(request_id: int, staff: dict[str, Any] = Depends(require_venue_staff)):
     return hold_action("remove_venue_hold", {"p_request_id": request_id, "p_staff_id": staff["id"]})
+

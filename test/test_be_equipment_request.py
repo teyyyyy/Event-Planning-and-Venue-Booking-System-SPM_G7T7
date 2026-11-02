@@ -217,7 +217,7 @@ def payload(*items, event_id=1):
     pre="No existing request for event 1.", data="MIC x2, requirements \"  wireless \"", steps="1. Call create_equipment_request(\"c1\", payload).")
 def test_create_ok(use_db):
     client = use_db(world(), er)
-    out = er.create_equipment_request("c1", payload(Item(equipment_id=" MIC ", requested_quantity=2, technical_requirements="  wireless ")))
+    out = er.create_equipment_request("c1", payload(Item(equipment_id="MIC", requested_quantity=2, technical_requirements="  wireless "), Item(equipment_id="PRJ", requested_quantity=1)))
     header = client.tables["Equipment Request"][0]
     item = client.tables["Equipment Request Item"][0]
     assert header["status"] == "Submitted" and header["created_by"] == "c1" and out["request_id"] == header["request_id"]
@@ -246,7 +246,7 @@ def test_create_exceeds(use_db):
 @tc("BE-EQREQ-036", "create_equipment_request", "Header insert returns no row.", "HTTP 500 \"Equipment request could not be created.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call the route.", kind="Negative")
 def test_create_header_fails(use_db):
     use_db(world(), er).empty_inserts = True
-    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1)))[1] == "Equipment request could not be created."
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1), Item(equipment_id="PRJ", requested_quantity=1)))[1] == "Equipment request could not be created."
 
 
 @tc("BE-EQREQ-037", "create_equipment_request", "Item insert fails after the header was created.", "Header is deleted (rollback) and HTTP 500 \"Equipment request items could not be saved.\" is raised.", pre="Item table insert raises.",
@@ -254,7 +254,7 @@ def test_create_header_fails(use_db):
 def test_create_rollback(use_db):
     client = use_db(world(), er)
     client.fail_tables.add(("Equipment Request Item", "insert"))
-    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1)))[0] == 500 and not client.tables["Equipment Request"]
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1), Item(equipment_id="PRJ", requested_quantity=1)))[0] == 500 and not client.tables["Equipment Request"]
 
 
 def edit_world():
@@ -264,16 +264,13 @@ def edit_world():
     ]))
 
 
-@tc("BE-EQREQ-038", "edit_equipment_request", "Coordinator changes one item, removes another and adds nothing.", "MIC updated; PRJ deleted; header reset to Submitted with update fields cleared.",
-    pre="Request 7 has MIC x2 and PRJ x1; header shows a Technical Support update.", data="new items: MIC x4", steps="1. Call edit_equipment_request(\"c1\", 7, [MIC x4]).")
+@tc("BE-EQREQ-038", "edit_equipment_request", "Coordinator removes equipment required by the Event Organiser.", "HTTP 400 explains that the required equipment must remain in the request.",
+    pre="The Event Organiser requires Microphone and Projector.", data="new items: MIC x4; PRJ removed", steps="1. Edit the request with only MIC.", kind="Negative")
 def test_edit_update_and_remove(use_db):
     client = use_db(edit_world(), er)
     client.tables["Equipment Request"][0].update(status="Updated", updated_by="t1", latest_update_summary="x")
-    out = er.edit_equipment_request("c1", 7, er.EquipmentRequestEditInput(items=[Item(equipment_id="MIC", requested_quantity=4)]))
-    items = client.tables["Equipment Request Item"]
-    header = client.tables["Equipment Request"][0]
-    assert [(i["equipment_id"], i["requested_quantity"]) for i in items] == [("MIC", 4)]
-    assert (header["status"], header["updated_by"], header["latest_update_summary"]) == ("Submitted", None, None) and out["request_id"] == 7
+    assert err(er.edit_equipment_request, "c1", 7, er.EquipmentRequestEditInput(items=[Item(equipment_id="MIC", requested_quantity=4)])) == (
+        400, "Projector were required by the Event Organiser but are missing from the equipment request. Add these equipment rows.")
 
 
 @tc("BE-EQREQ-039", "edit_equipment_request", "Coordinator adds a new equipment type.", "A new item row with trimmed requirements is inserted.", data="add PRJ x1 alongside MIC x2",
@@ -352,7 +349,7 @@ def rpc_fails(client, code):
 def test_create_rpc_duplicate(use_db):
     client = use_db(world(), er)
     rpc_fails(client, "23505")
-    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1))) == (409, "An equipment request has already been submitted for this event.")
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1), Item(equipment_id="PRJ", requested_quantity=1))) == (409, "An equipment request has already been submitted for this event.")
 
 
 @tc("BE-EQREQ-048", "create_equipment_request", "The submit RPC fails for any other database reason.", "HTTP 500 \"Equipment request could not be created.\" without database details.",
@@ -360,7 +357,7 @@ def test_create_rpc_duplicate(use_db):
 def test_create_rpc_other_error(use_db):
     client = use_db(world(), er)
     rpc_fails(client, "XX000")
-    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1))) == (500, "Equipment request could not be created.")
+    assert err(er.create_equipment_request, "c1", payload(Item(equipment_id="MIC", requested_quantity=1), Item(equipment_id="PRJ", requested_quantity=1))) == (500, "Equipment request could not be created.")
 
 
 @tc("BE-EQREQ-049", "validate_request_items", "Equipment id is only whitespace.", "HTTP 400 \"Equipment is required.\"", data="equipment_id = \"   \"",
@@ -456,10 +453,10 @@ def test_edit_quantity_marks_recheck(use_db):
     assert [r["status"] for r in client.tables["Equipment Reservation"]] == ["Needs Recheck", "Modified", "Cancelled"]
 
 
-@tc("BE-EQREQ-057", "edit_equipment_request", "Only the technical requirements of an item change.", "The response flags a reservation recheck.", data="MIC requirements \"a\" -> \"b\"",
+@tc("BE-EQREQ-057", "edit_equipment_request", "Only the technical requirements of an item change.", "No reservation recheck is required because the equipment type and quantity are unchanged.", data="MIC requirements \"a\" -> \"b\"",
     steps="1. Call edit_equipment_request with the same quantities and new requirements.", kind="Edge")
-def test_edit_requirements_marks_recheck(use_db):
+def test_edit_requirements_no_recheck(use_db):
     use_db(edit_world(), er)
     out = er.edit_equipment_request("c1", 7, er.EquipmentRequestEditInput(items=[
         Item(equipment_id="MIC", requested_quantity=2, technical_requirements="b"), Item(equipment_id="PRJ", requested_quantity=1)]))
-    assert out["reservation_recheck_required"] is True
+    assert out["reservation_recheck_required"] is False

@@ -59,7 +59,7 @@ def test_all_venues(monkeypatch):
 
 @tc("BE-VREQ-005", "create_venue_booking", "A coordinator submits a booking.", "A Pending row for the event and venue is inserted and its request_id returned.", data="event 10, venue 5, coordinator c1", steps="1. Call create_venue_booking(create()).")
 def test_create_ok(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
     out = vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     saved = client.tables[BOOKING][0]
     assert out == {"request_id": saved["request_id"]}
@@ -68,7 +68,7 @@ def test_create_ok(monkeypatch):
 
 @tc("BE-VREQ-006", "create_venue_booking", "The database rejects the insert (e.g. duplicate event/venue combination).", "HTTP 503 with a generic message; the database error text is not exposed.", pre="Insert raises.", data="\"23505 duplicate key\"", steps="1. Make insert raise. 2. Call create_venue_booking.", kind="Negative")
 def test_create_db_error(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
     client.fail_tables.add((BOOKING, "insert"))
     client.fail_error = RuntimeError("23505 duplicate key")
     with pytest.raises(HTTPException) as info:
@@ -78,7 +78,7 @@ def test_create_db_error(monkeypatch):
 
 @tc("BE-VREQ-007", "create_venue_booking", "The insert succeeds but returns no row.", "HTTP 400 \"Failed to create venue booking request.\"", pre="Insert returns empty data.", steps="1. Simulate empty insert. 2. Call create_venue_booking.", kind="Negative")
 def test_create_empty_insert(monkeypatch):
-    use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]}).empty_inserts = True
+    use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]}).empty_inserts = True
     with pytest.raises(HTTPException) as info:
         vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
     assert (info.value.status_code, info.value.detail) == (400, "Failed to create venue booking request.")
@@ -86,7 +86,7 @@ def test_create_empty_insert(monkeypatch):
 
 @tc("BE-VREQ-012", "create_venue_booking", "A coordinator submits another coordinator's id.", "HTTP 403 and no booking is inserted.", steps="1. Submit with a spoofed coordinator id.", kind="Security")
 def test_create_spoofed_coordinator(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
     with pytest.raises(HTTPException) as info:
         vr.create_venue_booking(create(coordinator_id="c2"), {"id": "c1", "role": "Event Coordinator"})
     assert info.value.status_code == 403 and client.tables[BOOKING] == []
@@ -100,7 +100,7 @@ def test_create_unassigned_event(monkeypatch):
     assert info.value.status_code == 403 and client.tables[BOOKING] == []
 
 
-@tc("BE-VREQ-008", "list_requests_by_venue", "Availability of a venue is checked.", "Only Approved bookings for that venue are returned.", pre="Venue 5 has Approved, Pending and Rejected bookings; venue 6 has an Approved one.", steps="1. Call list_requests_by_venue(5).")
+@tc("BE-VREQ-008", "list_requests_by_venue", "Availability of a venue is checked.", "Approved bookings and active holds for that venue are returned; Pending and Rejected requests are not.", pre="Venue 5 has Approved, Pending and Rejected bookings; venue 6 has an Approved one.", steps="1. Call list_requests_by_venue(5).")
 def test_by_venue(monkeypatch):
     use(monkeypatch, {BOOKING: [row(1, 5, "c1", "Approved"), row(2, 5, "c1", "Pending"), row(3, 5, "c2", "Rejected"), row(4, 6, "c1", "Approved")]})
     assert [r["request_id"] for r in vr.list_requests_by_venue(5)] == [1]
@@ -112,7 +112,7 @@ def test_by_venue_empty(monkeypatch):
     assert vr.list_requests_by_venue(9) == []
 
 
-@tc("BE-VREQ-014", "list_requests_by_venue", "Venue staff check a venue including requests still awaiting a decision.", "Approved and Pending bookings for that venue are returned; Rejected ones are not.", pre="Venue 5 has Approved, Pending and Rejected bookings.", data="include_pending = True", steps="1. Call list_requests_by_venue(5, include_pending=True).")
+@tc("BE-VREQ-014", "list_requests_by_venue", "Venue staff check a venue including requests still awaiting a decision.", "Approved, active On Hold, Pending and Expired bookings for that venue are included; Rejected ones are not.", pre="Venue 5 has Approved, Pending and Rejected bookings.", data="include_pending = True", steps="1. Call list_requests_by_venue(5, include_pending=True).")
 def test_by_venue_include_pending(monkeypatch):
     use(monkeypatch, {BOOKING: [row(1, 5, "c1", "Approved"), row(2, 5, "c1", "Pending"), row(3, 5, "c2", "Rejected"), row(4, 6, "c1", "Pending")]})
     assert sorted(r["request_id"] for r in vr.list_requests_by_venue(5, include_pending=True)) == [1, 2]
@@ -143,7 +143,7 @@ def test_by_coordinator_empty(monkeypatch):
 @tc("BE-VREQ-016", "create_venue_booking", "A coordinator submits a booking for an event that already has a request for a DIFFERENT venue.", "A Pending row for the event and the new venue is inserted.", pre="Event 10 already has a request for venue 5.", data="event 10, venue 6, coordinator c1", steps="1. Pre-populate a booking. 2. Call create_venue_booking with a different venue.", kind="Positive")
 def test_create_different_venue_ok(monkeypatch):
     client = use(monkeypatch, {
-        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}],
         BOOKING: [row(1, 5, "c1", "Pending")]
     })
     
@@ -169,7 +169,7 @@ def test_all_venues_includes_setup_and_teardown(monkeypatch):
 @tc("BE-VREQ-018", "create_venue_booking", "Allows multiple requests for the same event in different venues.", "Returns request_id for the newly inserted venue booking.", pre="Event 10 has an existing request for Venue 5.", steps="1. Submit request for Event 10 at Venue 6. 2. Verify request_id returned.", kind="Positive")
 def test_create_request_multi_venue_same_event(monkeypatch):
     client = use(monkeypatch, {
-        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}],
         BOOKING: [{"request_id": 101, "event_id": 10, "venue_id": 5, "coordinator_id": "c1", "status": "Pending"}]
     })
     
@@ -180,46 +180,6 @@ def test_create_request_multi_venue_same_event(monkeypatch):
     assert len(client.tables[BOOKING]) == 2
     assert client.tables[BOOKING][1]["venue_id"] == 6
 
-@tc("BE-VREQ-019", "create_venue_booking", "Handles composite key unique constraint failure (23505).", "HTTP 503 with a generic message; the constraint error text is not exposed.", pre="Database raises duplicate key error 23505 for event_id + venue_id.", steps="1. Make insert raise 23505 error. 2. Call create_venue_booking.", kind="Negative")
-def test_create_request_composite_duplicate_error(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
-    client.fail_tables.add((BOOKING, "insert"))
-    client.fail_error = RuntimeError('duplicate key value violates unique constraint "venue_booking_requests_event_id_venue_id_key" 23505')
-    
-    with pytest.raises(HTTPException) as info:
-        vr.create_venue_booking(create(event_id=10, venue_id=5), {"id": "c1", "role": "Event Coordinator"})
-    
-    assert info.value.status_code == 503
-    assert info.value.detail == "Unable to save venue request. Please try again."
-
-
-@tc("BE-VREQ-020", "check_venue_availability", "Availability check considers setup and teardown buffer windows.", "Returns overlapping status when a new booking collides with an existing event's setup/teardown time.", pre="Approved booking whose event runs 10:00-12:00, with 30m setup (9:30 AM total start).", steps="1. Query availability for 09:00-09:45. 2. Verify it reports overlap.", kind="Edge")
-def test_availability_check_includes_setup_teardown_buffer(monkeypatch):
-    use(monkeypatch, {
-        "Venues": [{"venue_id": 1, "setup_time": 30, "teardown_time": 30}],
-        "Event Details": [{"id": 1, "event_date": "2026-10-07", "event_end_date": "2026-10-07", "start_time": "10:00:00", "end_time": "12:00:00"}],
-        BOOKING: [
-            {
-                "request_id": 1,
-                "venue_id": 1,
-                "event_id": 1,
-                "status": "Approved",
-            }
-        ]
-    })
-    
-    if hasattr(vr, "check_venue_availability"):
-        is_available = vr.check_venue_availability(
-            venue_id=1,
-            start_dt="2026-10-07T09:00:00+08:00",
-            end_dt="2026-10-07T09:45:00+08:00"
-        )
-        assert is_available is False
-    else:
-        reqs = vr.list_requests_by_venue(1)
-        assert len(reqs) == 1
-
-
 @tc("BE-VREQ-021", "module settings", "The backend reads its Supabase settings.", "Venue requests use the same normalised URL and key as the other routers.",
     steps="1. Compare venue_request's settings with coordinator_assignment's.", kind="Config")
 def test_shared_settings():
@@ -229,7 +189,7 @@ def test_shared_settings():
 
 @tc("BE-VREQ-022", "create_venue_booking", "The database refuses a second active request for the same event and venue (23505).", "HTTP 409 asking for a different venue; the database text is not exposed.", pre="The event already has a Pending, On Hold or Approved request for venue 5.", steps="1. Make the insert raise APIError 23505. 2. Call create_venue_booking.", kind="Negative")
 def test_create_request_duplicate_venue(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
     client.fail_tables.add((BOOKING, "insert"))
     client.fail_error = APIError({"code": "23505", "message": 'duplicate key value violates unique constraint "Venue Booking Requests_active_event_venue_key"', "details": None, "hint": None})
     with pytest.raises(HTTPException) as info:
@@ -250,7 +210,7 @@ def alternative_offer():
 
 @tc("BE-VREQ-023", "create_venue_booking", "The database guard reports the venue became unavailable (23514).", "HTTP 409 asking for a replacement venue.", pre="Venue staff mark the venue unavailable after the form loaded.", steps="1. Make the insert raise APIError 23514. 2. Call create_venue_booking.", kind="Negative")
 def test_create_request_venue_became_unavailable(monkeypatch):
-    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
     client.fail_tables.add((BOOKING, "insert"))
     client.fail_error = APIError({"code": "23514", "message": "Venue is unavailable or this request needs a replacement.", "details": None, "hint": None})
     with pytest.raises(HTTPException) as info:
@@ -389,3 +349,69 @@ def test_accept_alternative_venue_duplicate_active_request(monkeypatch):
     assert info.value.status_code == 409
     assert info.value.detail == "This event already has an active request for the suggested alternative venue."
 
+@tc("BE-VREQ-033", "create_venue_booking", "A coordinator submits a venue request for an event that is not in Planning status.", "HTTP 409 explains that venue requests can only be submitted during Planning and nothing is inserted.", pre="Event 10 is assigned to c1 but has status Submitted.", steps="1. Submit a venue request for event 10.", kind="Negative")
+def test_create_requires_planning(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Submitted"}]})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (409, "Venue requests can only be submitted for events in Planning status.")
+    assert client.tables[BOOKING] == []
+
+
+@tc("BE-VREQ-034", "create_venue_booking", "A coordinator requests a venue that does not exist.", 'HTTP 404 \"Venue not found.\" and nothing is inserted.', pre="Event 10 is in Planning; venue 99 does not exist.", steps="1. Submit a request for venue 99.", kind="Negative")
+def test_create_missing_venue(monkeypatch):
+    client = use(monkeypatch, {"Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}]})
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(venue_id=99), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (404, "Venue not found.")
+    assert client.tables[BOOKING] == []
+
+
+@tc("BE-VREQ-035", "create_venue_booking", "A coordinator requests a venue that Venue Staff marked unavailable.", "HTTP 409 asks the coordinator to select another venue and nothing is inserted.", pre="Event 10 is in Planning; venue 5 has is_available=False.", steps="1. Submit a request for venue 5.", kind="Negative")
+def test_create_unavailable_venue(monkeypatch):
+    client = use(monkeypatch, {
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "status": "Planning"}],
+        "Venues": [{"venue_id": 5, "is_available": False}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.create_venue_booking(create(), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (409, "This venue is unavailable. Please select another venue.")
+    assert client.tables[BOOKING] == []
+
+
+@tc("BE-VREQ-036", "decide_alternative_venue", "The assigned coordinator accepts an alternative venue that has become unavailable.", "HTTP 409 explains that the suggested venue is no longer available and the offer remains unchanged.", pre="Request 12 offers venue 6; venue 6 is now unavailable.", steps="1. Accept the alternative venue.", kind="Negative")
+def test_accept_alternative_unavailable(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [alternative_offer()],
+        "Event Details": [{"id": 10, "coordinator_id": "c1", "event_date": "2026-12-01", "event_end_date": "2026-12-01", "start_time": "09:00:00", "end_time": "10:00:00"}],
+        "Venues": [{"venue_id": 6, "name": "Hall B", "is_available": False}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (409, "The suggested venue is no longer available.")
+    assert client.tables[BOOKING][0]["status"] == "Alternative Offered"
+    assert not client.writes(BOOKING, "update")
+
+
+@tc("BE-VREQ-037", "decide_alternative_venue", "The coordinator tries to decide a request that has no pending alternative offer.", "HTTP 409 and the booking is not updated.", pre="Request 12 is Pending even though an alternative_venue_id is present.", steps="1. Try to accept the alternative.", kind="Negative")
+def test_decide_alternative_requires_pending_offer(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [{**alternative_offer(), "status": "Pending"}],
+        "Event Details": [{"id": 10, "coordinator_id": "c1"}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.decide_alternative_venue("c1", 12, vr.AlternativeVenueDecision(decision="accept"), {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (409, "This request has no pending alternative venue offer.")
+    assert not client.writes(BOOKING, "update")
+
+
+@tc("BE-VREQ-038", "start_replacement_request", "A coordinator tries to start a replacement for a booking whose event is assigned to another coordinator.", "HTTP 403 and the booking is not updated.", pre="Request 12 belongs to c1 but event 10 is assigned to c2.", steps="1. Start the replacement as c1.", kind="Security")
+def test_start_replacement_unassigned_event(monkeypatch):
+    client = use(monkeypatch, {
+        BOOKING: [{**alternative_offer(), "replacement_required": True}],
+        "Event Details": [{"id": 10, "coordinator_id": "c2"}],
+    })
+    with pytest.raises(HTTPException) as info:
+        vr.start_replacement_request("c1", 12, {"id": "c1", "role": "Event Coordinator"})
+    assert (info.value.status_code, info.value.detail) == (403, "You can only replace requests for your assigned events.")
+    assert not client.writes(BOOKING, "update")

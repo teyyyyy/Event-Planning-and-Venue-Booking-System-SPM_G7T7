@@ -11,6 +11,23 @@ function formatTime(value) {
   return date.toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' });
 }
 
+
+function formatDate(value) {
+  if (!value) return '—';
+  const date = new Date(`${value}T00:00:00`);
+  return date.toLocaleDateString('en-SG', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function formatEventDateRange(startDate, endDate) {
+  if (!startDate) return '—';
+  if (!endDate || endDate === startDate) return formatDate(startDate);
+  return `${formatDate(startDate)} – ${formatDate(endDate)}`;
+}
+
 function statusClass(status) {
   return String(status || '').toLowerCase().replaceAll(' ', '-');
 }
@@ -190,7 +207,7 @@ export default function EquipmentAvailability({ user, onReserve, onUpdate }) {
                   {events.map((event) => (
                     <tr key={event.event_id}>
                       <td><strong>{event.event_name}</strong></td>
-                      <td>{event.event_date}</td>
+                      <td>{formatEventDateRange(event.event_date, event.event_end_date)}</td>
                       <td>{formatTime(event.start_time)} – {formatTime(event.end_time)}</td>
 
                       <td>
@@ -250,8 +267,8 @@ export default function EquipmentAvailability({ user, onReserve, onUpdate }) {
         </button>
 
         <div className="technical-event-date">
-          {selectedEvent?.event_date} · {formatTime(selectedEvent?.start_time)} –{' '}
-          {formatTime(selectedEvent?.end_time)}
+          {formatEventDateRange(selectedEvent?.event_date, selectedEvent?.event_end_date)} ·{' '}
+          {formatTime(selectedEvent?.start_time)} – {formatTime(selectedEvent?.end_time)}
         </div>
       </div>
 

@@ -11,9 +11,19 @@ function format12HourTime(time24) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+function formatCalendarDateTime(value) {
+  if (!value) return "";
+
+  return `${value.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+  })}, ${format12HourTime(value.toTimeString().slice(0, 5))}`;
+}
+
 export default function VenueCalendar({ venues }) {
   const [calendarVenueId, setCalendarVenueId] = useState("");
   const [calendarBookings, setCalendarBookings] = useState([]);
+  const [expandedOverlapKey, setExpandedOverlapKey] = useState(null);
   const [currentWeekStart, setCurrentWeekStart] = useState(() => {
     // Default to the Monday of the current week
     const now = new Date();
@@ -85,7 +95,10 @@ export default function VenueCalendar({ venues }) {
         <div className="selector" style={{ margin: 0 }}>
           <select
             value={calendarVenueId}
-            onChange={(e) => setCalendarVenueId(e.target.value)}
+            onChange={(e) => {
+              setCalendarVenueId(e.target.value);
+              setExpandedOverlapKey(null);
+            }}
           >
             <option value="">Select a venue to view...</option>
             {venues.map((v) => (
@@ -213,33 +226,50 @@ export default function VenueCalendar({ venues }) {
                     const dayEnd = new Date(day);
                     dayEnd.setHours(24, 0, 0, 0); // Midnight of the next day
 
-                    // Find bookings that START in this specific hour on this specific day.
-                    // Bookings have no times of their own; they come from the linked event.
-                    const startingBookings = calendarBookings.filter((b) => {
-                      const times = eventWindow(b["Event Details"]);
-                      if (!times) return false;
-                      const { start: eventStart, end: eventEnd } = times;
+                    // Build every booking that overlaps this day, then assign it a lane.
+                    // This lets bookings that start in different hours still display side by side
+                    // when their visible time periods overlap.
+                    const dayBookings = calendarBookings
+                      .map((booking) => {
+                        const times = eventWindow(booking["Event Details"]);
+                        if (!times) return null;
 
-                      // Expand boundaries by setup and teardown times
-                      const overallStart = new Date(
-                        eventStart.getTime() - setupMinutes * 60000,
-                      );
-                      const overallEnd = new Date(
-                        eventEnd.getTime() + teardownMinutes * 60000,
-                      );
+                        const { start: eventStart, end: eventEnd } = times;
+                        const overallStart = new Date(
+                          eventStart.getTime() - setupMinutes * 60000,
+                        );
+                        const overallEnd = new Date(
+                          eventEnd.getTime() + teardownMinutes * 60000,
+                        );
 
-                      // Ignore if the block doesn't overlap this day at all
-                      if (overallEnd <= dayStart || overallStart >= dayEnd)
-                        return false;
+                        if (overallEnd <= dayStart || overallStart >= dayEnd)
+                          return null;
 
-                      // Clamp the START time to midnight of THIS day to find the block's anchor
-                      const effectiveStart = new Date(
-                        Math.max(overallStart, dayStart),
-                      );
+                        return {
+                          booking, eventStart, eventEnd, overallStart, overallEnd,
+                          effectiveStart: new Date(Math.max(overallStart, dayStart)),
+                          effectiveEnd: new Date(Math.min(overallEnd, dayEnd)),
+                        };
+                      })
+                      .filter(Boolean)
+                      .sort((a, b) => a.effectiveStart - b.effectiveStart || a.effectiveEnd - b.effectiveEnd);
 
-                      // Render block in the cell matching its anchor hour
-                      return effectiveStart.getHours() === hour;
+                    const activeLanes = [];
+                    const laidOutBookings = dayBookings.map((item) => {
+                      let lane = activeLanes.findIndex((laneEnd) => laneEnd <= item.effectiveStart);
+                      if (lane === -1) lane = activeLanes.length;
+                      activeLanes[lane] = item.effectiveEnd;
+                      return { ...item, lane };
                     });
+
+                    const overlapCountFor = (item) =>
+                      laidOutBookings.filter(
+                        (other) => item.effectiveStart < other.effectiveEnd && item.effectiveEnd > other.effectiveStart,
+                      ).length;
+
+                    const startingBookings = laidOutBookings.filter(
+                      (item) => item.effectiveStart.getHours() === hour,
+                    );
 
                     return (
                       <td
@@ -252,24 +282,14 @@ export default function VenueCalendar({ venues }) {
                           verticalAlign: "top",
                         }}
                       >
-                        {startingBookings.map((booking, bIdx) => {
+                        {startingBookings.map((item, bIdx) => {
+                          const { booking, eventStart, eventEnd, overallStart, overallEnd, effectiveStart, lane } = item;
                           const eventDetails = booking["Event Details"];
-                          const eventName =
-                            eventDetails.event_name || "Unknown Event";
-                          const { start: eventStart, end: eventEnd } =
-                            eventWindow(eventDetails);
-
-                          // Calculate overall bounds including setup & teardown
-                          const overallStart = new Date(
-                            eventStart.getTime() - setupMinutes * 60000,
-                          );
-                          const overallEnd = new Date(
-                            eventEnd.getTime() + teardownMinutes * 60000,
-                          );
-
-                          const effectiveStart = new Date(
-                            Math.max(overallStart, dayStart),
-                          );
+                          const eventName = eventDetails.event_name || "Unknown Event";
+                          const overlapCount = overlapCountFor(item);
+                          const displayLaneCount = Math.min(overlapCount, 2);
+                          const overlapKey = `${dayStart.toISOString()}-${hour}-${booking.request_id || bIdx}`;
+                          const isExpanded = expandedOverlapKey === overlapKey;
                           const startMinute = effectiveStart.getMinutes();
 
                           // Format inclusive times for tooltip
@@ -322,14 +342,75 @@ export default function VenueCalendar({ venues }) {
                               style={{
                                 position: "absolute",
                                 top: `${startMinute}px`,
-                                left: "4px",
-                                right: "4px",
-                                display: "flex",
+                                left: overlapCount <= 2 ? `calc(${(lane / displayLaneCount) * 100}% + 4px)` : "4px",
+                                width: overlapCount <= 2 ? `calc(${100 / displayLaneCount}% - 8px)` : "calc(100% - 8px)",
+                                display: overlapCount > 2 && lane > 0 && !isExpanded ? "none" : "flex",
                                 flexDirection: "column",
-                                zIndex: 5,
+                                zIndex: isExpanded ? 20 : 5 + lane,
                               }}
                               title={`${eventName} (Req ID: ${booking.request_id}) - ${booking.status}${isHeld ? ` until ${holdTime}` : isExpired ? `, expired ${holdTime}` : ""}\nBooking (incl. setup & teardown): ${overallStartStr} - ${overallEndStr}`}
                             >
+                              {overlapCount > 2 && lane === 0 && (
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  onClick={() => setExpandedOverlapKey(isExpanded ? null : overlapKey)}
+                                  style={{ marginBottom: "4px", padding: "4px 6px", fontSize: "10px", textAlign: "left", width: "100%", cursor: "pointer" }}
+                                >
+                                  {overlapCount} overlapping events — {isExpanded ? "collapse" : "expand to see all"}
+                                </button>
+                              )}
+                              {overlapCount > 2 && isExpanded && lane === 0 && (() => {
+                                const overlappingItems = laidOutBookings.filter(
+                                  (other) =>
+                                    item.effectiveStart < other.effectiveEnd &&
+                                    item.effectiveEnd > other.effectiveStart,
+                                );
+
+                                const sharedOverlapStart = new Date(
+                                  Math.max(
+                                    ...overlappingItems.map((other) =>
+                                      other.effectiveStart.getTime(),
+                                    ),
+                                  ),
+                                );
+                                const sharedOverlapEnd = new Date(
+                                  Math.min(
+                                    ...overlappingItems.map((other) =>
+                                      other.effectiveEnd.getTime(),
+                                    ),
+                                  ),
+                                );
+                                const hasSharedOverlap =
+                                  sharedOverlapStart < sharedOverlapEnd;
+
+                                return (
+                                  <div style={{ marginBottom: "4px", padding: "6px", background: "#ffffff", border: "1px solid #dce6f3", borderRadius: "4px", fontSize: "10px", lineHeight: 1.4 }}>
+                                    {hasSharedOverlap && (
+                                      <div style={{ marginBottom: "6px", paddingBottom: "6px", borderBottom: "1px solid #edf0f5" }}>
+                                        <strong>Shared overlap:</strong>{" "}
+                                        {formatCalendarDateTime(sharedOverlapStart)}
+                                        {" – "}
+                                        {formatCalendarDateTime(sharedOverlapEnd)}
+                                      </div>
+                                    )}
+
+                                    {overlappingItems.map((other) => {
+                                      const otherDetails = other.booking["Event Details"];
+                                      return (
+                                        <div key={other.booking.request_id || `${otherDetails?.event_name}-${other.lane}`} style={{ marginBottom: "6px" }}>
+                                          <strong>{otherDetails?.event_name || "Unknown Event"}</strong> ({other.booking.status})
+                                          <div style={{ color: "#68758a", marginTop: "1px" }}>
+                                            {formatCalendarDateTime(other.eventStart)}
+                                            {" – "}
+                                            {formatCalendarDateTime(other.eventEnd)}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
                               {/* --- Setup Block --- */}
                               {visibleSetup > 0 && (
                                 <div
@@ -481,3 +562,4 @@ export default function VenueCalendar({ venues }) {
     </div>
   );
 }
+

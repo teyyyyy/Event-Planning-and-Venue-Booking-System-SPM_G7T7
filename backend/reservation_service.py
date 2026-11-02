@@ -83,16 +83,31 @@ class ReservationService:
             self.client.table(REQUEST_TABLE)
             .select("*")
             .eq("event_id", event_id)
+            .order("request_id", desc=True)
             .execute()
             .data or []
         )
+
+        inactive_statuses = {
+            "superseded",
+            "cancelled",
+            "rejected",
+        }
+
+        rows = [
+            row
+            for row in rows
+            if str(
+                row.get("status") or ""
+            ).strip().lower() not in inactive_statuses
+        ]
 
         if not rows:
             raise HTTPException(
                 status_code=404,
                 detail=(
                     "This event does not have an "
-                    "equipment request."
+                    "active equipment request."
                 ),
             )
 
@@ -374,29 +389,41 @@ class ReservationService:
                 row.get("requested_quantity") or 0
             )
             for row in requested_rows
+            if int(
+                row.get("requested_quantity") or 0
+            ) > 0
         }
 
-        for item in items:
-            if item.equipment_id not in requested_map:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"{item.equipment_id} is not part "
-                        "of this equipment request."
-                    ),
-                )
-
-            if (
+        reserved_map = {
+            item.equipment_id: int(
                 item.reserved_quantity
-                > requested_map[item.equipment_id]
+            )
+            for item in items
+            if int(item.reserved_quantity) > 0
+        }
+
+        if set(reserved_map) != set(requested_map):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The reservation equipment must exactly "
+                    "match the current equipment request."
+                ),
+            )
+
+        for equipment_id, requested_quantity in (
+            requested_map.items()
+        ):
+            if (
+                reserved_map[equipment_id]
+                != requested_quantity
             ):
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        f"Reserved quantity for "
-                        f"{item.equipment_id} cannot exceed "
-                        f"the requested quantity of "
-                        f"{requested_map[item.equipment_id]}."
+                        f"Reserved quantity for {equipment_id} "
+                        f"must match the requested quantity of "
+                        f"{requested_quantity}."
                     ),
                 )
 
@@ -547,6 +574,8 @@ class ReservationService:
                     event.get("event_name"),
                 "event_date":
                     event.get("event_date"),
+                "event_end_date":
+                    event.get("event_end_date"),
                 "start_time":
                     event.get("start_time"),
                 "end_time":
@@ -592,7 +621,7 @@ class ReservationService:
         event_rows = (
             self.client.table(EVENT_TABLE)
             .select(
-                "id,event_name,event_date,"
+                "id,event_name,event_date,event_end_date,"
                 "start_time,end_time"
             )
             .in_(
@@ -701,6 +730,8 @@ class ReservationService:
                     ),
                 "event_date":
                     event.get("event_date"),
+                "event_end_date":
+                    event.get("event_end_date"),
                 "start_time":
                     event.get("start_time"),
                 "end_time":
@@ -759,10 +790,41 @@ class ReservationService:
         )
 
         if existing:
+            reservation = existing[0]
+
+            if (
+                reservation.get("request_id")
+                != request["request_id"]
+            ):
+                now = datetime.now(
+                    timezone.utc
+                ).isoformat()
+
+                updated = (
+                    self.client.table(RESERVATION_TABLE)
+                    .update({
+                        "request_id":
+                            request["request_id"],
+                        "status":
+                            "Needs Recheck",
+                        "updated_at":
+                            now,
+                    })
+                    .eq(
+                        "reservation_id",
+                        reservation["reservation_id"],
+                    )
+                    .execute()
+                    .data or []
+                )
+
+                if updated:
+                    reservation = updated[0]
+
             return {
                 "mode": "existing",
                 **self.reservation_response(
-                    existing[0]
+                    reservation
                 ),
             }
 
@@ -820,6 +882,8 @@ class ReservationService:
                     event.get("event_name"),
                 "event_date":
                     event.get("event_date"),
+                "event_end_date":
+                    event.get("event_end_date"),
                 "start_time":
                     event.get("start_time"),
                 "end_time":
@@ -1370,29 +1434,24 @@ class ReservationService:
             reservation["event_id"]
         )
 
-        reservation_items = (
-            self.client.table(RESERVATION_ITEM_TABLE)
-            .select(
-                "equipment_id,reserved_quantity"
-            )
-            .eq(
-                "reservation_id",
-                reservation_id,
-            )
-            .execute()
-            .data or []
+        current_request = self.get_request(
+            reservation["event_id"]
+        )
+
+        request_items = self.get_request_items(
+            current_request["request_id"]
         )
 
         positive_items = [
             SimpleNamespace(
                 equipment_id=item["equipment_id"],
                 reserved_quantity=int(
-                    item.get("reserved_quantity") or 0
+                    item.get("requested_quantity") or 0
                 ),
             )
-            for item in reservation_items
+            for item in request_items
             if int(
-                item.get("reserved_quantity") or 0
+                item.get("requested_quantity") or 0
             ) > 0
         ]
 
@@ -1400,14 +1459,13 @@ class ReservationService:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "At least one equipment item must remain "
-                    "reserved before this reservation can be confirmed."
+                    "The current equipment request does not "
+                    "contain any equipment to reserve."
                 ),
             )
 
-        self.validate_request_items(
-            reservation["request_id"],
-            positive_items,
+        self.validate_no_duplicates(
+            positive_items
         )
 
         availability = self.availability_for_items(
@@ -1430,13 +1488,99 @@ class ReservationService:
                     ),
                 )
 
+        current_items = (
+            self.client.table(RESERVATION_ITEM_TABLE)
+            .select("*")
+            .eq(
+                "reservation_id",
+                reservation_id,
+            )
+            .execute()
+            .data or []
+        )
+
+        current_map = {
+            item["equipment_id"]: item
+            for item in current_items
+        }
+
+        requested_ids = {
+            item.equipment_id
+            for item in positive_items
+        }
+
+        for current in current_items:
+            if current["equipment_id"] not in requested_ids:
+                (
+                    self.client.table(
+                        RESERVATION_ITEM_TABLE
+                    )
+                    .delete()
+                    .eq(
+                        "reservation_item_id",
+                        current["reservation_item_id"],
+                    )
+                    .execute()
+                )
+
+        start_datetime, end_datetime = (
+            self.event_datetimes(event)
+        )
+
         now = datetime.now(
             timezone.utc
         ).isoformat()
 
+        for item in positive_items:
+            existing_item = current_map.get(
+                item.equipment_id
+            )
+
+            item_data = {
+                "reserved_quantity":
+                    item.reserved_quantity,
+                "start_datetime":
+                    start_datetime.isoformat(),
+                "end_datetime":
+                    end_datetime.isoformat(),
+                "updated_at":
+                    now,
+            }
+
+            if existing_item:
+                (
+                    self.client.table(
+                        RESERVATION_ITEM_TABLE
+                    )
+                    .update(item_data)
+                    .eq(
+                        "reservation_item_id",
+                        existing_item[
+                            "reservation_item_id"
+                        ],
+                    )
+                    .execute()
+                )
+            else:
+                (
+                    self.client.table(
+                        RESERVATION_ITEM_TABLE
+                    )
+                    .insert({
+                        "reservation_id":
+                            reservation_id,
+                        "equipment_id":
+                            item.equipment_id,
+                        **item_data,
+                    })
+                    .execute()
+                )
+
         updated = (
             self.client.table(RESERVATION_TABLE)
             .update({
+                "request_id":
+                    current_request["request_id"],
                 "status":
                     "Reserved",
                 "updated_at":

@@ -84,7 +84,7 @@ function backend(o = {}) {
         message: 'Operational Safety Check submitted successfully.',
         event_id: 1,
         decision: 'Approved',
-        event_status: 'Preparation',
+        event_status: 'Confirmed',
       }),
     ...o,
   };
@@ -270,7 +270,9 @@ describe('OperationalFeasibilityCheck', () => {
       ).toBeInTheDocument();
 
       expect(
-        screen.getByText('Reservation #5')
+        screen.getByText(
+          'No confirmed equipment arrangements found.'
+        )
       ).toBeInTheDocument();
     }
   );
@@ -428,7 +430,7 @@ describe('OperationalFeasibilityCheck', () => {
 
       const comments =
         screen.getByPlaceholderText(
-          'Explain the safety issue and required changes.'
+          'Explain what information needs to be improved in Equipment Placement and/or Crowd Movement.'
         );
 
       expect(comments).toBeRequired();
@@ -461,9 +463,23 @@ describe('OperationalFeasibilityCheck', () => {
 
       expect(
         screen.getByPlaceholderText(
-          'Explain the safety issue and required changes.'
+          'Explain the safety issue and what the organiser should revise through an Event Change Request.'
         )
       ).toBeRequired();
+
+      expect(
+        screen.getByLabelText('Venue')
+      ).not.toBeChecked();
+
+      expect(
+        screen.getByLabelText('Equipment')
+      ).not.toBeChecked();
+
+      expect(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      ).toBeDisabled();
     }
   );
 
@@ -472,7 +488,7 @@ describe('OperationalFeasibilityCheck', () => {
     'FE-SAFETY-011',
     'OperationalFeasibilityCheck (decision)',
     'The Safety Officer approves an event without comments.',
-    'The approval is POSTed and a success message shows the new Preparation status.',
+    'The approval is POSTed and a success message shows the new Confirmed status.',
     {
       data: 'decision = Approved, comments omitted',
       steps:
@@ -499,7 +515,7 @@ describe('OperationalFeasibilityCheck', () => {
 
       expect(
         await screen.findByText(
-          'Gala: Approved. Event status is now Preparation.'
+          'Gala: Approved. Event status is now Confirmed.'
         )
       ).toBeInTheDocument();
 
@@ -517,6 +533,7 @@ describe('OperationalFeasibilityCheck', () => {
       expect(JSON.parse(options.body)).toEqual({
         decision: 'Approved',
         comments: null,
+        affected_arrangements: null,
       });
     }
   );
@@ -557,7 +574,7 @@ describe('OperationalFeasibilityCheck', () => {
 
       fireEvent.change(
         screen.getByPlaceholderText(
-          'Explain the safety issue and required changes.'
+          'Explain what information needs to be improved in Equipment Placement and/or Crowd Movement.'
         ),
         {
           target: {
@@ -588,6 +605,7 @@ describe('OperationalFeasibilityCheck', () => {
       expect(JSON.parse(options.body)).toEqual({
         decision: 'Rejected',
         comments: 'Emergency access blocked.',
+        affected_arrangements: null,
       });
     }
   );
@@ -628,9 +646,13 @@ describe('OperationalFeasibilityCheck', () => {
         }
       );
 
+      fireEvent.click(
+        screen.getByLabelText('Venue')
+      );
+
       fireEvent.change(
         screen.getByPlaceholderText(
-          'Explain the safety issue and required changes.'
+          'Explain the safety issue and what the organiser should revise through an Event Change Request.'
         ),
         {
           target: {
@@ -661,6 +683,7 @@ describe('OperationalFeasibilityCheck', () => {
       expect(JSON.parse(options.body)).toEqual({
         decision: 'Changes Requested',
         comments: 'Revise venue layout.',
+        affected_arrangements: ['Venue'],
       });
     }
   );
@@ -830,4 +853,704 @@ describe('OperationalFeasibilityCheck', () => {
       ).toBeInTheDocument();
     }
   );
+
+  tc(
+    'FE-SAFETY-018',
+    'OperationalFeasibilityCheck (details)',
+    'The event has complete venue, equipment and planning information.',
+    'The detailed arrangements and formatted planning information are displayed.',
+    {
+      kind: 'State',
+      steps:
+        '1. Return complete event, venue and equipment details. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          event: {
+            ...DETAILS.event,
+            event_end_date: '2026-10-02',
+            facilities_required: ['Aircon', 'Stage'],
+          },
+          venue_bookings: [
+            {
+              request_id: 1,
+              venue_id: 10,
+              status: 'Approved',
+              Venues: {
+                name: 'Seminar Room 1',
+              },
+            },
+          ],
+          equipment_reservations: [
+            {
+              reservation_id: 5,
+              items: [
+                {
+                  reservation_item_id: 9,
+                  equipment_id: 20,
+                  equipment_name: 'Projector',
+                  reserved_quantity: 2,
+                },
+              ],
+            },
+          ],
+          emergency_access: 'Rear emergency exit.',
+          equipment_placement: 'Projector beside stage.',
+          crowd_movement: 'Keep centre aisle clear.',
+          venue_restrictions: 'No open flames.',
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(screen.getByText('Aircon, Stage')).toBeInTheDocument();
+      expect(screen.getByText('Projector')).toBeInTheDocument();
+      expect(screen.getByText('2')).toBeInTheDocument();
+      expect(screen.getByText('Rear emergency exit.')).toBeInTheDocument();
+      expect(screen.getByText('Projector beside stage.')).toBeInTheDocument();
+      expect(screen.getByText('Keep centre aisle clear.')).toBeInTheDocument();
+      expect(screen.getByText('No open flames.')).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-019',
+    'OperationalFeasibilityCheck (details)',
+    'Facilities are returned as a JSON string.',
+    'The facilities are parsed and displayed as a readable list.',
+    {
+      kind: 'Edge',
+      data: 'facilities_required = \'["Aircon","Stage"]\'',
+      steps:
+        '1. Return facilities as a JSON array string. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          event: {
+            ...DETAILS.event,
+            facilities_required: '["Aircon","Stage"]',
+          },
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Aircon, Stage')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-020',
+    'OperationalFeasibilityCheck (details)',
+    'Facilities are returned as a comma-separated string.',
+    'Whitespace and blank facility values are removed before display.',
+    {
+      kind: 'Edge',
+      data: 'facilities_required = " Aircon, , Stage "',
+      steps:
+        '1. Return comma-separated facilities. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          event: {
+            ...DETAILS.event,
+            facilities_required: ' Aircon, , Stage ',
+          },
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Aircon, Stage')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-021',
+    'OperationalFeasibilityCheck (details)',
+    'Venue and equipment records do not contain display names or quantities.',
+    'Fallback venue and equipment labels are shown and a missing quantity is displayed as a dash.',
+    {
+      kind: 'Edge',
+      steps:
+        '1. Return arrangements without names and quantity. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          venue_bookings: [
+            {
+              venue_id: 10,
+              status: 'Approved',
+            },
+          ],
+          equipment_reservations: [
+            {
+              reservation_id: 5,
+              items: [
+                {
+                  equipment_id: 20,
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Venue #10')
+      ).toBeInTheDocument();
+
+      expect(
+        screen.getByText('Equipment #20')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-022',
+    'OperationalFeasibilityCheck (details)',
+    'The event has no approved venue arrangements.',
+    'The venue empty-state message is displayed.',
+    {
+      kind: 'Edge',
+      steps:
+        '1. Return no venue bookings. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          venue_bookings: [],
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText(
+          'No approved venue arrangements found.'
+        )
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-023',
+    'OperationalFeasibilityCheck (details)',
+    'The event contains missing optional event information.',
+    'Fallback values are displayed without breaking the safety review.',
+    {
+      kind: 'Edge',
+      steps:
+        '1. Return an event with missing optional values. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          event: {
+            id: 1,
+            event_name: '',
+            event_type: '',
+            event_date: null,
+            event_end_date: null,
+            start_time: null,
+            end_time: null,
+            event_capacity: null,
+            status: 'Confirmed',
+            description: '',
+            layout_required: '',
+            facilities_required: null,
+            accessibility_required: 0,
+          },
+        },
+      });
+
+      await ready();
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'View details',
+        })
+      );
+
+      expect(
+        await screen.findByRole('heading', {
+          name: 'Event #1',
+        })
+      ).toBeInTheDocument();
+
+      expect(screen.getByText('No')).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-024',
+    'OperationalFeasibilityCheck (previous decision)',
+    'A previous safety decision stores affected arrangements as an array.',
+    'The affected arrangements are displayed.',
+    {
+      kind: 'State',
+      steps:
+        '1. Return a previous decision with affected arrangements. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          safety_check: {
+            status: 'Changes Requested',
+            comments: 'Revise arrangements.',
+            affected_arrangements: ['Venue', 'Equipment'],
+          },
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Venue, Equipment')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-025',
+    'OperationalFeasibilityCheck (previous decision)',
+    'A previous safety decision stores affected arrangements as a JSON string.',
+    'The JSON value is parsed and displayed.',
+    {
+      kind: 'Edge',
+      steps:
+        '1. Return JSON affected arrangements. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          safety_check: {
+            status: 'Changes Requested',
+            comments: 'Revise arrangements.',
+            affected_arrangements: '["Venue","Equipment"]',
+          },
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Venue, Equipment')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-026',
+    'OperationalFeasibilityCheck (previous decision)',
+    'A previous safety decision stores affected arrangements in PostgreSQL array format.',
+    'The PostgreSQL value is normalised and displayed.',
+    {
+      kind: 'Edge',
+      data: 'affected_arrangements = {"Venue","Equipment"}',
+      steps:
+        '1. Return PostgreSQL-style affected arrangements. 2. Open the event.',
+    },
+    async () => {
+      backend({
+        details: {
+          ...DETAILS,
+          safety_check: {
+            status: 'Changes Requested',
+            comments: 'Revise arrangements.',
+            affected_arrangements: '{"Venue","Equipment"}',
+          },
+        },
+      });
+
+      await ready();
+      await openDetails();
+
+      expect(
+        screen.getByText('Venue, Equipment')
+      ).toBeInTheDocument();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-027',
+    'OperationalFeasibilityCheck (decision)',
+    'The Safety Officer requests changes to equipment only.',
+    'Equipment is submitted as the only affected arrangement.',
+    {
+      steps:
+        '1. Open event. 2. Select Request Changes. 3. Select Equipment. 4. Enter comments. 5. Submit.',
+    },
+    async () => {
+      const f = backend({
+        post: () =>
+          json({
+            decision: 'Changes Requested',
+            event_status: 'Planning',
+          }),
+      });
+
+      await ready();
+      await openDetails();
+
+      fireEvent.change(
+        screen.getByRole('combobox'),
+        {
+          target: {
+            value: 'Changes Requested',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByLabelText('Equipment')
+      );
+
+      fireEvent.change(
+        screen.getByPlaceholderText(
+          'Explain the safety issue and what the organiser should revise through an Event Change Request.'
+        ),
+        {
+          target: {
+            value: 'Move the equipment.',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      );
+
+      await screen.findByText(
+        'Gala: Changes Requested. Event status is now Planning.'
+      );
+
+      const [, options] =
+        callsTo(
+          f,
+          '/safety-check/events/1/decision',
+          'POST'
+        )[0];
+
+      expect(JSON.parse(options.body)).toEqual({
+        decision: 'Changes Requested',
+        comments: 'Move the equipment.',
+        affected_arrangements: ['Equipment'],
+      });
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-028',
+    'OperationalFeasibilityCheck (decision)',
+    'The Safety Officer requests changes to both venue and equipment.',
+    'Both affected arrangements are submitted.',
+    {
+      steps:
+        '1. Open event. 2. Select Request Changes. 3. Select Venue and Equipment. 4. Enter comments. 5. Submit.',
+    },
+    async () => {
+      const f = backend({
+        post: () =>
+          json({
+            decision: 'Changes Requested',
+            event_status: 'Planning',
+          }),
+      });
+
+      await ready();
+      await openDetails();
+
+      fireEvent.change(
+        screen.getByRole('combobox'),
+        {
+          target: {
+            value: 'Changes Requested',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByLabelText('Venue')
+      );
+
+      fireEvent.click(
+        screen.getByLabelText('Equipment')
+      );
+
+      fireEvent.change(
+        screen.getByPlaceholderText(
+          'Explain the safety issue and what the organiser should revise through an Event Change Request.'
+        ),
+        {
+          target: {
+            value: 'Revise both arrangements.',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      );
+
+      await screen.findByText(
+        'Gala: Changes Requested. Event status is now Planning.'
+      );
+
+      const [, options] =
+        callsTo(
+          f,
+          '/safety-check/events/1/decision',
+          'POST'
+        )[0];
+
+      expect(JSON.parse(options.body)).toEqual({
+        decision: 'Changes Requested',
+        comments: 'Revise both arrangements.',
+        affected_arrangements: ['Venue', 'Equipment'],
+      });
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-029',
+    'OperationalFeasibilityCheck (decision)',
+    'The Safety Officer removes a previously selected affected arrangement.',
+    'The unchecked arrangement is removed and submission remains disabled when none are selected.',
+    {
+      kind: 'State',
+      steps:
+        '1. Select Request Changes. 2. Select Venue. 3. Unselect Venue.',
+    },
+    async () => {
+      backend();
+
+      await ready();
+      await openDetails();
+
+      fireEvent.change(
+        screen.getByRole('combobox'),
+        {
+          target: {
+            value: 'Changes Requested',
+          },
+        }
+      );
+
+      const venue =
+        screen.getByLabelText('Venue');
+
+      fireEvent.click(venue);
+      expect(venue).toBeChecked();
+
+      fireEvent.click(venue);
+      expect(venue).not.toBeChecked();
+
+      expect(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      ).toBeDisabled();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-030',
+    'OperationalFeasibilityCheck (decision)',
+    'The Safety Officer changes from Request Changes to Approve after selecting an affected arrangement.',
+    'The affected-arrangement requirement is cleared and approval can be submitted.',
+    {
+      kind: 'State',
+      steps:
+        '1. Select Request Changes. 2. Select Venue. 3. Change decision to Approve.',
+    },
+    async () => {
+      backend();
+
+      await ready();
+      await openDetails();
+
+      const decision =
+        screen.getByRole('combobox');
+
+      fireEvent.change(
+        decision,
+        {
+          target: {
+            value: 'Changes Requested',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByLabelText('Venue')
+      );
+
+      fireEvent.change(
+        decision,
+        {
+          target: {
+            value: 'Approved',
+          },
+        }
+      );
+
+      expect(
+        screen.queryByLabelText('Venue')
+      ).toBeNull();
+
+      expect(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      ).toBeEnabled();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-031',
+    'OperationalFeasibilityCheck',
+    'An eligible event already has a safety-check status.',
+    'The existing safety-check status is displayed instead of Pending.',
+    {
+      kind: 'State',
+      steps:
+        '1. Return an event with an existing safety check. 2. Render the page.',
+    },
+    async () => {
+      backend({
+        events: [
+          {
+            ...EVENTS[0],
+            safety_check: {
+              status: 'Changes Requested',
+            },
+          },
+        ],
+      });
+
+      render(<OperationalFeasibilityCheck />);
+
+      expect(
+        await screen.findByText('Changes Requested')
+      ).toBeInTheDocument();
+
+      expect(
+        screen.queryByText('Pending')
+      ).toBeNull();
+    }
+  );
+
+
+  tc(
+    'FE-SAFETY-032',
+    'OperationalFeasibilityCheck (decision)',
+    'A decision is being submitted.',
+    'The decision controls and Close button are disabled while submission is in progress.',
+    {
+      kind: 'State',
+      steps:
+        '1. Open an event. 2. Select Approve. 3. Submit while the backend response is pending.',
+    },
+    async () => {
+      let resolvePost;
+
+      backend({
+        post: () =>
+          new Promise((resolve) => {
+            resolvePost = resolve;
+          }),
+      });
+
+      await ready();
+      await openDetails();
+
+      fireEvent.change(
+        screen.getByRole('combobox'),
+        {
+          target: {
+            value: 'Approved',
+          },
+        }
+      );
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'Submit decision',
+        })
+      );
+
+      expect(
+        await screen.findByRole('button', {
+          name: 'Submitting…',
+        })
+      ).toBeDisabled();
+
+      expect(
+        screen.getByRole('button', {
+          name: 'Close',
+        })
+      ).toBeDisabled();
+
+      await waitFor(() => {
+        expect(resolvePost).toBeTypeOf('function');
+      });
+
+      resolvePost(
+        json({
+          decision: 'Approved',
+          event_status: 'Confirmed',
+        })
+      );
+
+      expect(
+        await screen.findByText(
+          'Gala: Approved. Event status is now Confirmed.'
+        )
+      ).toBeInTheDocument();
+    }
+  );
+
 });

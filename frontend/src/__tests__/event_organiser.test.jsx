@@ -545,4 +545,90 @@ describe('EventOrganiser', () => {
       expect(await screen.findByText('Draft was discarded, but the refreshed event list could not be loaded.')).toBeInTheDocument();
       expect(callsTo(f, '/requests/1', 'DELETE')).toHaveLength(1);
     });
+  
+  tc('FE-ORG-043', 'EventOrganiser (editingEvent)', 'The editing event uses event_status = Draft instead of status.', 'The event is recognised as a Draft and the Draft editing actions are shown.',
+    { kind: 'Edge', steps: '1. Render an editingEvent using event_status. 2. Inspect the available actions.' },
+    async () => {
+      backend([]);
+      render(<EventOrganiser editingEvent={{
+        id: 4,
+        event_status: 'Draft',
+        event_name: 'Gala',
+        event_date: FUTURE,
+        event_capacity: 50,
+      }} />);
+      await waitFor(() => expect(field('event_name')).toHaveValue('Gala'));
+      expect(screen.getByRole('button', { name: 'Save draft' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Submit request' })).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-044', 'EventOrganiser (submit)', 'The backend rejects a new submission without a detail message.', 'The default submission error is shown.',
+    { kind: 'Negative', steps: '1. Return a failed submit response without detail. 2. Submit a valid event.' },
+    async () => {
+      backend([], () => json({}, 500));
+      render(<EventOrganiser />);
+      await screen.findByText('No draft event requests found for this organiser.');
+      fillForm();
+      fireEvent.submit(form());
+      expect(await screen.findByText('Event request was not submitted.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-045', 'EventOrganiser (edit)', 'Updating an event is rejected without a backend detail message.', 'The default update error is shown.',
+    { kind: 'Negative', steps: '1. Open a submitted event for editing. 2. Return a failed update without detail. 3. Save.' },
+    async () => {
+      backend([], () => json({}, 500));
+      render(<EventOrganiser editingEvent={{
+        id: 4,
+        status: 'Submitted',
+        event_name: 'Gala',
+        event_date: FUTURE,
+        event_end_date: FUTURE,
+        event_capacity: 50,
+        event_type: 'Workshop',
+        start_time: '09:00',
+        end_time: '17:00',
+        description: 'd',
+        layout_required: 'Banquet',
+        equipment_required: ['Microphone'],
+        accessibility_required: 0,
+        equipment_placement: 'Near the stage.',
+        crowd_movement: 'Keep the center aisle clear.',
+        facilities_required: ['Aircon'],
+      }} />);
+      fireEvent.submit(form());
+      expect(await screen.findByText('Could not update request.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-046', 'EventOrganiser (draft)', 'Creating a draft is rejected without a backend detail message.', 'The default new-draft error is shown.',
+    { kind: 'Negative', steps: '1. Return a failed draft response without detail. 2. Save a valid draft.' },
+    async () => {
+      backend([], () => json({}, 500));
+      render(<EventOrganiser />);
+      await screen.findByText('No draft event requests found for this organiser.');
+      fillForm();
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText('Event draft could not be saved.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-047', 'EventOrganiser (draft)', 'Updating an existing Draft is rejected without a backend detail message.', 'The default draft-update error is shown.',
+    { kind: 'Negative', steps: '1. Edit a Draft. 2. Return a failed update without detail. 3. Save the Draft.' },
+    async () => {
+      window.scrollTo = vi.fn();
+      backend([row()], () => json({}, 500));
+      render(<EventOrganiser />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Save draft' }));
+      expect(await screen.findByText('Event draft could not be updated.')).toBeInTheDocument();
+    });
+
+  tc('FE-ORG-048', 'EventOrganiser (discard)', 'Discarding a Draft is rejected without a backend detail message.', 'The default discard error is shown.',
+    { kind: 'Negative', steps: '1. Open the discard confirmation. 2. Return a failed DELETE without detail. 3. Confirm discard.' },
+    async () => {
+      backend([row()], () => json({}, 500));
+      render(<EventOrganiser />);
+      await screen.findByText('Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }));
+      expect(await screen.findByText('Event draft could not be discarded.')).toBeInTheDocument();
+    });
 });

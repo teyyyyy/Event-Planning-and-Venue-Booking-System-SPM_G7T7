@@ -30,7 +30,6 @@ const openDetail = async (props = {}) => {
 };
 const startEdit = async () => { await openDetail({ canEdit: true }); fireEvent.click(screen.getByRole('button', { name: 'Edit venue' })); await screen.findByRole('heading', { name: 'Hall A' }); };
 const form = () => document.querySelector('form.catalogue-panel');
-const area = (i) => document.querySelectorAll('textarea')[i]; // 0 facilities, 1 notes, 2 layouts
 
 describe('VenueCatalogue', () => {
   beforeEach(() => request.mockReset());
@@ -61,29 +60,29 @@ describe('VenueCatalogue', () => {
       expect(screen.queryByRole('alert')).toBeNull();
     });
 
-  tc('FE-VCAT-004', 'VenueCatalogue (details)', 'The user opens a venue.', 'GET /venue-catalogue/<id> is called and the details show the week\'s hours ("Closed" for a closed day), setup and teardown minutes, facilities, accessibility and layouts.',
+  tc('FE-VCAT-004', 'VenueCatalogue (details)', 'The user opens a venue.', 'GET /venue-catalogue/<id> is called and the details show setup and teardown minutes, facilities, accessibility, emergency access, venue restrictions and layouts.',
     { steps: '1. Render. 2. Click "View Hall A".' },
     async () => {
-      backend();
+      backend({ detail: { ...VENUE, emergency_access: 'Rear emergency exit', venue_restrictions: 'No open flames' } });
       await openDetail();
       expect(request).toHaveBeenCalledWith('/venue-catalogue/1', expect.anything());
-      expect(screen.getByText('Monday').nextSibling).toHaveTextContent('09:00 – 18:00');
-      expect(screen.getByText('Saturday').nextSibling).toHaveTextContent('10:00 – 14:00');
-      expect(screen.getByText('Sunday').nextSibling).toHaveTextContent('Closed');
       expect(screen.getByText('Wi-Fi, Projector')).toBeInTheDocument();
       expect(screen.getByText('Accessible')).toBeInTheDocument();
       expect(screen.getByText('Step-free entrance')).toBeInTheDocument();
+      expect(screen.getByText('Rear emergency exit')).toBeInTheDocument();
+      expect(screen.getByText('No open flames')).toBeInTheDocument();
+      expect(screen.getByText('Theatre, Banquet')).toBeInTheDocument();
       expect(screen.getByText('90 minutes')).toBeInTheDocument();
       expect(screen.getByText('30 minutes')).toBeInTheDocument();
     });
 
-  tc('FE-VCAT-005', 'VenueCatalogue (details)', 'A venue has no hours, lists or accessibility information.', 'The page shows "Not specified" placeholders and "No additional accessibility information."',
-    { kind: 'Edge', data: 'operating_hours/facilities/layouts missing; accessible = null; capacity = null', steps: '1. Open a sparse venue.' },
+  tc('FE-VCAT-005', 'VenueCatalogue (details)', 'A venue has no lists, accessibility, emergency access or venue restrictions.', 'The page shows "Not specified" placeholders and "No additional accessibility information.".',
+    { kind: 'Edge', data: 'facilities/layouts missing; accessible/capacity/setup_time/teardown_time missing; emergency_access/venue_restrictions blank', steps: '1. Open a sparse venue.' },
     async () => {
       const sparse = { venue_id: 1, name: 'Hall A', location: 'SG', capacity: null, accessible: null };
       backend({ list: [sparse], detail: sparse });
       await openDetail();
-      expect(screen.getAllByText('Not specified').length).toBeGreaterThanOrEqual(10);
+      expect(screen.getAllByText('Not specified').length).toBeGreaterThanOrEqual(7);
       expect(screen.getByText('No additional accessibility information.')).toBeInTheDocument();
       expect(screen.getByText(/Capacity: Not specified/)).toBeInTheDocument();
     });
@@ -113,19 +112,19 @@ describe('VenueCatalogue', () => {
       expect(await screen.findByRole('button', { name: 'View Hall A' })).toBeInTheDocument();
     });
 
-  tc('FE-VCAT-009', 'VenueCatalogue (edit)', 'Venue staff clicks "Edit venue".', 'The form is pre-filled with setup and teardown durations, one item per line in the list boxes, a closed day ticked with its time inputs disabled, and the accessibility select set.',
+  tc('FE-VCAT-009', 'VenueCatalogue (edit)', 'Venue staff clicks "Edit venue".', 'The form is pre-filled with setup and teardown durations, accessibility, accessibility notes, emergency access and venue restrictions; facilities and layouts remain read-only.',
     { steps: '1. Open a venue as staff. 2. Click "Edit venue".' },
     async () => {
-      backend();
+      backend({ detail: { ...VENUE, emergency_access: 'Rear emergency exit', venue_restrictions: 'No open flames' } });
       await startEdit();
-      expect(area(0)).toHaveValue('Wi-Fi\nProjector');
-      expect(area(2)).toHaveValue('Theatre\nBanquet');
-      expect(screen.getByLabelText('Monday opening time')).toHaveValue('09:00');
-      expect(screen.getByLabelText('Sunday opening time')).toBeDisabled();
-      expect(document.querySelector('select')).toHaveValue('1');
-      expect(area(1)).toHaveValue('Step-free entrance');
       expect(screen.getByLabelText('Setup time (minutes)')).toHaveValue('90');
       expect(screen.getByLabelText('Teardown time (minutes)')).toHaveValue('30');
+      expect(screen.getByLabelText('Accessibility')).toHaveValue('1');
+      expect(screen.getByLabelText('Accessibility notes')).toHaveValue('Step-free entrance');
+      expect(screen.getByLabelText('Emergency access')).toHaveValue('Rear emergency exit');
+      expect(screen.getByLabelText('Venue restrictions')).toHaveValue('No open flames');
+      expect(screen.getByText('Facilities:').parentElement).toHaveTextContent('Facilities: Wi-Fi, Projector');
+      expect(screen.getByText('Supported characteristics / layouts:').parentElement).toHaveTextContent('Supported characteristics / layouts: Theatre, Banquet');
     });
 
   tc('FE-VCAT-010', 'VenueCatalogue (edit)', 'Venue staff cancels editing.', 'The details view returns and no PUT is sent.', { kind: 'State', steps: '1. Click "Edit venue". 2. Click "Cancel".' },
@@ -148,70 +147,36 @@ describe('VenueCatalogue', () => {
       expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
     });
 
-  tc('FE-VCAT-011', 'VenueCatalogue (edit)', 'Staff edits venue planning fields and saves.', 'PUT /venue-catalogue/<id> includes whole-number setup and teardown minutes with the trimmed lists and accessibility; the success message and updated details follow.',
-    { data: 'facilities "Wi-Fi\\n\\n  Stage  "', steps: '1. Click "Edit venue". 2. Change facilities. 3. Click "Save changes".' },
+  tc('FE-VCAT-011', 'VenueCatalogue (edit)', 'Staff edits venue planning fields and saves.', 'PUT /venue-catalogue/<id> includes accessibility, accessibility notes, emergency access, venue restrictions and whole-number setup and teardown minutes; the success message and updated details follow.',
+    { data: 'setup_time = 120, teardown_time = 45, accessibility = 0, updated planning notes', steps: '1. Click "Edit venue". 2. Change the planning fields. 3. Click "Save changes".' },
     async () => {
       backend();
       await startEdit();
-      fireEvent.change(area(0), { target: { value: 'Wi-Fi\n\n  Stage  ' } });
       fireEvent.change(screen.getByLabelText('Setup time (minutes)'), { target: { value: '120' } });
       fireEvent.change(screen.getByLabelText('Teardown time (minutes)'), { target: { value: '45' } });
+      fireEvent.change(screen.getByLabelText('Accessibility'), { target: { value: '0' } });
+      fireEvent.change(screen.getByLabelText('Accessibility notes'), { target: { value: 'Ramp required' } });
+      fireEvent.change(screen.getByLabelText('Emergency access'), { target: { value: 'Use rear emergency exit' } });
+      fireEvent.change(screen.getByLabelText('Venue restrictions'), { target: { value: 'No open flames' } });
       fireEvent.submit(form());
       expect(await screen.findByText('Hall A updated successfully.')).toBeInTheDocument();
       const [path, options] = request.mock.calls.find(([, o]) => o?.method === 'PUT');
       expect(path).toBe('/venue-catalogue/1');
       const body = JSON.parse(options.body);
-      expect(body.facilities).toEqual(['Wi-Fi', 'Stage']);
-      expect(body.layouts).toEqual(['Theatre', 'Banquet']);
-      expect(body.accessible).toBe(1);
+      expect(body.accessible).toBe(0);
+      expect(body.accessibility_details).toBe('Ramp required');
+      expect(body.emergency_access).toBe('Use rear emergency exit');
+      expect(body.venue_restrictions).toBe('No open flames');
       expect(body.setup_time).toBe(120);
       expect(body.teardown_time).toBe(45);
-      expect(screen.getByText('Wi-Fi, Stage')).toBeInTheDocument();
+      expect(body).not.toHaveProperty('facilities');
+      expect(body).not.toHaveProperty('layouts');
+      expect(screen.getByText('Not accessible')).toBeInTheDocument();
+      expect(screen.getByText('Ramp required')).toBeInTheDocument();
+      expect(screen.getByText('Use rear emergency exit')).toBeInTheDocument();
+      expect(screen.getByText('No open flames')).toBeInTheDocument();
       expect(screen.getByText('120 minutes')).toBeInTheDocument();
       expect(screen.getByText('45 minutes')).toBeInTheDocument();
-    });
-
-  tc('FE-VCAT-012', 'VenueCatalogue (edit)', 'A day\'s closing time is not later than its opening time.', 'The error "Monday: closing time must be later than opening time on the same day." is shown and no PUT is sent.',
-    { kind: 'Negative', data: 'Monday 09:00-08:00', steps: '1. Edit. 2. Set Monday closing to 08:00. 3. Save.' },
-    async () => {
-      backend();
-      await startEdit();
-      fireEvent.change(screen.getByLabelText('Monday closing time'), { target: { value: '08:00' } });
-      fireEvent.submit(form());
-      expect(await screen.findByText('Monday: closing time must be later than opening time on the same day.')).toBeInTheDocument();
-      expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
-    });
-
-  tc('FE-VCAT-013', 'VenueCatalogue (edit)', 'Staff ticks "Closed" for Monday and saves.', 'The time inputs are disabled and the payload sends {closed: true, opens: null, closes: null} for Monday.',
-    { steps: '1. Edit. 2. Tick Monday\'s Closed box. 3. Save.' },
-    async () => {
-      backend();
-      await startEdit();
-      fireEvent.click(document.querySelectorAll('input[type=checkbox]')[0]);
-      expect(screen.getByLabelText('Monday opening time')).toBeDisabled();
-      fireEvent.submit(form());
-      await screen.findByText('Hall A updated successfully.');
-      const body = JSON.parse(request.mock.calls.find(([, o]) => o?.method === 'PUT')[1].body);
-      expect(body.operating_hours.monday).toEqual({ closed: true, opens: null, closes: null });
-    });
-
-  tc('FE-VCAT-014', 'VenueCatalogue (edit)', 'More than 30 facilities are entered.', 'The error "Enter up to 30 items per list, with no more than 100 characters per item." is shown and no PUT is sent.', { kind: 'Edge', data: '31 lines', steps: '1. Edit. 2. Enter 31 facilities. 3. Save.' },
-    async () => {
-      backend();
-      await startEdit();
-      fireEvent.change(area(0), { target: { value: Array.from({ length: 31 }, (_, i) => `f${i}`).join('\n') } });
-      fireEvent.submit(form());
-      expect(await screen.findByText(/Enter up to 30 items per list/)).toBeInTheDocument();
-      expect(request.mock.calls.filter(([, o]) => o?.method === 'PUT')).toHaveLength(0);
-    });
-
-  tc('FE-VCAT-015', 'VenueCatalogue (edit)', 'A layout item is longer than 100 characters.', 'The same list-limit error is shown and no PUT is sent.', { kind: 'Edge', data: '101 characters', steps: '1. Edit. 2. Enter a 101-character layout. 3. Save.' },
-    async () => {
-      backend();
-      await startEdit();
-      fireEvent.change(area(2), { target: { value: 'x'.repeat(101) } });
-      fireEvent.submit(form());
-      expect(await screen.findByText(/Enter up to 30 items per list/)).toBeInTheDocument();
     });
 
   tc('FE-VCAT-016', 'VenueCatalogue (edit)', 'The server rejects the save.', 'The error message is shown (without a "Try again" button) and the form stays open with the user\'s edits.',
@@ -219,11 +184,11 @@ describe('VenueCatalogue', () => {
     async () => {
       backend({ put: () => { throw new Error('Venue not found. Changes were not saved.'); } });
       await startEdit();
-      fireEvent.change(area(0), { target: { value: 'Stage' } });
+      fireEvent.change(screen.getByLabelText('Emergency access'), { target: { value: 'Use loading bay exit' } });
       fireEvent.submit(form());
       expect(await screen.findByText('Venue not found. Changes were not saved.')).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
-      expect(area(0)).toHaveValue('Stage');
+      expect(screen.getByLabelText('Emergency access')).toHaveValue('Use loading bay exit');
     });
 
   tc('FE-VCAT-017', 'VenueCatalogue (edit)', 'A save is in progress.', 'The submit button reads "Saving…" and is disabled, and Cancel is disabled.', { kind: 'State', pre: 'PUT never resolves.', steps: '1. Edit. 2. Save. 3. Inspect the buttons.' },
@@ -298,5 +263,35 @@ tc('FE-VCAT-025', 'Venue unavailability', 'Staff block and reopen a venue.', 'Th
   expect(await screen.findByRole('heading', { name: 'Unavailable' })).toBeInTheDocument();
   expect(screen.getByText('Maintenance')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Mark available' }));
-  expect(await screen.findByRole('heading', { name: 'Available' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Available 24/7' })).toBeInTheDocument();
 });
+
+tc('FE-VCAT-026', 'Venue unavailability', 'Marking a venue unavailable fails.', 'The server error is shown and the venue remains available.',
+  { kind: 'Negative', data: 'PATCH rejects with a server message', steps: '1. Open venue. 2. Enter reason. 3. Make PATCH fail. 4. Mark unavailable.' },
+  async () => {
+    backend();
+    request.mockImplementation(async (path, options = {}) => {
+      if (options.method === 'PATCH') throw new Error('Unable to block venue.');
+      return path === '/venue-catalogue' ? [VENUE] : VENUE;
+    });
+    await openDetail({ canEdit: true });
+    fireEvent.change(screen.getByLabelText('Reason for unavailability'), { target: { value: 'Maintenance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Mark unavailable' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to block venue.');
+    expect(screen.getByRole('heading', { name: 'Available 24/7' })).toBeInTheDocument();
+  });
+
+tc('FE-VCAT-027', 'Venue unavailability', 'Updating availability fails without a server error message.', 'The default availability error is shown.',
+  { kind: 'Negative', data: 'PATCH rejects with an empty error message', steps: '1. Open venue. 2. Enter reason. 3. Make PATCH fail without a message. 4. Mark unavailable.' },
+  async () => {
+    backend();
+    request.mockImplementation(async (path, options = {}) => {
+      if (options.method === 'PATCH') throw new Error('');
+      return path === '/venue-catalogue' ? [VENUE] : VENUE;
+    });
+    await openDetail({ canEdit: true });
+    fireEvent.change(screen.getByLabelText('Reason for unavailability'), { target: { value: 'Maintenance' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Mark unavailable' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to update availability.');
+  });
+

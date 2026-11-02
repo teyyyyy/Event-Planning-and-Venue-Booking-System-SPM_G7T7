@@ -13,8 +13,10 @@ create table users(id uuid primary key, role text, active_event_count bigint def
 create table "Event Details"(id bigint primary key, event_name text, event_date date, event_end_date date,
   start_time time, end_time time, event_capacity integer, status text, organiser_id uuid, coordinator_id uuid references users(id));
 create table "Venue Booking Requests"(request_id bigint generated always as identity primary key, event_id bigint, venue_id bigint, venue_staff_id uuid, coordinator_id uuid, status text);
-create table "Equipment Request"(request_id bigint generated always as identity primary key, event_id bigint, status text, created_by uuid);
+create table "Equipment Request"(request_id bigint generated always as identity primary key, event_id bigint, status text, created_by uuid, assigned_staff_id uuid);
 create table "Equipment Request Item"(request_id bigint, equipment_id text, requested_quantity integer, technical_requirements text);
+create table "Equipment Reservation"(reservation_id bigint generated always as identity primary key, request_id bigint, event_id bigint, status text);
+create table event_change_requests(id bigint generated always as identity primary key, event_id bigint, coordinator_id uuid, review_status text);
 `);
 await db.exec(await sql('sprint2_registration_notifications.sql'));
 await db.exec(await sql('coordinator_reassignment.sql'));
@@ -32,6 +34,7 @@ await q(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,c
 await db.exec(await sql('sync_venue_booking_coordinators.sql'));
 assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=99')).coordinator_id, ids.c1);
 assert.equal((await one('select previous_coordinator_id from venue_booking_coordinator_id_backup where request_id=(select request_id from "Venue Booking Requests" where event_id=99)')).previous_coordinator_id, ids.c2);
+await q(`update "Event Details" set status='Completed' where id=99`);
 const actor = key => q("select set_config('request.headers',$1,false)", [JSON.stringify({ 'x-actor-id': ids[key] })]);
 const assign = (id, target, expected, lead = ids.lead) => one('select * from assign_event_coordinator($1,$2,$3,$4)', [id, target, expected, lead]);
 const notes = async () => (await q('select recipient_id,description from notifications order by id')).rows;
@@ -44,12 +47,18 @@ await actor('lead');
 await q(`insert into "Event Details"(id,event_name,status,organiser_id) values(1,'Gala','Submitted',$1)`, [ids.organiser]);
 await q(`insert into "Venue Booking Requests"(event_id,venue_id,venue_staff_id,coordinator_id,status)
   values(1,9,$2,$1,'Alternative Offered')`, [ids.c2, ids.v]);
+await q(`insert into "Equipment Request"(event_id,status,created_by) values(1,'Submitted',$1)`, [ids.c2]);
+await q(`insert into event_change_requests(event_id,coordinator_id,review_status) values
+  (1,$1,'Pending'),(1,$1,'Approved')`, [ids.c2]);
 await clear();
 
 // Initial assignment is atomic, sets Assigned, and notifies only the incoming coordinator.
 assert.equal((await assign(1, ids.c1, null)).status, 'Assigned');
 assert.deepEqual(await counts(), [1, 0, 0]);
 assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=1')).coordinator_id, ids.c1);
+assert.equal((await one('select created_by from "Equipment Request" where event_id=1')).created_by, ids.c1);
+assert.equal((await one(`select coordinator_id from event_change_requests where event_id=1 and review_status='Pending'`)).coordinator_id, ids.c1);
+assert.equal((await one(`select coordinator_id from event_change_requests where event_id=1 and review_status='Approved'`)).coordinator_id, ids.c2);
 assert.deepEqual((await notes()).map(r => r.recipient_id), [ids.c1]);
 await clear();
 
@@ -63,6 +72,9 @@ for (const status of ['Assigned', 'Under review', 'Approved', 'Planning', 'Confi
   assert.equal(result.status, status);
   assert.equal(result.coordinator_id, next);
   assert.equal((await one('select coordinator_id from "Venue Booking Requests" where event_id=1')).coordinator_id, next);
+  assert.equal((await one('select created_by from "Equipment Request" where event_id=1')).created_by, next);
+  assert.equal((await one(`select coordinator_id from event_change_requests where event_id=1 and review_status='Pending'`)).coordinator_id, next);
+  assert.equal((await one(`select coordinator_id from event_change_requests where event_id=1 and review_status='Approved'`)).coordinator_id, ids.c2);
   assert.deepEqual(await counts(), next === ids.c1 ? [1, 0, 0] : [0, 1, 0]);
   const messages = await notes();
   assert.deepEqual(messages.map(r => r.recipient_id).sort(), [current, next].sort());
@@ -145,4 +157,4 @@ assert.equal((await notes()).length, notificationCount);
 assert.equal((await one("select to_regprocedure('assign_event_coordinator(bigint,uuid,uuid,uuid)') as fn")).fn, null);
 await db.exec(await sql('coordinator_reassignment.sql'));
 await db.close();
-console.log('Coordinator assignment SQL checks passed: statuses, repeat reassignment, both notifications, workloads, permissions, stale writes, atomic rollback and migration rollback.');
+console.log('Coordinator assignment SQL checks passed: statuses, related planning records, repeat reassignment, both notifications, workloads, permissions, stale writes, atomic rollback and migration rollback.');

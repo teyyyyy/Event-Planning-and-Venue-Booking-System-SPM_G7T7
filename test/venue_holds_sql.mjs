@@ -28,6 +28,9 @@ create table "Equipment Request"(request_id bigint generated always as identity 
 create table "Equipment Request Item"(request_id bigint, equipment_id text, requested_quantity integer not null check(requested_quantity >= 0),
   technical_requirements text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   updated_by uuid, primary key(request_id, equipment_id));
+create table "Equipment Reservation"(reservation_id bigint generated always as identity primary key,
+  event_id bigint not null, request_id bigint not null, status text not null default 'Reserved',
+  created_by uuid, created_at timestamptz default now(), updated_at timestamptz default now());
 create table event_change_requests(
   id bigint generated always as identity primary key,
   event_id bigint not null references public."Event Details"(id),
@@ -37,6 +40,7 @@ create table event_change_requests(
   created_at timestamptz not null default now()
 );
 `);
+
 const sql = async (name) =>
   readFile(new URL(`../backend/sql/${name}`, import.meta.url), "utf8");
 for (const name of [
@@ -46,6 +50,7 @@ for (const name of [
 ]) {
   await db.exec(await sql(name));
 }
+
 await db.exec(await sql("venue_holds.sql"));
 await db.exec(await sql("venue_holds.sql")); // rerunnable; pg_cron is absent here, so only a notice is raised
 
@@ -62,6 +67,7 @@ const roles = {
   v: "Venue Staff",
   w: "Venue Staff",
 };
+
 for (const [key, role] of Object.entries(roles))
   await db.query("insert into users values($1,$2,$3)", [
     ids[key],
@@ -91,6 +97,7 @@ const rejects = async (promise, code, pattern) => {
     if (pattern) assert.match(e.message, pattern);
   }
 };
+
 const booking = (requestId) =>
   one('select * from "Venue Booking Requests" where request_id=$1', [
     requestId,
@@ -146,7 +153,11 @@ await actor("v");
 const gala = await addBooking(1, 1);
 await clear();
 await rejects(hold(999, await inDays(2)), "P0002");
-await rejects(hold(gala, await inDays(2), ids.w), "42501");
+const sharedQueueHold = await hold(gala, await inDays(2), ids.w);
+assert.equal(sharedQueueHold.status, "On Hold");
+assert.equal(sharedQueueHold.hold_placed_by, ids.w);
+await removeHold(gala, ids.w);
+await clear();
 await rejects(hold(gala, "2000-01-01T00:00:00Z"), "22023", /future/);
 await rejects(hold(gala, null), "22023", /future/);
 await rejects(
@@ -178,6 +189,7 @@ assert.equal(
   null,
   "A hold longer than the lead time is reminded later",
 );
+
 let sent = await notices();
 assert.equal(
   sent.length,
@@ -251,7 +263,6 @@ assert.ok(
 
 // ---- 22.1: removing a hold ---------------------------------------------------------------
 await clear();
-await rejects(removeHold(gala, ids.w), "42501");
 await rejects(removeHold(launch), "55000", /not on hold/);
 const released = await removeHold(gala);
 assert.equal(released.status, "Pending");

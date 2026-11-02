@@ -50,9 +50,8 @@ describe('EquipmentReservation (list)', () => {
       expect(f.mock.calls[0][0]).toMatch(/equipment-reservation\/t1\/reservations$/);
       expect(row).toHaveTextContent('Gala');
       expect(row).toHaveTextContent(date('2026-10-01'));
-      expect(row).toHaveTextContent(`${time(9, 0)} – ${time(17, 0)}`);
+      expect(row).toHaveTextContent(`${date('2026-10-01')}, ${time(9, 0)} – ${date('2026-10-01')}, ${time(17, 0)}`);
       expect(row).toHaveTextContent('#7');
-      expect(row).toHaveTextContent('2 equipment types');
       expect(row).toHaveTextContent('Microphone × 2, Projector × 1');
       expect(within(row).getByText('Reserved')).toHaveClass('reservation-status', 'reserved');
       expect(within(row).getByRole('button', { name: 'View' })).toHaveClass('secondary');
@@ -76,7 +75,6 @@ describe('EquipmentReservation (list)', () => {
       expect(pill('Cancelled')).toHaveClass('cancelled');
       expect(pill('On Hold').className.trim()).toBe('reservation-status');
       const odd = screen.getByText('Reservation #5').closest('tr');
-      expect(odd).toHaveTextContent('1 equipment type');
       expect(odd).toHaveTextContent('— – —');
       expect(odd.querySelector('.reservation-equipment-description')).toBeNull();
       const review = screen.getByRole('button', { name: 'Review' });
@@ -207,49 +205,39 @@ describe('EquipmentReservation (new reservation)', () => {
 });
 
 describe('EquipmentReservation (existing reservation)', () => {
-  tc('FE-EQRES-011', 'EquipmentReservation (manage)', 'Technical support lowers a reserved quantity and confirms.',
-    '"Manage equipment reservation" shows the status pill and editable quantities; PUT /equipment-reservation/<staff>/<reservation> sends the new quantities and the page reloads.',
-    { pre: 'Reservation 50 holds MIC x2 and PRJ x1.', data: 'MIC 2 -> 1', steps: '1. Open event 1. 2. Set MIC to 1. 3. Click "Confirm Reservation Changes".' },
+  tc('FE-EQRES-011', 'EquipmentReservation (manage)', 'Technical support opens an existing reserved reservation.',
+    '"Manage equipment reservation" shows the status pill and fixed reserved quantities; normal reserved quantities cannot be edited or reconfirmed from this screen.',
+    { pre: 'Reservation 50 holds MIC x2 and PRJ x1.', steps: '1. Open event 1. 2. Inspect the existing reservation. 3. Return to reservations.' },
     async () => {
       const onBack = vi.fn();
-      const f = backend({ detail: existing(), write: () => json({ message: 'Equipment reservation updated successfully.' }) });
+      backend({ detail: existing() });
       await openEvent({ onBack });
       expect(screen.getByRole('heading', { name: 'Manage equipment reservation' })).toBeInTheDocument();
       expect(screen.getByText(/Reservation #50 ·/)).toHaveClass('reserved');
-      expect(qty().map((i) => i.value)).toEqual(['2', '1']);
-      fireEvent.change(qty()[0], { target: { value: '1' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm Reservation Changes' }));
-      expect(await screen.findByText('Equipment reservation updated successfully.')).toBeInTheDocument();
-      const [url, options] = callsTo(f, '/equipment-reservation/t1/50', 'PUT')[0];
-      expect(url).toMatch(/equipment-reservation\/t1\/50$/);
-      expect(JSON.parse(options.body)).toEqual({ items: [{ equipment_id: 'MIC', reserved_quantity: 1 }, { equipment_id: 'PRJ', reserved_quantity: 1 }] });
-      await waitFor(() => expect(callsTo(f, '/events/1')).toHaveLength(2));
+      expect(screen.getByText('Microphone').closest('tr').querySelector('.reservation-fixed-quantity')).toHaveTextContent('2');
+      expect(screen.getByText('Projector').closest('tr').querySelector('.reservation-fixed-quantity')).toHaveTextContent('1');
+      expect(qty()).toHaveLength(0);
+      expect(confirmBtn()).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: '← Back to Reservations' }));
       expect(onBack).toHaveBeenCalled();
     });
 
-  tc('FE-EQRES-012', 'EquipmentReservation (validation)', 'Edited quantities are fractional, above the request, or all zero.',
-    'Nothing is sent and the matching message is shown: whole number of 0 or more; cannot exceed the requested quantity; at least one item must remain reserved.',
-    { kind: 'Negative', data: 'MIC 1.5; MIC 3 (requested 2); MIC 0 and PRJ 0', steps: '1. Enter each value. 2. Click confirm after each.' },
+  tc('FE-EQRES-012', 'EquipmentReservation (manage)', 'A normal existing reservation is already aligned with its equipment request.',
+    'Reserved quantities are displayed read-only and no confirmation action is offered until the reservation needs recheck.',
+    { kind: 'State', steps: '1. Open a Reserved reservation. 2. Inspect its quantities and actions.' },
     async () => {
       const f = backend({ detail: existing() });
       await openEvent();
-      const tryValues = (mic, prj, message) => {
-        fireEvent.change(qty()[0], { target: { value: mic } });
-        fireEvent.change(qty()[1], { target: { value: prj } });
-        fireEvent.click(confirmBtn());
-        expect(screen.getByText(message)).toBeInTheDocument();
-      };
-      tryValues('1.5', '1', 'Microphone must have a whole-number quantity of 0 or more.');
-      tryValues('3', '1', 'Microphone cannot exceed the requested quantity of 2.');
-      tryValues('0', '0', 'At least one equipment item must remain reserved. Cancel the reservation instead.');
+      expect(qty()).toHaveLength(0);
+      expect(screen.queryByRole('button', { name: 'Confirm Reviewed Reservation' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Use Current Requested Quantities' })).toBeNull();
       expect(callsTo(f, '/equipment-reservation/t1/50', 'PUT')).toHaveLength(0);
     });
 
   tc('FE-EQRES-013', 'EquipmentReservation (recheck)', 'The equipment request changed after the reservation was made.',
-    '"Review equipment reservation" warns about the change, shows the current request, flags changed, removed and newly added items, and offers "Use Requested" per item and for all items.',
-    { kind: 'State', pre: 'Status Needs Recheck. MIC reserved 2, requested 3; PRJ reserved 1 but removed from the request; CAM newly requested x1 (no reserved quantity yet); SPK matches.',
-      steps: '1. Open event 1. 2. Click "Use Requested" on MIC. 3. Click "Use Current Requested Quantities". 4. Confirm.' },
+    '"Review equipment reservation" warns about the change, shows changed, removed and newly added items, and "Use Current Requested Quantities" synchronises all displayed reserved quantities before confirmation.',
+    { kind: 'State', pre: 'Status Needs Recheck. MIC reserved 2, requested 3; PRJ reserved 1 but removed from the request; CAM newly requested x1; SPK matches.',
+      steps: '1. Open event 1. 2. Click "Use Current Requested Quantities". 3. Confirm.' },
     async () => {
       const f = backend({ detail: existing({ status: 'Needs Recheck', items: [
         reservedLine({ requested_quantity: 3 }),
@@ -266,25 +254,25 @@ describe('EquipmentReservation (existing reservation)', () => {
       expect(row('Microphone')).toHaveTextContent('Request changed');
       expect(row('Projector')).toHaveTextContent('Removed from current request');
       expect(row('Camera')).toHaveTextContent('Newly added to request');
-      expect(within(row('Speaker')).getByText('✓ Matches')).toBeInTheDocument();
-      expect(qty()[2]).toHaveValue(1);
-      fireEvent.click(within(row('Microphone')).getByRole('button', { name: 'Use Requested' }));
-      expect(qty()[0]).toHaveValue(3);
-      fireEvent.change(qty()[2], { target: { value: '' } });
+      expect(within(row('Microphone')).getByText('2', { selector: '.reservation-fixed-quantity' })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Use Current Requested Quantities' }));
-      expect(qty().map((i) => i.value)).toEqual(['3', '0', '1', '1']);
+      expect(within(row('Microphone')).getByText('3', { selector: '.reservation-fixed-quantity' })).toBeInTheDocument();
+      expect(within(row('Projector')).getByText('0', { selector: '.reservation-fixed-quantity' })).toBeInTheDocument();
+      expect(within(row('Camera')).getByText('1', { selector: '.reservation-fixed-quantity' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Use Current Requested Quantities' })).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Confirm Reviewed Reservation' }));
       await waitFor(() => expect(callsTo(f, '/equipment-reservation/t1/50', 'PUT')).toHaveLength(1));
     });
 
-  tc('FE-EQRES-014', 'EquipmentReservation (recheck)', 'An item has neither a reserved nor a requested quantity.', 'Its quantity input starts at 0 and matches the request.',
+  tc('FE-EQRES-014', 'EquipmentReservation (recheck)', 'An item has neither a reserved nor a requested quantity.', 'Its displayed reserved quantity starts at 0 and it is not marked as changed.',
     { kind: 'Edge', data: 'reserved_quantity and requested_quantity missing', steps: '1. Open a Needs Recheck reservation with such an item.' },
     async () => {
       backend({ detail: existing({ status: 'needs recheck', items: [reservedLine(), reservedLine({ equipment_id: 'CAM', equipment_name: 'Camera', reserved_quantity: undefined, requested_quantity: undefined })] }) });
       await openEvent();
-      expect(qty()[1]).toHaveValue(0);
-      expect(within(screen.getByText('Camera', { selector: 'strong' }).closest('tr')).getByText('✓ Matches')).toBeInTheDocument();
+      const camera = screen.getByText('Camera', { selector: 'strong' }).closest('tr');
+      expect(camera.querySelector('.reservation-fixed-quantity')).toHaveTextContent('0');
+      expect(camera).not.toHaveClass('reservation-changed-row');
+      expect(within(camera).queryByText('Request changed')).toBeNull();
     });
 
   tc('FE-EQRES-015', 'EquipmentReservation (cancel)', 'Technical support clicks "Cancel Reservation", declines, then confirms.',
@@ -331,31 +319,29 @@ describe('EquipmentReservation (existing reservation)', () => {
       confirm.mockRestore();
     });
 
-  tc('FE-EQRES-018', 'EquipmentReservation (manage)', 'A save succeeds without a message from the backend.', 'The default "Equipment reservation saved successfully." message is shown.',
-    { kind: 'Edge', data: 'response {}', steps: '1. Open an existing reservation. 2. Confirm without changes.' },
+  tc('FE-EQRES-018', 'EquipmentReservation (recheck)', 'A reviewed reservation save succeeds without a message from the backend.', 'The default "Equipment reservation saved successfully." message is shown.',
+    { kind: 'Edge', data: 'response {}', steps: '1. Open a Needs Recheck reservation. 2. Confirm the reviewed reservation.' },
     async () => {
-      backend({ detail: existing(), write: () => json({}) });
+      backend({ detail: existing({ status: 'Needs Recheck' }), write: () => json({}) });
       await openEvent();
-      fireEvent.click(confirmBtn());
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm Reviewed Reservation' }));
       expect(await screen.findByText('Equipment reservation saved successfully.')).toBeInTheDocument();
     });
-});
 
-describe('EquipmentReservation (authentication)', () => {
-  tc('FE-EQRES-019', 'EquipmentReservation (authentication)', 'Signed-in technical support lists reservations, updates and cancels one, then reserves an event.',
+  tc('FE-EQRES-019', 'EquipmentReservation (authentication)', 'Signed-in technical support lists reservations, reviews and cancels one, then reserves an event.',
     'Every request (list, event details, PUT, DELETE and POST) carries "Authorization: Bearer <access token>"; PUT and POST still send a JSON content type.',
     { kind: 'Security', pre: 'A Supabase session with access_token tok-1 exists.',
-      steps: '1. Open the list. 2. Open the existing reservation, confirm changes, then cancel it. 3. Open the event as a new reservation and confirm.' },
+      steps: '1. Open the list. 2. Open a Needs Recheck reservation, confirm it, then cancel it. 3. Open the event as a new reservation and confirm.' },
     async () => {
       const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-      const f = backend({ detail: [existing(), existing(), fresh(), existing()], write: () => json({}) });
+      const f = backend({ detail: [existing({ status: 'Needs Recheck' }), existing(), fresh(), existing()], write: () => json({}) });
       const list = render(<EquipmentReservation user={USER} />);
       await screen.findByText('Reservation #50');
       list.unmount();
 
       const onBack = vi.fn();
       const manage = render(<EquipmentReservation user={USER} eventId={1} onBack={onBack} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'Confirm Reservation Changes' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Confirm Reviewed Reservation' }));
       await waitFor(() => expect(callsTo(f, '/events/1')).toHaveLength(2));
       fireEvent.click(screen.getByRole('button', { name: 'Cancel Reservation' }));
       await waitFor(() => expect(onBack).toHaveBeenCalled());
@@ -366,10 +352,129 @@ describe('EquipmentReservation (authentication)', () => {
       await waitFor(() => expect(callsTo(f, '/events/1')).toHaveLength(4));
 
       expect(f.mock.calls.map(([url, o]) => `${o.method || 'GET'} ${url.replace(/^.*equipment-reservation/, '')}`)).toEqual([
-        'GET /t1/reservations', 'GET /t1/events/1', 'PUT /t1/50', 'GET /t1/events/1', 'DELETE /t1/50', 'GET /t1/events/1', 'POST /t1', 'GET /t1/events/1',
+        'GET /t1/reservations', 'GET /t1/events/1', 'PUT /t1/50/confirm', 'GET /t1/events/1', 'DELETE /t1/50', 'GET /t1/events/1', 'POST /t1', 'GET /t1/events/1',
       ]);
       f.mock.calls.forEach(([, options]) => expect(options.headers.Authorization).toBe('Bearer tok-1'));
       ['PUT', 'POST'].forEach((method) => expect(callsTo(f, '/t1', method)[0][1].headers['Content-Type']).toBe('application/json'));
       confirm.mockRestore();
+    });
+
+  tc('FE-EQRES-020', 'EquipmentReservation (details)', 'The event spans multiple days.',
+    'The event card displays the full start-to-end date range.',
+    { kind: 'Edge', data: '1 Oct 2026 to 3 Oct 2026', steps: '1. Open an event spanning multiple days. 2. Inspect the event date.' },
+    async () => {
+      backend({
+        detail: {
+          ...fresh(),
+          event: {
+            ...EVENT,
+            event_end_date: '2026-10-03',
+          },
+        },
+      });
+      await openEvent();
+      expect(document.querySelector('.reservation-event-card')).toHaveTextContent(
+        `${date('2026-10-01')} – ${date('2026-10-03')}`
+      );
+    });
+
+  tc('FE-EQRES-021', 'EquipmentReservation (details)', 'An event has missing start and end times.',
+    'The missing times are displayed as dashes without crashing the page.',
+    { kind: 'Edge', steps: '1. Open an event without start and end times. 2. Inspect the event card.' },
+    async () => {
+      backend({
+        detail: {
+          ...fresh(),
+          event: {
+            ...EVENT,
+            start_time: null,
+            end_time: null,
+          },
+        },
+      });
+      await openEvent();
+      const card = document.querySelector('.reservation-event-card');
+      expect(card).toHaveTextContent('— – —');
+    });
+
+  tc('FE-EQRES-022', 'EquipmentReservation (validation)', 'A new reservation contains a negative reserved quantity.',
+    'The reservation is rejected because quantities must be whole numbers of 0 or more.',
+    { kind: 'Negative', data: 'reserved_quantity = -1', steps: '1. Open the reservation. 2. Confirm it.' },
+    async () => {
+      const f = backend({
+        detail: fresh([
+          newLine({
+            reserved_quantity: -1,
+          }),
+        ]),
+      });
+      await openEvent();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm Reservation' }));
+      expect(screen.getByText('Microphone must have a whole-number quantity of 0 or more.')).toBeInTheDocument();
+      expect(callsTo(f, '/equipment-reservation/t1', 'POST')).toHaveLength(0);
+    });
+
+  tc('FE-EQRES-023', 'EquipmentReservation (recheck validation)', 'A recheck reservation currently reserves more than the latest requested quantity.',
+    'Confirmation is rejected because the reserved quantity cannot exceed the current request.',
+    { kind: 'Negative', data: 'Reserved 3, requested 2', steps: '1. Open a Needs Recheck reservation. 2. Confirm without synchronising quantities.' },
+    async () => {
+      const f = backend({
+        detail: existing({
+          status: 'Needs Recheck',
+          items: [
+            reservedLine({
+              reserved_quantity: 3,
+              requested_quantity: 2,
+            }),
+          ],
+        }),
+      });
+      await openEvent();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm Reviewed Reservation' }));
+      expect(screen.getByText('Microphone cannot exceed the requested quantity of 2.')).toBeInTheDocument();
+      expect(callsTo(f, '/equipment-reservation/t1/50/confirm', 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-EQRES-024', 'EquipmentReservation (recheck validation)', 'All quantities in a reservation needing review are zero.',
+    'The reservation cannot be confirmed because at least one equipment item must remain reserved.',
+    { kind: 'Negative', data: 'All reserved quantities = 0', steps: '1. Open a Needs Recheck reservation containing only zero quantities. 2. Confirm it.' },
+    async () => {
+      const f = backend({
+        detail: existing({
+          status: 'Needs Recheck',
+          items: [
+            reservedLine({
+              reserved_quantity: 0,
+              requested_quantity: 0,
+            }),
+          ],
+        }),
+      });
+      await openEvent();
+      fireEvent.click(screen.getByRole('button', { name: 'Confirm Reviewed Reservation' }));
+      expect(screen.getByText('At least one equipment item must remain reserved. Cancel the reservation instead.')).toBeInTheDocument();
+      expect(callsTo(f, '/equipment-reservation/t1/50/confirm', 'PUT')).toHaveLength(0);
+    });
+
+  tc('FE-EQRES-025', 'EquipmentReservation (recheck)', 'An existing reservation has Modified status.',
+    'Modified is treated as a reservation requiring review.',
+    { kind: 'State', data: 'status = Modified', steps: '1. Open a Modified reservation. 2. Verify the review workflow is shown.' },
+    async () => {
+      backend({
+        detail: existing({
+          status: 'Modified',
+          items: [
+            reservedLine({
+              reserved_quantity: 1,
+              requested_quantity: 2,
+            }),
+          ],
+        }),
+      });
+      await openEvent();
+      expect(screen.getByRole('heading', { name: 'Review equipment reservation' })).toBeInTheDocument();
+      expect(screen.getByText('Equipment request changed — reservation needs review')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Use Current Requested Quantities' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Confirm Reviewed Reservation' })).toBeInTheDocument();
     });
 });

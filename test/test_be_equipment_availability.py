@@ -60,10 +60,10 @@ def test_datetimes_reversed():
     assert err(ea.event_datetimes, {**EVENT, "start_time": "17:00:00", "end_time": "09:00:00"})[0] == 400
 
 
-@tc("BE-EQAVAIL-010", "get_overlapping_reservations", "Active reservations overlap for two equipment types, one split across two rows.", "Quantities are summed per equipment id.", pre="MIC reserved 2 + 1 in the window, PRJ reserved 1.",
+@tc("BE-EQAVAIL-010", "get_overlapping_reservations", "Reserved reservations overlap for two equipment types, one split across two rows.", "Quantities are summed per equipment id.", pre="MIC reserved 2 + 1 in the window, PRJ reserved 1.",
     steps="1. Call get_overlapping_reservations(client, EVENT).")
 def test_overlap_sums():
-    client = world(**{"Equipment Reservation": [{"reservation_id": 1, "status": "Active", "event_id": 99}, {"reservation_id": 2, "status": "Active", "event_id": 98}],
+    client = world(**{"Equipment Reservation": [{"reservation_id": 1, "status": "Reserved", "event_id": 99}, {"reservation_id": 2, "status": "Reserved", "event_id": 98}],
                       "Equipment Reservation Item": [
                           {"reservation_id": 1, "equipment_id": "MIC", "reserved_quantity": 2, "start_datetime": "2026-10-01T10:00:00", "end_datetime": "2026-10-01T12:00:00"},
                           {"reservation_id": 2, "equipment_id": "MIC", "reserved_quantity": 1, "start_datetime": "2026-10-01T09:00:00", "end_datetime": "2026-10-01T10:00:00"},

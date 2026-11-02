@@ -23,9 +23,9 @@ VENUE_FIELDS = (
     "event_date", "event_end_date", "start_time", "end_time", "event_capacity",
     "venue_id", "layout_required", "facilities_required", "accessibility_required",
 )
-EQUIPMENT_FIELDS = ("event_date", "event_end_date", "start_time", "end_time")
+EQUIPMENT_FIELDS = ("event_date", "event_end_date", "start_time", "end_time","equipment_required",)
 TRACKED_FIELDS = (
-    "event_name", "event_type", "description", "equipment_placement", "crowd_movement",
+    "event_name", "event_type", "description", "equipment_placement", "crowd_movement", "equipment_required",
     *VENUE_FIELDS,
 )
 # Requests in these states are history, so a significant change neither reopens nor replaces them.
@@ -46,10 +46,39 @@ def status_of(row: dict[str, Any]) -> str:
 
 def comparable(record: dict[str, Any], field: str) -> str | None:
     value = record.get(field)
+
     if field == "event_end_date":
         value = value or record.get("event_date")  # blank end date = single-day event
+
     if value is None:
         return None
+
+    # Equipment and facilities are selections, so their order does not matter.
+    if field in {"equipment_required", "facilities_required"}:
+        if isinstance(value, (list, tuple, set)):
+            items = [str(item).strip() for item in value if str(item).strip()]
+        elif isinstance(value, str):
+            serialized = value.strip()
+
+            if (
+                (serialized.startswith("[") and serialized.endswith("]"))
+                or (serialized.startswith("{") and serialized.endswith("}"))
+            ):
+                serialized = serialized[1:-1]
+
+            items = [
+                item.strip().strip("\"'")
+                for item in serialized.split(",")
+                if item.strip().strip("\"'")
+            ]
+        else:
+            items = [str(value).strip()]
+
+        return "|".join(sorted(items))
+
+    if field == "accessibility_required":
+        return "1" if str(value).strip().lower() in {"1", "true"} else "0"
+
     return str(value)[:5] if field.endswith("_time") else str(value)
 
 

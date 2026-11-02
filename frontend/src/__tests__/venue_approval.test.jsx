@@ -945,4 +945,147 @@ describe("VenueApproval", () => {
       expect(activeRequestVenue).toBeDisabled();
     },
   );
+
+tc("FE-VENUE-030", "VenueApproval (hold)", 'Staff clicks "Place hold…".', "The hold form appears and Confirm hold is initially disabled.", { kind: "State", steps: '1. Open Pending request. 2. Click "Place hold…".' }, async () => {
+  request.mockResolvedValue([booking()]);
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Place hold…" }));
+  expect(screen.getByLabelText("Hold until (SGT)")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Confirm hold" })).toBeDisabled();
+});
+
+tc("FE-VENUE-031", "VenueApproval (hold)", "Staff cancels placing a hold.", 'The hold form closes and "Place hold…" returns.', { kind: "State", steps: '1. Open hold form. 2. Click "Cancel".' }, async () => {
+  request.mockResolvedValue([booking()]);
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Place hold…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByLabelText("Hold until (SGT)")).toBeNull();
+  expect(screen.getByRole("button", { name: "Place hold…" })).toBeInTheDocument();
+});
+
+tc("FE-VENUE-032", "VenueApproval (hold)", "Staff places a venue hold.", "POST /hold sends the SGT expiry and the request becomes On Hold.", { data: "2026-11-10T12:00", steps: "1. Open hold form. 2. Enter expiry. 3. Confirm." }, async () => {
+  request.mockImplementation(async (url, options) => {
+    if (url === "/venues") return [];
+    if (url === "/venue-booking-requests") return [booking()];
+    if (url === "/venue-booking-requests/1/hold" && options?.method === "POST") return booking({ status: "On Hold", hold_expires_at: "2026-11-10T12:00:00+08:00" });
+    return [];
+  });
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Place hold…" }));
+  fireEvent.change(screen.getByLabelText("Hold until (SGT)"), { target: { value: "2026-11-10T12:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm hold" }));
+  expect(await screen.findByText(/Venue held for Gala until/)).toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith("/venue-booking-requests/1/hold", { method: "POST", body: JSON.stringify({ expires_at: "2026-11-10T12:00:00+08:00" }) });
+  expect(within(screen.getByRole("table")).getByText("On Hold")).toBeInTheDocument();
+});
+
+tc("FE-VENUE-033", "VenueApproval (hold)", "Staff opens an On Hold request.", "The hold expiry and Remove hold action are displayed.", { kind: "State", steps: "1. Return an On Hold request. 2. Open details." }, async () => {
+  request.mockResolvedValue([booking({ status: "On Hold", hold_expires_at: "2026-11-10T12:00:00+08:00" })]);
+  render(<VenueApproval />);
+  const panel = within(await open());
+  expect(panel.getByText("Hold expires")).toBeInTheDocument();
+  expect(panel.getByRole("button", { name: "Remove hold" })).toBeInTheDocument();
+  expect(panel.queryByRole("button", { name: "Place hold…" })).toBeNull();
+});
+
+tc("FE-VENUE-034", "VenueApproval (hold)", "Staff removes an active hold.", "DELETE /hold is sent and the request returns to Pending.", { steps: '1. Open On Hold request. 2. Click "Remove hold".' }, async () => {
+  request.mockImplementation(async (url, options) => {
+    if (url === "/venues") return [];
+    if (url === "/venue-booking-requests") return [booking({ status: "On Hold", hold_expires_at: "2026-11-10T12:00:00+08:00" })];
+    if (url === "/venue-booking-requests/1/hold" && options?.method === "DELETE") return booking({ status: "Pending", hold_expires_at: null });
+    return [];
+  });
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Remove hold" }));
+  expect(await screen.findByText("Hold removed for Gala. The request is pending again.")).toBeInTheDocument();
+  expect(request).toHaveBeenCalledWith("/venue-booking-requests/1/hold", { method: "DELETE" });
+});
+
+tc("FE-VENUE-035", "VenueApproval (expired hold)", "A venue hold has expired.", "The expiry is shown, the coordinator instruction appears and no decision actions are available.", { kind: "State", steps: "1. Return an Expired request. 2. Open details." }, async () => {
+  request.mockResolvedValue([booking({ status: "Expired", hold_expires_at: "2026-10-01T12:00:00+08:00" })]);
+  render(<VenueApproval />);
+  const panel = within(await open());
+  expect(panel.getByText("Hold expired")).toBeInTheDocument();
+  expect(panel.getByText(/must submit a new venue request/i)).toBeInTheDocument();
+  expect(panel.queryByRole("button", { name: "Approve" })).toBeNull();
+  expect(panel.queryByRole("button", { name: "Remove hold" })).toBeNull();
+});
+
+tc("FE-VENUE-036", "VenueApproval (hold)", "Placing a hold fails.", "The backend error is displayed and the request remains Pending.", { kind: "Negative", steps: "1. Open hold form. 2. Enter expiry. 3. Make POST /hold fail." }, async () => {
+  request.mockImplementation(async (url, options) => {
+    if (url === "/venues") return [];
+    if (url === "/venue-booking-requests") return [booking()];
+    if (url === "/venue-booking-requests/1/hold" && options?.method === "POST") throw new Error("Unable to place hold.");
+    return [];
+  });
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Place hold…" }));
+  fireEvent.change(screen.getByLabelText("Hold until (SGT)"), { target: { value: "2026-11-10T12:00" } });
+  fireEvent.click(screen.getByRole("button", { name: "Confirm hold" }));
+  expect(await screen.findByText("Unable to place hold.")).toBeInTheDocument();
+});
+
+tc("FE-VENUE-037", "VenueApproval (alternative availability)", "Alternative venue availability cannot be verified.", "The selector is disabled and rejection without an alternative remains possible.", { kind: "Negative", steps: '1. Open Reject. 2. Make alternative availability fail.' }, async () => {
+  request.mockImplementation(async (url) => {
+    if (url === "/venues") return [{ venue_id: 1, name: "Hall A" }, { venue_id: 2, name: "Hall B" }];
+    if (url === "/venue-booking-requests") return [booking()];
+    if (url.endsWith("/alternative-venue-availability")) throw new Error("Availability failed.");
+    return [];
+  });
+  render(<VenueApproval />);
+  fireEvent.click(within(await open()).getByRole("button", { name: "Reject…" }));
+  expect(await screen.findByText(/Unable to check alternative venue availability/)).toBeInTheDocument();
+  expect(screen.getByLabelText(/Alternative venue/)).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Confirm rejection" })).toBeEnabled();
+  });
+
+tc("FE-VENUE-038", "VenueApproval (overlap)", "An earlier approved event's teardown overlaps the pending event's setup.", "The venue is unavailable and Approve is disabled.", { kind: "Edge", steps: "1. Mock an earlier approved event whose teardown overlaps the pending event setup. 2. Open pending request." }, async () => {
+  request.mockImplementation(async (url) => {
+    if (url === "/venues") return [{ venue_id: 1, setup_time: 60, teardown_time: 60 }];
+    if (url === "/venue-booking-requests") return [
+      booking({ request_id: 1, event_name: "Pending Event", status: "Pending", event_date: "2026-10-03", event_end_date: "2026-10-03", start_time: "10:00:00", end_time: "12:00:00" }),
+      booking({ request_id: 2, event_name: "Earlier Event", status: "Approved", event_date: "2026-10-03", event_end_date: "2026-10-03", start_time: "08:00:00", end_time: "09:30:00" }),
+    ];
+    return [];
+  });
+
+  render(<VenueApproval />);
+  const rows = await screen.findAllByRole("button", { name: "View details" });
+  fireEvent.click(rows[0]);
+  const panel = await screen.findByRole("region", { name: "Venue booking request details" });
+
+  expect(await within(panel).findByText(/overlapping with event setup/)).toBeInTheDocument();
+  expect(within(panel).getByRole("button", { name: "Approve" })).toBeDisabled();
+});
+
+tc("FE-VENUE-040", "VenueApproval (hold conflict)", "Another event has an active hold on the same venue during the requested time.", "The active hold blocks approval.", { kind: "State", steps: "1. Mock an overlapping On Hold request. 2. Open the pending request." }, async () => {
+  request.mockImplementation(async (url) => {
+    if (url === "/venues") return [{ venue_id: 1, setup_time: 30, teardown_time: 30 }];
+    if (url === "/venue-booking-requests") return [
+      booking({ request_id: 1, event_name: "Pending Event", status: "Pending", event_date: "2026-10-03", event_end_date: "2026-10-03", start_time: "10:00:00", end_time: "12:00:00" }),
+      booking({ request_id: 2, event_name: "Held Event", status: "On Hold", event_date: "2026-10-03", event_end_date: "2026-10-03", start_time: "11:00:00", end_time: "13:00:00", hold_expires_at: "2026-10-03T18:00:00+08:00" }),
+    ];
+    return [];
+  });
+
+  render(<VenueApproval />);
+  const rows = await screen.findAllByRole("button", { name: "View details" });
+  fireEvent.click(rows[0]);
+  const panel = await screen.findByRole("region", { name: "Venue booking request details" });
+
+  expect(await within(panel).findByText(/Venue is on hold for 'Held Event'/)).toBeInTheDocument();
+  expect(within(panel).getByRole("button", { name: "Approve" })).toBeDisabled();
+});
+
+tc("FE-VENUE-041", "VenueApproval (invalid schedule)", "The selected event has invalid or missing start and end times.", "Approval is blocked and the schedule error is displayed.", { kind: "Negative", steps: "1. Return a request with missing event times. 2. Open the request." }, async () => {
+  request.mockImplementation(async url => {
+    if (url === "/venues") return [{ venue_id: 1, name: "Hall A" }];
+    if (url === "/venue-booking-requests") return [booking({ venue_id: 1, start_time: null, end_time: null })];
+    return [];
+  });
+  render(<VenueApproval />);
+  const panel = within(await open());
+  expect(await screen.findByText("Cannot approve: This event has invalid or missing start/end times.")).toBeInTheDocument();
+  expect(panel.getByRole("button", { name: "Approve" })).toBeDisabled();
+});
 });

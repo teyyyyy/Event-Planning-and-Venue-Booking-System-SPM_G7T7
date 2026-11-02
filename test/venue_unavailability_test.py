@@ -36,11 +36,36 @@ def test_staff_can_toggle_and_coordinator_cannot(monkeypatch):
 
 
 def test_unavailable_venue_rejects_direct_booking(monkeypatch):
-    client = FakeClient({"Venues": [{"venue_id": 5, "is_available": False}], "Event Details": [{"id": 10, "coordinator_id": "c1"}]})
+    client = FakeClient({
+        "Venues": [
+            {
+                "venue_id": 5,
+                "is_available": False
+            }
+        ],
+        "Event Details": [
+            {
+                "id": 10,
+                "coordinator_id": "c1",
+                "status": "Planning"
+            }
+        ]
+    })
+
     monkeypatch.setattr(vr, "get_supabase", lambda: client)
+
     with pytest.raises(HTTPException) as error:
-        vr.create_venue_booking(vr.VenueBookingCreate(event_id=10, venue_id=5, coordinator_id="c1"), {"id": "c1"})
+        vr.create_venue_booking(
+            vr.VenueBookingCreate(
+                event_id=10,
+                venue_id=5,
+                coordinator_id="c1"
+            ),
+            {"id": "c1"}
+        )
+
     assert error.value.status_code == 409
+    assert error.value.detail == "This venue is unavailable. Please select another venue."
     assert not client.tables.get("Venue Booking Requests")
 
 

@@ -422,6 +422,211 @@ describe("VenueCalendar", () => {
       expect(screen.queryByText("Teardown")).not.toBeInTheDocument();
     },
   );
+
+  tc(
+    "FE-VCAL-016",
+    "VenueCalendar (hold)",
+    "A venue has an active On Hold booking.",
+    "The calendar identifies the booking as On Hold and displays its hold expiry.",
+    {
+      kind: "State",
+      data: "On Hold booking with hold_expires_at.",
+      steps: '1. Select "Hall A". 2. Inspect the held booking.',
+    },
+    async () => {
+      request.mockResolvedValue([
+        {
+          request_id: 20,
+          status: "On Hold",
+          hold_expires_at: "2026-10-07T18:00:00+08:00",
+          "Event Details": {
+            event_name: "Held Event",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "12:00:00",
+          },
+        },
+      ]);
+
+      render(<VenueCalendar venues={VENUES} />);
+      pickVenue(1);
+
+      const held = await screen.findByText(/Held Event.*On Hold until/);
+      expect(held).toBeInTheDocument();
+
+      const block = held.closest("div[title]");
+      expect(block.getAttribute("title")).toContain("On Hold");
+      expect(block.getAttribute("title")).toContain("2026-10-07 18:00 SGT");
+    },
+  );
+
+  tc(
+    "FE-VCAL-017",
+    "VenueCalendar (expired hold)",
+    "A venue booking has an expired hold.",
+    "The calendar labels it as an expired hold and renders it as tentative.",
+    {
+      kind: "State",
+      data: "Expired booking with hold_expires_at.",
+      steps: '1. Select "Hall A". 2. Inspect the expired booking.',
+    },
+    async () => {
+      request.mockResolvedValue([
+        {
+          request_id: 21,
+          status: "Expired",
+          hold_expires_at: "2026-10-07T09:00:00+08:00",
+          "Event Details": {
+            event_name: "Expired Event",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "12:00:00",
+          },
+        },
+      ]);
+
+      render(<VenueCalendar venues={VENUES} />);
+      pickVenue(1);
+
+      const expired = await screen.findByText(/Expired Event.*Expired hold/);
+      expect(expired).toBeInTheDocument();
+
+      const block = expired.closest("div[title]");
+      expect(block.getAttribute("title")).toContain("Expired");
+      expect(block.getAttribute("title")).toContain(
+        "expired 2026-10-07 09:00 SGT",
+      );
+    },
+  );
+
+  tc(
+    "FE-VCAL-018",
+    "VenueCalendar (overlaps)",
+    "Three events overlap during the same period.",
+    "The calendar groups the overlap, allows it to be expanded, shows the shared overlap and event details, then allows it to be collapsed.",
+    {
+      kind: "State",
+      pre: "Three bookings overlap from 11:00 AM to 12:00 PM.",
+      steps:
+        '1. Select "Hall A". 2. Expand the overlapping events. 3. Inspect the shared overlap and event details. 4. Collapse.',
+    },
+    async () => {
+      request.mockResolvedValue([
+        {
+          request_id: 31,
+          status: "Approved",
+          "Event Details": {
+            event_name: "Event A",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-07",
+            start_time: "10:00:00",
+            end_time: "13:00:00",
+          },
+        },
+        {
+          request_id: 32,
+          status: "Pending",
+          "Event Details": {
+            event_name: "Event B",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-07",
+            start_time: "10:30:00",
+            end_time: "12:30:00",
+          },
+        },
+        {
+          request_id: 33,
+          status: "Approved",
+          "Event Details": {
+            event_name: "Event C",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-07",
+            start_time: "11:00:00",
+            end_time: "12:00:00",
+          },
+        },
+      ]);
+
+      render(<VenueCalendar venues={VENUES} />);
+      pickVenue(1);
+
+      const expand = await screen.findByRole("button", {
+        name: /3 overlapping events.*expand to see all/i,
+      });
+
+      expect(expand).toBeInTheDocument();
+      fireEvent.click(expand);
+
+      expect(screen.getByText("Shared overlap:")).toBeInTheDocument();
+
+      expect(screen.getAllByText("Event A").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Event B").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("Event C").length).toBeGreaterThan(0);
+
+      const collapse = screen.getByRole("button", {
+        name: /3 overlapping events.*collapse/i,
+      });
+      expect(collapse).toBeInTheDocument();
+
+      fireEvent.click(collapse);
+
+      expect(
+        screen.getByRole("button", {
+          name: /3 overlapping events.*expand to see all/i,
+        }),
+      ).toBeInTheDocument();
+    },
+  );
+
+
+  tc(
+    "FE-VCAL-020",
+    "VenueCalendar (midnight buffers)",
+    "Setup and teardown extend a booking across midnight.",
+    "The booking is clipped and displayed across the affected calendar days.",
+    {
+      kind: "Edge",
+      pre: "Venue has 30-minute setup and teardown.",
+      data: "Event runs Wed 23:45 to Thu 00:15.",
+      steps: '1. Select "Hall A". 2. Inspect the booking across Wednesday and Thursday.',
+    },
+    async () => {
+      const venues = [
+        {
+          venue_id: 1,
+          name: "Hall A",
+          setup_time: 30,
+          teardown_time: 30,
+        },
+      ];
+
+      request.mockResolvedValue([
+        {
+          request_id: 50,
+          status: "Approved",
+          "Event Details": {
+            event_name: "Midnight Event",
+            event_date: "2026-10-07",
+            event_end_date: "2026-10-08",
+            start_time: "23:45:00",
+            end_time: "00:15:00",
+          },
+        },
+      ]);
+
+      render(<VenueCalendar venues={venues} />);
+      pickVenue(1);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("Midnight Event").length).toBeGreaterThanOrEqual(2);
+      });
+
+      expect(screen.getByText("Setup")).toBeInTheDocument();
+      expect(screen.getByText("Teardown")).toBeInTheDocument();
+    },
+  );
 });
 
 describe("eventTimes", () => {
@@ -551,4 +756,6 @@ describe("VenueStaffCalendar", () => {
       log.mockRestore();
     },
   );
+
 });
+

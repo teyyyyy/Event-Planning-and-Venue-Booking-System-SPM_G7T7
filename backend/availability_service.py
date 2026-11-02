@@ -199,10 +199,14 @@ class AvailabilityService:
             event
         )
 
+        # Exclude this event's own active reservation while
+        # validating request edits. This also works after a
+        # significant event change creates a replacement request
+        # with a new request_id.
         reservations = (
             self.client.table(RESERVATION_TABLE)
             .select("reservation_id,status")
-            .eq("request_id", request_id)
+            .eq("event_id", event["id"])
             .execute()
             .data or []
         )
@@ -619,7 +623,7 @@ class AvailabilityService:
         event_rows = (
             self.client.table(EVENT_TABLE)
             .select(
-                "id,event_name,event_date,"
+                "id,event_name,event_date,event_end_date,"
                 "start_time,end_time,status"
             )
             .in_(
@@ -717,6 +721,8 @@ class AvailabilityService:
                     event.get("event_name"),
                 "event_date":
                     event.get("event_date"),
+                "event_end_date":
+                    event.get("event_end_date"),
                 "start_time":
                     event.get("start_time"),
                 "end_time":
@@ -834,6 +840,8 @@ class AvailabilityService:
                     event.get("event_name"),
                 "event_date":
                     event.get("event_date"),
+                "event_end_date":
+                    event.get("event_end_date"),
                 "start_time":
                     event.get("start_time"),
                 "end_time":

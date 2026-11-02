@@ -141,6 +141,11 @@ function RequestDetail({
     };
   }
 
+  const availableAlternativeCount = venues.filter((venue) => {
+    if (String(venue.venue_id) === String(booking.venue_id)) return false;
+    return alternativeAvailability[String(venue.venue_id)]?.available === true;
+  }).length;
+
   return (
     <section
       className="detail-panel"
@@ -360,9 +365,17 @@ function RequestDetail({
             </select>
             {alternativeAvailabilityError && (
               <span className="field-error" role="alert">
-                {alternativeAvailabilityError} No alternative can be offered until availability is verified.
+                Unable to check alternative venue availability. You can still reject this request without suggesting an alternative.
               </span>
             )}
+            {!alternativeAvailabilityLoading &&
+              !alternativeAvailabilityError &&
+              Object.keys(alternativeAvailability).length > 0 &&
+              availableAlternativeCount === 0 && (
+                <span className="field-error" role="status">
+                  No suitable alternative venues are currently available for this event.
+                </span>
+              )}
           </label>
           <div className="decision-actions">
             <button type="submit" className="btn-reject" disabled={busy}>
@@ -720,3 +733,4 @@ export default function VenueApproval() {
     </main>
   );
 }
+

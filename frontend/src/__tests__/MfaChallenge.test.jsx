@@ -86,4 +86,24 @@ describe('MfaChallenge', () => {
   tc('FE-MFA-007', 'MfaChallenge', 'User chooses "Use a different account".', 'logout is called.',
     { steps: '1. Click the link.' },
     () => { render(<MfaChallenge />); fireEvent.click(screen.getByText('Use a different account')); expect(logout).toHaveBeenCalled(); });
+
+  tc('FE-MFA-008', 'MfaChallenge', 'MFA verification fails without an error message.', 'The fallback verification error is shown and the code is cleared.',
+    { kind: 'Edge', steps: '1. Make verifyMfa reject with an empty error. 2. Enter six digits. 3. Submit.' },
+    async () => {
+      verifyMfa.mockRejectedValue(new Error(''));
+      render(<MfaChallenge />);
+      type('123456');
+      fireEvent.click(screen.getByRole('button', { name: 'Verify' }));
+      expect(await screen.findByText('Unable to verify the code')).toBeInTheDocument();
+      expect(codeInput().value).toBe('');
+    });
+
+  tc('FE-MFA-009', 'MfaChallenge', 'Authenticator setup fails without an error message.', 'The fallback authenticator setup error is shown.',
+    { kind: 'Edge', pre: 'mfa step "enroll".', steps: '1. Make startEnrollment reject with an empty error. 2. Render the component.' },
+    async () => {
+      auth.value.mfa = { step: 'enroll' };
+      startEnrollment.mockRejectedValue(new Error(''));
+      render(<MfaChallenge />);
+      expect(await screen.findByText('Unable to start authenticator setup')).toBeInTheDocument();
+    });
 });

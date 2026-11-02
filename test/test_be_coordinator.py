@@ -395,37 +395,76 @@ def test_organiser_events_marks_pending_change_requests(use_db):
     assert out[2]["latest_change_request"]["review_status"] == "Approved"
     assert out[2]["latest_change_request"]["review_comments"] is None
 
-
 def change_request(**overrides):
     return {
-        "id": 11, "event_id": 1, "organiser_id": "o1", "coordinator_id": "c1",
-        "review_status": "Pending", "request_text": "Move the event",
-        "proposed_event_name": "Morning Gala", "proposed_event_type": "Workshop",
-        "proposed_event_date": "2026-10-02", "proposed_event_end_date": "2026-10-03",
-        "proposed_event_capacity": 50, "proposed_description": "Updated plan",
-        "proposed_start_time": "08:00", "proposed_end_time": "12:00",
+        "id": 11,
+        "event_id": 1,
+        "organiser_id": "o1",
+        "coordinator_id": "c1",
+        "review_status": "Pending",
+        "request_text": "Move the event",
+
+        "proposed_event_name": "Morning Gala",
+        "proposed_event_type": "Workshop",
+        "proposed_event_date": "2026-10-02",
+        "proposed_event_end_date": "2026-10-03",
+        "proposed_event_capacity": 50,
+        "proposed_description": "Updated plan",
+
+        "proposed_layout_required": "Banquet",
+        "proposed_equipment_required": ["Microphone", "Projector"],
+        "proposed_facilities_required": ["Aircon", "Stage"],
+        "proposed_accessibility_required": 1,
+        "proposed_equipment_placement": "Projector at the stage.",
+        "proposed_crowd_movement": "Keep the center aisle clear.",
+
+        "proposed_start_time": "08:00",
+        "proposed_end_time": "12:00",
+
         **overrides,
     }
-
 
 @tc("BE-COORD-048", "review_event_change_request", "Assigned coordinator approves a pending request.",
     "The request is Approved and all proposed event fields are applied; reviewer and review time are recorded.",
     steps="1. Seed a pending request. 2. Approve it as its assigned coordinator.")
 def test_approve_event_change_request_applies_proposal(use_db):
-    client = use_db(world([event(status="Confirmed", event_type="Workshop", event_capacity=10)], [*COORDS, ORGANISER], [change_request()]), ca)
-    reviewed = ca.review_event_change_request(
-        11, ca.EventChangeRequestReview(decision="Approved"), {"id": "c1", "role": "Event Coordinator"}
+    client = use_db(
+        world(
+            [event(status="Confirmed", event_type="Workshop", event_capacity=10)],
+            [*COORDS, ORGANISER],
+            [change_request()],
+        ),
+        ca,
     )
+
+    reviewed = ca.review_event_change_request(
+        11,
+        ca.EventChangeRequestReview(decision="Approved"),
+        {"id": "c1", "role": "Event Coordinator"},
+    )
+
     assert reviewed["review_status"] == "Approved"
     assert reviewed["reviewed_by"] == "c1"
     assert reviewed["reviewed_at"]
-    assert client.tables["Event Details"][0] == {
-        **event(status="Confirmed", event_type="Workshop", event_capacity=10),
-        "event_name": "Morning Gala", "event_type": "Workshop",
-        "event_date": "2026-10-02", "event_end_date": "2026-10-03",
-        "event_capacity": 50, "description": "Updated plan",
-        "start_time": "08:00", "end_time": "12:00",
-    }
+
+    updated_event = client.tables["Event Details"][0]
+
+    assert updated_event["event_name"] == "Morning Gala"
+    assert updated_event["event_type"] == "Workshop"
+    assert updated_event["event_date"] == "2026-10-02"
+    assert updated_event["event_end_date"] == "2026-10-03"
+    assert updated_event["event_capacity"] == 50
+    assert updated_event["description"] == "Updated plan"
+    assert updated_event["start_time"] == "08:00"
+    assert updated_event["end_time"] == "12:00"
+
+    assert updated_event["layout_required"] == "Banquet"
+    assert updated_event["equipment_required"] == ["Microphone", "Projector"]
+    assert updated_event["facilities_required"] == ["Aircon", "Stage"]
+    assert updated_event["accessibility_required"] == 1
+    assert updated_event["equipment_placement"] == "Projector at the stage."
+    assert updated_event["crowd_movement"] == "Keep the center aisle clear."
+
     assert client.tables["notifications"][0]["recipient_id"] == "o1"
     assert "was approved" in client.tables["notifications"][0]["description"]
 
@@ -700,33 +739,111 @@ def test_assigned_coordinator_event_guard(use_db):
     assert err(ca.require_assigned_coordinator_event, 99, user)[0] == 404
 
 
-@tc("BE-COORD-059", "event_change_requests", "A coordinator opens a pending request that moves the event's start time, and one that was processed.",
+@tc(
+    "BE-COORD-059",
+    "event_change_requests",
+    "A coordinator opens a pending request that moves the event's start time, and one that was processed.",
     "The pending request previews a Significant change with the live venue booking and equipment request that approval reopens; the processed one returns its processing status and summary.",
-    pre="Event 1 has an Approved booking and an Updated equipment request. Request 11 Pending (new times); request 12 Processed.",
-    steps="1. Call event_change_requests as coordinator c1.")
+    pre="Event 1 has an Approved booking and an Updated equipment request. Request 11 Pending (new start time); request 12 Processed.",
+    steps="1. Seed an event whose planning fields already match the proposal except for start time. "
+          "2. Seed an Approved venue booking and Updated equipment request. "
+          "3. Call event_change_requests as coordinator c1."
+)
 def test_event_change_requests_include_impact_and_processing(use_db):
     client = world(
-        [event(id=1, coordinator_id="c1", start_time="10:00:00", end_time="12:00:00", event_date="2026-10-02", event_end_date="2026-10-03",
-               event_capacity=50, event_name="Morning Gala", event_type="Workshop", description="Updated plan")],
+        [
+            event(
+                id=1,
+                coordinator_id="c1",
+                start_time="10:00:00",
+                end_time="12:00:00",
+                event_date="2026-10-02",
+                event_end_date="2026-10-03",
+                event_capacity=50,
+                event_name="Morning Gala",
+                event_type="Workshop",
+                description="Updated plan",
+                layout_required="Banquet",
+                equipment_required=["Microphone", "Projector"],
+                facilities_required=["Aircon", "Stage"],
+                accessibility_required=1,
+                equipment_placement="Projector at the stage.",
+                crowd_movement="Keep the center aisle clear.",
+            )
+        ],
         change_requests=[
-            change_request(created_at="2026-02-01T00:00:00Z"),
-            change_request(id=12, review_status="Approved", created_at="2026-01-01T00:00:00Z", change_type="Significant",
-                           significant_fields=["start_time"], affects_venue=True, affects_equipment=True,
-                           processing_status="Processed", processed_at="2026-01-02T00:00:00Z",
-                           processing_summary="Venue booking #5 replaced by #6."),
+            change_request(
+                created_at="2026-02-01T00:00:00Z"
+            ),
+            change_request(
+                id=12,
+                review_status="Approved",
+                created_at="2026-01-01T00:00:00Z",
+                change_type="Significant",
+                significant_fields=["start_time"],
+                affects_venue=True,
+                affects_equipment=True,
+                processing_status="Processed",
+                processed_at="2026-01-02T00:00:00Z",
+                processing_summary="Venue booking #5 replaced by #6.",
+            ),
         ],
     )
-    client.tables["Venue Booking Requests"] = [{"request_id": 5, "event_id": 1, "venue_id": 7, "status": "Approved"}]
-    client.tables["Equipment Request"] = [{"request_id": 9, "event_id": 1, "status": "Updated"}]
+
+    client.tables["Venue Booking Requests"] = [
+        {
+            "request_id": 5,
+            "event_id": 1,
+            "venue_id": 7,
+            "status": "Approved",
+        }
+    ]
+
+    client.tables["Equipment Request"] = [
+        {
+            "request_id": 9,
+            "event_id": 1,
+            "status": "Updated",
+        }
+    ]
+
     use_db(client, ca)
-    pending, processed = ca.event_change_requests({"id": "c1", "role": "Event Coordinator"})
+
+    pending, processed = ca.event_change_requests(
+        {"id": "c1", "role": "Event Coordinator"}
+    )
+
     assert pending["processing_status"] is None
+
     assert pending["impact"] == {
-        "change_type": "Significant", "significant_fields": ["start_time"], "affects_venue": True, "affects_equipment": True,
-        "venue_requests": [{"request_id": 5, "status": "Approved"}], "equipment_requests": [{"request_id": 9, "status": "Updated"}],
+        "change_type": "Significant",
+        "significant_fields": ["start_time"],
+        "affects_venue": True,
+        "affects_equipment": True,
+        "venue_requests": [
+            {
+                "request_id": 5,
+                "status": "Approved",
+            }
+        ],
+        "equipment_requests": [
+            {
+                "request_id": 9,
+                "status": "Updated",
+            }
+        ],
     }
-    assert (processed["processing_status"], processed["processed_at"], processed["processing_summary"]) == (
-        "Processed", "2026-01-02T00:00:00Z", "Venue booking #5 replaced by #6.")
+
+    assert (
+        processed["processing_status"],
+        processed["processed_at"],
+        processed["processing_summary"],
+    ) == (
+        "Processed",
+        "2026-01-02T00:00:00Z",
+        "Venue booking #5 replaced by #6.",
+    )
+
     assert processed["impact"]["change_type"] == "Significant"
 
 
@@ -739,3 +856,402 @@ def test_organiser_events_include_processing_status(use_db):
     )]), ca)
     latest = ca.organiser_events("o1")[0]["latest_change_request"]
     assert (latest["review_status"], latest["change_type"], latest["processing_status"]) == ("Approved", "Significant", "Awaiting processing")
+
+# ---- additional clarification-request coverage -----------------------------
+
+@tc(
+    "BE-COORD-066",
+    "request_event_clarification",
+    "A coordinator submits both clarification fields as blank whitespace.",
+    "HTTP 400 is returned before the database RPC is called.",
+    data="coordinator_comments = spaces; amendments = spaces",
+    steps="1. Build a blank feedback request. 2. Call request_event_clarification.",
+    kind="Negative",
+)
+def test_clarification_rejects_blank_feedback(monkeypatch):
+    monkeypatch.setattr(
+        ca,
+        "db",
+        lambda: pytest.fail("Database must not be called for blank feedback"),
+    )
+
+    feedback = ca.CoordinatorFeedbackRequest(
+        coordinator_comments="   ",
+        amendments="   ",
+    )
+
+    assert err(
+        ca.request_event_clarification,
+        "1",
+        feedback,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        400,
+        "Enter a clarification request, an amendment request, or both.",
+    )
+
+
+@tc(
+    "BE-COORD-067",
+    "request_event_clarification",
+    "A coordinator submits a clarification or amendment longer than 5,000 characters.",
+    "HTTP 400 is returned before the database RPC is called.",
+    data="coordinator_comments = 5001 characters",
+    steps="1. Build oversized feedback. 2. Call request_event_clarification.",
+    kind="Negative",
+)
+def test_clarification_rejects_oversized_feedback(monkeypatch):
+    monkeypatch.setattr(
+        ca,
+        "db",
+        lambda: pytest.fail("Database must not be called for oversized feedback"),
+    )
+
+    feedback = ca.CoordinatorFeedbackRequest(
+        coordinator_comments="x" * 5001,
+        amendments="",
+    )
+
+    assert err(
+        ca.request_event_clarification,
+        "1",
+        feedback,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        400,
+        "Clarification and amendment requests must be 5,000 characters or fewer each.",
+    )
+
+
+@tc(
+    "BE-COORD-068",
+    "request_event_clarification",
+    "The feedback RPC reports that the event state changed before the request could be saved.",
+    "HTTP 409 tells the coordinator to reload the event.",
+    pre="submit_coordinator_feedback returns no data.",
+    steps="1. Stub the RPC to return no data. 2. Submit valid clarification feedback.",
+    kind="State",
+)
+def test_clarification_empty_rpc_result(monkeypatch):
+    client = SimpleNamespace(
+        rpc=lambda name, params: SimpleNamespace(
+            execute=lambda: SimpleNamespace(data=None)
+        )
+    )
+    monkeypatch.setattr(ca, "db", lambda: client)
+
+    feedback = ca.CoordinatorFeedbackRequest(
+        coordinator_comments="Please clarify the expected attendance.",
+        amendments="",
+    )
+
+    assert err(
+        ca.request_event_clarification,
+        "1",
+        feedback,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        409,
+        "The event assignment or review status changed. Reload the event and try again.",
+    )
+
+
+@tc(
+    "BE-COORD-069",
+    "request_event_clarification",
+    "The feedback RPC rejects the request with database error 22023.",
+    "The database validation error is translated to HTTP 400.",
+    steps="1. Make submit_coordinator_feedback raise APIError 22023. 2. Submit valid feedback.",
+    kind="Negative",
+)
+def test_clarification_maps_database_validation_error(monkeypatch):
+    error = APIError({
+        "message": "Event is not available for clarification.",
+        "code": "22023",
+        "details": None,
+        "hint": None,
+    })
+
+    def raise_error():
+        raise error
+
+    client = SimpleNamespace(
+        rpc=lambda name, params: SimpleNamespace(
+            execute=raise_error
+        )
+    )
+    monkeypatch.setattr(ca, "db", lambda: client)
+
+    feedback = ca.CoordinatorFeedbackRequest(
+        coordinator_comments="Please clarify the event requirements.",
+        amendments="",
+    )
+
+    assert err(
+        ca.request_event_clarification,
+        "1",
+        feedback,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        400,
+        "Event is not available for clarification.",
+    )
+
+
+# ---- additional full-event-details coverage --------------------------------
+
+@tc(
+    "BE-COORD-070",
+    "get_full_event_details",
+    "Full details are requested for an event that does not exist.",
+    "HTTP 404 \"Event not found.\"",
+    steps="1. Use an empty event table. 2. Request event 99.",
+    kind="Negative",
+)
+def test_full_event_details_missing_event(use_db):
+    use_db(world([]), ca)
+
+    assert err(
+        ca.get_full_event_details,
+        99,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        404,
+        "Event not found.",
+    )
+
+
+@tc(
+    "BE-COORD-079",
+    "get_full_event_details",
+    "An organiser or coordinator requests full details for an event they do not own or manage.",
+    "Both unauthorised users receive HTTP 403.",
+    pre="Planning event 1 belongs to o1 and is assigned to c1.",
+    steps="1. Request as organiser o2. 2. Request as coordinator c2.",
+    kind="Security",
+)
+def test_full_event_details_enforces_event_access(use_db):
+    use_db(
+        world([
+            event(
+                id=1,
+                status="Planning",
+                organiser_id="o1",
+                coordinator_id="c1",
+            )
+        ]),
+        ca,
+    )
+
+    assert err(
+        ca.get_full_event_details,
+        1,
+        {"id": "o2", "role": "Event Organiser"},
+    ) == (
+        403,
+        "You can only view full details for your own events.",
+    )
+
+    assert err(
+        ca.get_full_event_details,
+        1,
+        {"id": "c2", "role": "Event Coordinator"},
+    ) == (
+        403,
+        "You can only view full details for events assigned to you.",
+    )
+
+
+@tc(
+    "BE-COORD-080",
+    "get_full_event_details",
+    "Full details are requested while the event is still Submitted.",
+    "HTTP 409 because full details are only available for Planning, Confirmed, or Completed events.",
+    pre="Event 1 is Submitted and assigned to c1.",
+    steps="1. Request full details as assigned coordinator c1.",
+    kind="State",
+)
+def test_full_event_details_rejects_unavailable_status(use_db):
+    use_db(
+        world([
+            event(
+                id=1,
+                status="Submitted",
+                coordinator_id="c1",
+            )
+        ]),
+        ca,
+    )
+
+    assert err(
+        ca.get_full_event_details,
+        1,
+        {"id": "c1", "role": "Event Coordinator"},
+    ) == (
+        409,
+        "Full event details are available only for Planning, Confirmed, or Completed events.",
+    )
+
+
+@tc(
+    "BE-COORD-081",
+    "get_full_event_details",
+    "A Planning event has no approved venue booking and no equipment reservation yet.",
+    "The event is still returned with empty venue, reservation and equipment lists and no safety check.",
+    pre="Planning event 1 is assigned to c1; no venue or equipment planning exists.",
+    steps="1. Request full details as c1. 2. Inspect the optional planning sections.",
+    kind="Edge",
+)
+def test_full_event_details_allows_missing_optional_planning(use_db):
+    client = world([
+        event(
+            id=1,
+            status="Planning",
+            coordinator_id="c1",
+        )
+    ])
+
+    client.tables["Venue Booking Requests"] = []
+    client.tables["Venues"] = []
+    client.tables["Equipment Reservation"] = []
+    client.tables["Equipment Reservation Item"] = []
+    client.tables["Equipment"] = []
+
+    use_db(client, ca)
+
+    out = ca.get_full_event_details(
+        1,
+        {"id": "c1", "role": "Event Coordinator"},
+    )
+
+    assert out["event"]["id"] == 1
+    assert out["venue_bookings"] == []
+    assert out["equipment_reservations"] == []
+    assert out["equipment_items"] == []
+    assert out["safety_check"] is None
+
+
+@tc(
+    "BE-COORD-082",
+    "get_full_event_details",
+    "A confirmed event has an approved venue, mixed equipment reservation statuses and a recorded safety decision.",
+    "The venue is enriched, only Reserved equipment is returned, equipment names are resolved with ID fallback, and the safety decision is exposed.",
+    pre="Event 1 is Confirmed and assigned to c1.",
+    steps="1. Seed venue, equipment reservations/items and safety fields. "
+          "2. Request full details as c1. "
+          "3. Verify venue, Reserved equipment filtering, equipment-name fallback and safety information.",
+)
+def test_full_event_details_builds_planning_and_safety_view(use_db):
+    client = world([
+        event(
+            id=1,
+            status="Confirmed",
+            coordinator_id="c1",
+            safety_decision_status="Approved",
+            safety_officer_id="s1",
+            safety_comments="Safety arrangements approved.",
+            safety_affected_arrangements=["venue"],
+            safety_decided_at="2026-10-01T10:00:00Z",
+        )
+    ])
+
+    client.tables["Venue Booking Requests"] = [
+        {
+            "request_id": 5,
+            "event_id": 1,
+            "venue_id": 7,
+            "status": "Approved",
+        },
+        {
+            "request_id": 6,
+            "event_id": 1,
+            "venue_id": 8,
+            "status": "Rejected",
+        },
+    ]
+
+    client.tables["Venues"] = [
+        {
+            "venue_id": 7,
+            "venue_name": "Grand Hall",
+            "capacity": 200,
+        }
+    ]
+
+    client.tables["Equipment Reservation"] = [
+        {
+            "reservation_id": 20,
+            "event_id": 1,
+            "status": "Reserved",
+        },
+        {
+            "reservation_id": 21,
+            "event_id": 1,
+            "status": "Needs Recheck",
+        },
+    ]
+
+    client.tables["Equipment Reservation Item"] = [
+        {
+            "reservation_item_id": 1,
+            "reservation_id": 20,
+            "equipment_id": 100,
+            "quantity": 2,
+        },
+        {
+            "reservation_item_id": 2,
+            "reservation_id": 20,
+            "equipment_id": 999,
+            "quantity": 1,
+        },
+        {
+            "reservation_item_id": 3,
+            "reservation_id": 21,
+            "equipment_id": 200,
+            "quantity": 1,
+        },
+    ]
+
+    client.tables["Equipment"] = [
+        {
+            "equipment_id": 100,
+            "equipment_name": "Microphone",
+        },
+        {
+            "equipment_id": 200,
+            "equipment_name": "Projector",
+        },
+    ]
+
+    use_db(client, ca)
+
+    out = ca.get_full_event_details(
+        1,
+        {"id": "c1", "role": "Event Coordinator"},
+    )
+
+    assert len(out["venue_bookings"]) == 1
+    assert out["venue_bookings"][0]["request_id"] == 5
+    assert out["venue_bookings"][0]["Venues"]["venue_name"] == "Grand Hall"
+
+    assert [
+        reservation["reservation_id"]
+        for reservation in out["equipment_reservations"]
+    ] == [20]
+
+    assert [
+        item["equipment_id"]
+        for item in out["equipment_items"]
+    ] == [100, 999]
+
+    assert out["equipment_items"][0]["equipment_name"] == "Microphone"
+    assert out["equipment_items"][1]["equipment_name"] == 999
+
+    assert out["safety_check"] == {
+        "event_id": 1,
+        "safety_officer_id": "s1",
+        "status": "Approved",
+        "comments": "Safety arrangements approved.",
+        "affected_arrangements": ["venue"],
+        "decided_at": "2026-10-01T10:00:00Z",
+    }

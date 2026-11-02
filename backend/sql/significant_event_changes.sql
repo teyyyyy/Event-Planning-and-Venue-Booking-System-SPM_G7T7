@@ -20,22 +20,63 @@ language sql immutable set search_path = public, pg_temp as $$
     (3, 'description', false, false),
     (4, 'equipment_placement', false, false),
     (5, 'crowd_movement', false, false),
-    (6, 'event_date', true, true),
-    (7, 'event_end_date', true, true),
-    (8, 'start_time', true, true),
-    (9, 'end_time', true, true),
-    (10, 'event_capacity', true, false),
-    (11, 'venue_id', true, false),
-    (12, 'layout_required', true, false),
-    (13, 'facilities_required', true, false),
-    (14, 'accessibility_required', true, false)
+    (6, 'equipment_required', false, true),
+    (7, 'event_date', true, true),
+    (8, 'event_end_date', true, true),
+    (9, 'start_time', true, true),
+    (10, 'end_time', true, true),
+    (11, 'event_capacity', true, false),
+    (12, 'venue_id', true, false),
+    (13, 'layout_required', true, false),
+    (14, 'facilities_required', true, false),
+    (15, 'accessibility_required', true, false)
   ), changed as (
     select t.* from tracked t
-    where case when t.field = 'event_end_date'
-      -- A blank end date means a single-day event, so it equals the start date.
-      then coalesce(nullif(previous->'event_end_date', 'null'), previous->'event_date')
-        is distinct from coalesce(nullif(current_row->'event_end_date', 'null'), current_row->'event_date')
-      else previous->t.field is distinct from current_row->t.field end
+    where case
+      when t.field = 'event_end_date' then
+        -- A blank end date means a single-day event, so it equals the start date.
+        coalesce(nullif(previous->'event_end_date', 'null'), previous->'event_date')
+          is distinct from
+        coalesce(nullif(current_row->'event_end_date', 'null'), current_row->'event_date')
+
+      when t.field in ('equipment_required', 'facilities_required') then
+        -- Equipment/facilities are selections. Their order does not matter.
+        -- For example:
+        -- ["Microphone", "Laptop", "Projector"]
+        -- and
+        -- ["Projector", "Microphone", "Laptop"]
+        -- represent the same requirements.
+        coalesce(
+          (
+            select array_agg(value order by value)
+            from jsonb_array_elements_text(
+              case
+                when jsonb_typeof(previous->t.field) = 'array'
+                  then previous->t.field
+                else '[]'::jsonb
+              end
+            ) as item(value)
+          ),
+          '{}'::text[]
+        )
+        is distinct from
+        coalesce(
+          (
+            select array_agg(value order by value)
+            from jsonb_array_elements_text(
+              case
+                when jsonb_typeof(current_row->t.field) = 'array'
+                  then current_row->t.field
+                else '[]'::jsonb
+              end
+            ) as item(value)
+          ),
+          '{}'::text[]
+        )
+
+      else
+        previous->t.field is distinct from current_row->t.field
+    end
   )
   select
     coalesce(array_agg(field order by ord), '{}'),
@@ -44,6 +85,7 @@ language sql immutable set search_path = public, pg_temp as $$
     coalesce(array_agg(field order by ord) filter (where affects_equipment), '{}')
   from changed;
 $$;
+
 revoke all on function public.event_change_impact(jsonb, jsonb) from public, anon, authenticated;
 
 create table if not exists public.event_change_log (
@@ -336,9 +378,17 @@ begin
       )
       returning request_id into new_id;
       insert into public."Equipment Request Item" (request_id, equipment_id, requested_quantity, technical_requirements)
-      select new_id, equipment_id, requested_quantity, technical_requirements
-      from public."Equipment Request Item"
-      where request_id = previous.request_id and requested_quantity > 0;
+      select
+        new_id,
+        equipment.equipment_id,
+        coalesce(old_item.requested_quantity, 0),
+        old_item.technical_requirements
+      from unnest(coalesce(event_row.equipment_required, array[]::text[])) as required_equipment(equipment_name)
+      join public."Equipment" equipment
+        on equipment.equipment_name = required_equipment.equipment_name
+      left join public."Equipment Request Item" old_item
+        on old_item.request_id = previous.request_id
+        and old_item.equipment_id = equipment.equipment_id;
       equipment_requests := equipment_requests || jsonb_build_object(
         'request_id', new_id, 'previous_request_id', previous.request_id
       );
