@@ -174,3 +174,42 @@ tc('FE-SP2-016', 'Equipment notification record', 'An equipment request notifica
   expect(screen.getByText('MIC × 2 wireless')).toBeInTheDocument();
 });
 
+tc('FE-SP2-017', 'Attendee event loading', 'Loading attendee events fails.', 'The API error is displayed.', { steps: '1. Reject the initial attendee events request. 2. Render the workspace.', kind: 'Negative' }, async () => {
+  request.mockRejectedValueOnce(new Error('Unable to load events.'));
+  render(<AttendeeWorkspace user={{}} logout={vi.fn()} />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load events.');
+});
+
+tc('FE-SP2-018', 'Event details fallbacks', 'An event has no description or confirmed venue and spans multiple days.', 'Fallback description, date range and venue message are displayed.', { steps: '1. Return a multi-day event without description or venues. 2. Inspect its details.', kind: 'Edge' }, async () => {
+  request.mockResolvedValueOnce([{ ...event, description: '', event_end_date: '2099-01-03', venues: [] }]);
+  render(<AttendeeWorkspace user={{}} logout={vi.fn()} />);
+  expect(await screen.findByText('No description provided.')).toBeInTheDocument();
+  expect(screen.getByText('2099-01-01 to 2099-01-03')).toBeInTheDocument();
+  expect(screen.getByText('Venue to be announced')).toBeInTheDocument();
+});
+
+tc('FE-SP2-019', 'Event venue display', 'A confirmed venue has no location.', 'Only the venue name is displayed.', { steps: '1. Return an event whose venue has no location. 2. Inspect its details.', kind: 'Edge' }, async () => {
+  request.mockResolvedValueOnce([{ ...event, venues: [{ name: 'Hall' }] }]);
+  render(<AttendeeWorkspace user={{}} logout={vi.fn()} />);
+  expect(await screen.findByText('Hall')).toBeInTheDocument();
+  expect(screen.queryByText('Hall (Campus)')).toBeNull();
+});
+
+tc('FE-SP2-020', 'Notification event equipment', 'A linked notification record contains reserved equipment.', 'The reserved equipment names and quantities are displayed.', { steps: '1. Open a notification deep link. 2. Return reserved equipment. 3. Inspect the linked record.' }, async () => {
+  window.history.replaceState(null, '', '/#notification/1');
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record')
+    ? { type: 'event', event, equipment: [{ equipment_name: 'Microphone', reserved_quantity: 2 }, { equipment_name: 'Projector', reserved_quantity: 1 }] }
+    : [notification]));
+  render(<Notifications />);
+  expect(await screen.findByText('Microphone × 2, Projector × 1')).toBeInTheDocument();
+});
+
+tc('FE-SP2-021', 'Notification event equipment', 'A linked notification record has no reserved equipment.', 'The equipment fallback message is displayed.', { steps: '1. Open a notification deep link. 2. Return no reserved equipment. 3. Inspect the linked record.', kind: 'Edge' }, async () => {
+  window.history.replaceState(null, '', '/#notification/1');
+  request.mockImplementation(path => Promise.resolve(path.endsWith('/record')
+    ? { type: 'event', event, equipment: [] }
+    : [notification]));
+  render(<Notifications />);
+  expect(await screen.findByText('Equipment to be reserved')).toBeInTheDocument();
+});
+

@@ -26,9 +26,59 @@ const formatTime = (value) => {
 };
 
 
-function Detail({ label, children }) {
+const formatFacilities = (value) => {
+  if (!value) return '—';
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (Array.isArray(parsed)) {
+      return parsed.join(', ');
+    }
+  } catch {
+    // Continue with normal string formatting.
+  }
+
+  return String(value)
+    .split(',')
+    .map((facility) => facility.trim())
+    .filter(Boolean)
+    .join(', ');
+};
+
+const formatAffectedArrangements = (value) => {
+  if (!value) return '—';
+
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+
+    if (Array.isArray(parsed)) {
+      return parsed.join(', ');
+    }
+  } catch {
+    // Continue with PostgreSQL/string formatting.
+  }
+
+  return String(value)
+    .replace(/^\{|\}$/g, '')
+    .split(',')
+    .map((item) => item.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean)
+    .join(', ');
+};
+
+
+function Detail({ label, children, style }) {
   return (
-    <div className="detail-item">
+    <div className="detail-item" style={style}>
       <dt>{label}</dt>
       <dd>{children ?? '—'}</dd>
     </div>
@@ -44,6 +94,7 @@ function SafetyDetail({
 }) {
   const [decision, setDecision] = useState('');
   const [comments, setComments] = useState('');
+  const [affectedArrangements, setAffectedArrangements] = useState([]);
 
   const event = details.event || {};
   const venueBookings = details.venue_bookings || [];
@@ -54,14 +105,48 @@ function SafetyDetail({
     decision === 'Rejected' ||
     decision === 'Changes Requested';
 
+  function changeDecision(eventObject) {
+    const nextDecision = eventObject.target.value;
+    setDecision(nextDecision);
+
+    if (nextDecision !== 'Changes Requested') {
+      setAffectedArrangements([]);
+    }
+  }
+
+  function changeAffectedArrangement(eventObject) {
+    const { value, checked } = eventObject.target;
+
+    setAffectedArrangements((current) => {
+      if (checked) {
+        return current.includes(value)
+          ? current
+          : [...current, value];
+      }
+
+      return current.filter((item) => item !== value);
+    });
+  }
+
   function submitDecision(eventObject) {
     eventObject.preventDefault();
 
     if (!decision) return;
 
+    if (
+      decision === 'Changes Requested' &&
+      affectedArrangements.length === 0
+    ) {
+      return;
+    }
+
     onDecision({
       decision,
       comments: comments.trim() || null,
+      affected_arrangements:
+        decision === 'Changes Requested'
+          ? affectedArrangements
+          : null,
     });
   }
 
@@ -88,16 +173,29 @@ function SafetyDetail({
 
       <h3 className="safety-section-title">Event information</h3>
 
-      <dl className="detail-grid">
-        <Detail label="Event ID">
-          {event.id}
+      <dl
+        className="detail-grid"
+        style={{
+          gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+        }}
+      >
+        <Detail label="Event name">
+          {event.event_name || '—'}
         </Detail>
 
         <Detail label="Event type">
-          {event.event_type}
+          {event.event_type || '—'}
         </Detail>
 
-        <Detail label="Event date">
+        <Detail label="Layout required">
+          {event.layout_required || '—'}
+        </Detail>
+
+        <Detail label="Expected attendance">
+          {event.event_capacity ?? '—'}
+        </Detail>
+
+        <Detail label="Start date">
           {formatDate(event.event_date)}
         </Detail>
 
@@ -105,24 +203,33 @@ function SafetyDetail({
           {formatTime(event.start_time)}
         </Detail>
 
+        <Detail label="End date">
+          {formatDate(event.event_end_date)}
+        </Detail>
+
         <Detail label="End time">
           {formatTime(event.end_time)}
         </Detail>
 
-        <Detail label="Expected attendance">
-          {event.event_capacity}
+        <Detail
+          label="Facilities required"
+          style={{ gridColumn: 'span 2' }}
+        >
+          {formatFacilities(event.facilities_required)}
         </Detail>
 
-        <Detail label="Layout required">
-          {event.layout_required}
-        </Detail>
-
-        <Detail label="Accessibility required">
+        <Detail
+          label="Accessibility required"
+          style={{ gridColumn: 'span 2' }}
+        >
           {event.accessibility_required ? 'Yes' : 'No'}
         </Detail>
 
-        <Detail label="Event description">
-          {event.description}
+        <Detail
+          label="Description and planning requirements"
+          style={{ gridColumn: '1 / -1' }}
+        >
+          {event.description || '—'}
         </Detail>
       </dl>
 
@@ -152,7 +259,8 @@ function SafetyDetail({
                     }
                   >
                     <td>
-                      {venue.venue_name ||
+                      {venue.name ||
+                        venue.venue_name ||
                         booking.venue_name ||
                         `Venue #${booking.venue_id}`}
                     </td>
@@ -178,36 +286,39 @@ function SafetyDetail({
         Equipment arrangements
       </h3>
 
-      {equipmentReservations.length ? (
+      {equipmentReservations.some(
+        (reservation) => reservation.items?.length
+      ) ? (
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Reservation</th>
-                <th>Status</th>
+                <th>Equipment</th>
+                <th>Reserved quantity</th>
               </tr>
             </thead>
 
             <tbody>
-              {equipmentReservations.map((reservation, index) => (
-                <tr
-                  key={
-                    reservation.reservation_id ??
-                    index
-                  }
-                >
-                  <td>
-                    Reservation #
-                    {reservation.reservation_id ?? '—'}
-                  </td>
+              {equipmentReservations.flatMap(
+                (reservation) =>
+                  (reservation.items || []).map((item, index) => (
+                    <tr
+                      key={
+                        item.reservation_item_id ??
+                        `${reservation.reservation_id}-${item.equipment_id}-${index}`
+                      }
+                    >
+                      <td>
+                        {item.equipment_name ||
+                          `Equipment #${item.equipment_id}`}
+                      </td>
 
-                  <td>
-                    <span className="pill status-approved">
-                      {reservation.status}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+                      <td>
+                        {item.reserved_quantity ?? '—'}
+                      </td>
+                    </tr>
+                  ))
+              )}
             </tbody>
           </table>
         </div>
@@ -253,6 +364,14 @@ function SafetyDetail({
             <Detail label="Comments">
               {existingCheck.comments}
             </Detail>
+
+            {existingCheck.affected_arrangements && (
+              <Detail label="Affected arrangements">
+                {formatAffectedArrangements(
+                  existingCheck.affected_arrangements
+                )}
+              </Detail>
+            )}
           </dl>
         </>
       )}
@@ -270,9 +389,7 @@ function SafetyDetail({
 
           <select
             value={decision}
-            onChange={(eventObject) =>
-              setDecision(eventObject.target.value)
-            }
+            onChange={changeDecision}
             disabled={busy}
             required
           >
@@ -284,6 +401,125 @@ function SafetyDetail({
             <option value="Rejected">Reject</option>
           </select>
         </label>
+
+        {decision === 'Changes Requested' && (
+          <fieldset
+            className="choice-group"
+            style={{
+              marginTop: '4px',
+              padding: '16px',
+            }}
+          >
+            <legend>
+              Affected arrangements{' '}
+              <span className="safety-required">*</span>
+            </legend>
+
+            <p style={{ margin: '4px 0 18px' }}>
+              Select the arrangements affected by the requested safety changes.
+            </p>
+
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: '12px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '18px auto',
+                  alignItems: 'center',
+                  columnGap: '10px',
+                }}
+              >
+                <input
+                  id="affected-venue"
+                  type="checkbox"
+                  value="Venue"
+                  checked={affectedArrangements.includes('Venue')}
+                  onChange={changeAffectedArrangement}
+                  disabled={busy}
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    margin: 0,
+                  }}
+                />
+
+                <label
+                  htmlFor="affected-venue"
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    display: 'inline',
+                    width: 'auto',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Venue
+                </label>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '18px auto',
+                  alignItems: 'center',
+                  columnGap: '10px',
+                }}
+              >
+                <input
+                  id="affected-equipment"
+                  type="checkbox"
+                  value="Equipment"
+                  checked={affectedArrangements.includes('Equipment')}
+                  onChange={changeAffectedArrangement}
+                  disabled={busy}
+                  style={{
+                    width: '16px',
+                    height: '16px',
+                    margin: 0,
+                  }}
+                />
+
+                <label
+                  htmlFor="affected-equipment"
+                  style={{
+                    margin: 0,
+                    padding: 0,
+                    display: 'inline',
+                    width: 'auto',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Equipment
+                </label>
+              </div>
+            </div>
+          </fieldset>
+        )}
+
+        {decision === 'Rejected' && (
+          <p className="message">
+            Reject when the organiser-provided safety information is
+            insufficient. Explain what needs to be improved in Equipment
+            Placement and/or Crowd Movement. Existing approved venue and
+            reserved equipment arrangements will remain unchanged.
+          </p>
+        )}
+
+        {decision === 'Changes Requested' && (
+          <p className="message">
+            Request Changes when the event needs to be revised before it can
+            pass the safety check. The event will return to Planning. Existing
+            approved venue and reserved equipment arrangements remain unchanged;
+            the organiser can submit an Event Change Request for the required
+            revisions.
+          </p>
+        )}
 
         <label>
           Comments
@@ -300,9 +536,11 @@ function SafetyDetail({
               setComments(eventObject.target.value)
             }
             placeholder={
-              commentsRequired
-                ? 'Explain the safety issue and required changes.'
-                : 'Optional comments'
+              decision === 'Rejected'
+                ? 'Explain what information needs to be improved in Equipment Placement and/or Crowd Movement.'
+                : decision === 'Changes Requested'
+                  ? 'Explain the safety issue and what the organiser should revise through an Event Change Request.'
+                  : 'Optional comments'
             }
             required={commentsRequired}
             disabled={busy}
@@ -317,7 +555,14 @@ function SafetyDetail({
                 ? 'btn-approve'
                 : 'btn-reject'
             }
-            disabled={busy || !decision}
+            disabled={
+              busy ||
+              !decision ||
+              (
+                decision === 'Changes Requested' &&
+                affectedArrangements.length === 0
+              )
+            }
           >
             {busy ? 'Submitting…' : 'Submit decision'}
           </button>

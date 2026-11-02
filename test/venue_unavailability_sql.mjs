@@ -24,6 +24,9 @@ create table "Equipment Request"(request_id bigint generated always as identity 
 create table "Equipment Request Item"(request_id bigint, equipment_id text, requested_quantity integer not null check(requested_quantity >= 0),
   technical_requirements text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
   updated_by uuid, primary key(request_id, equipment_id));
+create table "Equipment Reservation"(reservation_id bigint generated always as identity primary key,
+  event_id bigint not null, request_id bigint not null, status text not null default 'Reserved',
+  created_by uuid, created_at timestamptz default now(), updated_at timestamptz default now());
 create table event_change_requests(
   id bigint generated always as identity primary key,
   event_id bigint not null references public."Event Details"(id),
@@ -33,10 +36,12 @@ create table event_change_requests(
   created_at timestamptz not null default now()
 );
 `);
+
 const sql = async (name) => readFile(new URL(`../backend/sql/${name}`, import.meta.url), 'utf8');
 for (const name of ['sprint2_registration_notifications.sql', 'event_change_requests.sql', 'significant_event_changes.sql']) {
   await db.exec(await sql(name));
 }
+
 await db.exec(await sql('significant_event_changes.sql')); // rerunnable
 await db.exec(await sql('event_change_requests.sql')); // the review RPC keeps its link to the trigger
 

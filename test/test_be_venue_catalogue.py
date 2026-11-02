@@ -1,7 +1,5 @@
 """Unit tests for backend/venue_catalogue.py (venue catalogue read for staff, edit for venue staff)."""
 
-import copy
-
 import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -14,16 +12,22 @@ from auth import current_user
 from fake_supabase import FakeClient
 from tc import tc
 
-WEEK = {day: {"closed": False, "opens": "09:00", "closes": "18:00"} for day in vc.DAYS}
-
 
 def update(**kw):
-    base = dict(operating_hours=copy.deepcopy(WEEK), facilities=["Wi-Fi"], accessible=1, accessibility_details="Step-free", layouts=["Theatre"], setup_time=90, teardown_time=30)
+    base = dict(accessible=1, accessibility_details="Step-free", emergency_access="Emergency exit beside main entrance",
+                venue_restrictions="Keep emergency exits clear", setup_time=90, teardown_time=30)
     return vc.VenueUpdate(**{**base, **kw})
 
 
+def availability(**kw):
+    return vc.VenueAvailability(**{"is_available": True, **kw})
+
+
 def venue(i=1, **kw):
-    return {"venue_id": i, "name": f"Hall {i}", "location": "SG", "capacity": 100, **kw}
+    return {"venue_id": i, "name": f"Hall {i}", "location": "SG", "capacity": 100, "accessible": 1,
+            "accessibility_details": "Step-free", "emergency_access": "Emergency exit beside main entrance",
+            "venue_restrictions": "Keep emergency exits clear", "setup_time": 90, "teardown_time": 30,
+            "is_available": True, "unavailability_reason": "", **kw}
 
 
 def world(rows=None):
@@ -45,156 +49,140 @@ def api_error():
     return APIError({"code": "XX000", "message": "outage", "details": None, "hint": None})
 
 
-@tc("BE-VCAT-001", "require_reader", "Caller is Event Coordinator, Venue Staff or Technical Support Staff (odd casing/spacing).", "The user is returned.", data="\"event coordinator\", \"venue staff\", \"  Technical SUPPORT staff \"",
-    steps="1. Call require_reader for each role.")
+@tc("BE-VCAT-001", "require_reader", "Caller is Event Coordinator, Event Coordinator Lead, Venue Staff or Technical Support Staff (odd casing/spacing).", "The user is returned.",
+    data="event coordinator, event coordinator lead, venue staff, technical support staff", steps="1. Call require_reader for each role.")
 def test_reader_allowed():
-    assert vc.require_reader({"role": "event coordinator"}) and vc.require_reader({"role": "venue staff"}) and vc.require_reader({"role": "  Technical SUPPORT staff "})
+    for role in ("event coordinator", "event coordinator lead", "venue staff", "  Technical SUPPORT staff "):
+        assert vc.require_reader({"role": role})
 
 
-@tc("BE-VCAT-002", "require_reader", "Caller is an organiser or has no role.", "HTTP 403.", data="role = \"event organiser\"; {}",
-    steps="1. Call require_reader with an organiser. 2. Call it with no role.", kind="Security")
+@tc("BE-VCAT-002", "require_reader", "Caller is an organiser, attendee or has no role.", "HTTP 403 for each.",
+    data="event organiser, attendee, {}", steps="1. Call require_reader for each disallowed role.", kind="Security")
 def test_reader_denied():
-    assert err(vc.require_reader, {"role": "event organiser"})[0] == 403 and err(vc.require_reader, {})[0] == 403
+    for user in ({"role": "event organiser"}, {"role": "attendee"}, {}):
+        assert err(vc.require_reader, user)[0] == 403
 
 
-@tc("BE-VCAT-003", "Hours", "A closed day with no times.", "Accepted.", data="closed = True", steps="1. Instantiate Hours(closed=True).")
-def test_hours_closed_ok():
-    assert vc.Hours(closed=True).opens is None
-
-
-@tc("BE-VCAT-004", "Hours", "A closed day that still has times.", "Validation error \"Closed days cannot have operating times.\"", data="closed = True, opens 09:00", steps="1. Instantiate Hours(closed=True, opens=\"09:00\").", kind="Negative")
-def test_hours_closed_with_times():
-    with pytest.raises(ValidationError, match="Closed days cannot have operating times"):
-        vc.Hours(closed=True, opens="09:00")
-
-
-@tc("BE-VCAT-005", "Hours", "An open day with valid times.", "Accepted.", data="09:00-18:00", steps="1. Instantiate Hours(closed=False, opens=\"09:00\", closes=\"18:00\").")
-def test_hours_open_ok():
-    assert vc.Hours(closed=False, opens="09:00", closes="18:00").closes == "18:00"
-
-
-@tc("BE-VCAT-006", "Hours", "An open day is missing its closing time.", "Validation error \"Enter both times in HH:MM format.\"", data="closes = None", steps="1. Instantiate Hours(closed=False, opens=\"09:00\").", kind="Negative")
-def test_hours_missing_time():
-    with pytest.raises(ValidationError, match="HH:MM"):
-        vc.Hours(closed=False, opens="09:00")
-
-
-@tc("BE-VCAT-007", "Hours", "Times are not zero-padded HH:MM or are out of range.", "Validation error for each.", data="\"9:00\", \"24:00\", \"12:60\"", steps="1. Instantiate Hours with each bad opening time.", kind="Edge")
-def test_hours_bad_format():
-    for bad in ("9:00", "24:00", "12:60"):
-        with pytest.raises(ValidationError):
-            vc.Hours(closed=False, opens=bad, closes="23:59")
-
-
-@tc("BE-VCAT-008", "Hours", "Closing time equals or precedes opening time.", "Validation error \"Closing time must be later than opening time on the same day.\"", data="18:00-09:00 and 09:00-09:00", steps="1. Instantiate Hours with each range.", kind="Edge")
-def test_hours_close_before_open():
-    for opens, closes in (("18:00", "09:00"), ("09:00", "09:00")):
-        with pytest.raises(ValidationError, match="later than opening"):
-            vc.Hours(closed=False, opens=opens, closes=closes)
-
-
-@tc("BE-VCAT-009", "Hours", "Payload has an unknown field or a non-boolean \"closed\".", "Validation error (extra fields forbidden, strict types).", data="extra = 1; closed = \"yes\"", steps="1. Instantiate Hours with an extra field. 2. Instantiate with closed=\"yes\".", kind="Negative")
-def test_hours_strict():
-    with pytest.raises(ValidationError):
-        vc.Hours(closed=True, extra=1)
-    with pytest.raises(ValidationError):
-        vc.Hours(closed="yes")
-
-
-@tc("BE-VCAT-010", "VenueUpdate", "A complete valid update.", "Accepted and lists are kept.", steps="1. Instantiate VenueUpdate with all seven days.")
+@tc("BE-VCAT-003", "VenueUpdate", "A complete valid venue update is supplied.", "The update is accepted and all fields are retained.",
+    steps="1. Instantiate VenueUpdate with valid accessibility, safety and duration fields.")
 def test_update_ok():
-    assert update().layouts == ["Theatre"]
+    out = update()
+    assert out.accessible == 1
+    assert out.accessibility_details == "Step-free"
+    assert out.emergency_access == "Emergency exit beside main entrance"
+    assert out.venue_restrictions == "Keep emergency exits clear"
+    assert out.setup_time == 90
+    assert out.teardown_time == 30
 
 
-@tc("BE-VCAT-011", "VenueUpdate", "Only six days of operating hours are supplied.", "Validation error \"Specify all seven days.\"", data="sunday missing", steps="1. Remove sunday. 2. Instantiate VenueUpdate.", kind="Negative")
-def test_update_missing_day():
-    hours = copy.deepcopy(WEEK)
-    del hours["sunday"]
-    with pytest.raises(ValidationError, match="all seven days"):
-        update(operating_hours=hours)
-
-
-@tc("BE-VCAT-012", "VenueUpdate", "An unknown day name is supplied.", "Validation error.", data="\"funday\"", steps="1. Replace sunday with funday. 2. Instantiate VenueUpdate.", kind="Negative")
-def test_update_unknown_day():
-    hours = copy.deepcopy(WEEK)
-    hours["funday"] = hours.pop("sunday")
-    invalid(operating_hours=hours)
-
-
-@tc("BE-VCAT-013", "VenueUpdate", "Facilities contain padding and case-insensitive duplicates.", "Items are trimmed and de-duplicated, keeping the first spelling.", data="[\"  wi-fi \", \"Wi-Fi\", \"Projector\"]", steps="1. Instantiate VenueUpdate with those facilities.", kind="Edge")
-def test_update_dedupes():
-    assert update(facilities=["  wi-fi ", "Wi-Fi", "Projector"]).facilities == ["wi-fi", "Projector"]
-
-
-@tc("BE-VCAT-014", "VenueUpdate", "A list contains a blank item.", "Validation error \"Each item must be one line of 1–100 characters.\"", data="[\"Wi-Fi\", \"   \"]", steps="1. Instantiate VenueUpdate with a blank facility.", kind="Negative")
-def test_update_blank_item():
-    with pytest.raises(ValidationError, match="1–100 characters"):
-        update(facilities=["Wi-Fi", "   "])
-
-
-@tc("BE-VCAT-015", "VenueUpdate", "An item is 101 characters or contains a line break.", "Validation error.", data="\"x\"*101; \"a\\nb\"", steps="1. Instantiate VenueUpdate with each bad layout.", kind="Edge")
-def test_update_item_limits():
-    invalid(layouts=["x" * 101])
-    invalid(layouts=["a\nb"])
-    assert update(layouts=["x" * 100]).layouts == ["x" * 100]
-
-
-@tc("BE-VCAT-016", "VenueUpdate", "More than 30 facilities are supplied.", "Validation error (max 30 items).", data="31 facilities", steps="1. Instantiate VenueUpdate with 31 facilities.", kind="Edge")
-def test_update_too_many_items():
-    invalid(facilities=[f"f{i}" for i in range(31)])
-    assert len(update(facilities=[f"f{i}" for i in range(30)]).facilities) == 30
-
-
-@tc("BE-VCAT-017", "VenueUpdate", "\"accessible\" is not 0 or 1.", "Validation error.", data="accessible = 2", steps="1. Instantiate VenueUpdate with accessible=2.", kind="Negative")
+@tc("BE-VCAT-004", "VenueUpdate", "\"accessible\" is not 0 or 1.", "Validation error.",
+    data="accessible = 2", steps="1. Instantiate VenueUpdate with accessible=2.", kind="Negative")
 def test_update_accessible_values():
     invalid(accessible=2)
     assert update(accessible=0).accessible == 0
 
 
-@tc("BE-VCAT-033", "VenueUpdate", "Setup and teardown durations are whole non-negative minutes.", "Zero and positive whole minutes are accepted; missing values are allowed.", data="setup_time=0, teardown_time=45", steps="1. Instantiate VenueUpdate with valid durations. 2. Instantiate without duration fields.")
+@tc("BE-VCAT-005", "VenueUpdate", "Accessibility and safety text contains surrounding spaces.", "The text is trimmed.",
+    data="padded accessibility_details, emergency_access and venue_restrictions",
+    steps="1. Instantiate VenueUpdate with padded text. 2. Inspect the stored values.", kind="Edge")
+def test_update_text_trimmed():
+    out = update(accessibility_details="  ramp  ", emergency_access="  rear exit  ", venue_restrictions="  no open flames  ")
+    assert out.accessibility_details == "ramp"
+    assert out.emergency_access == "rear exit"
+    assert out.venue_restrictions == "no open flames"
+
+
+@tc("BE-VCAT-006", "VenueUpdate", "Accessibility or safety text exceeds 1000 characters.", "Validation error.",
+    data="1001 characters", steps="1. Instantiate VenueUpdate with each over-length field.", kind="Edge")
+def test_update_text_limits():
+    for field in ("accessibility_details", "emergency_access", "venue_restrictions"):
+        invalid(**{field: "x" * 1001})
+
+
+@tc("BE-VCAT-007", "VenueUpdate", "Setup and teardown durations are whole non-negative minutes.", "Zero and positive whole minutes are accepted; missing values are allowed.",
+    data="setup_time=0, teardown_time=45", steps="1. Instantiate VenueUpdate with valid durations. 2. Instantiate without duration fields.")
 def test_update_durations():
     assert update(setup_time=0, teardown_time=45).teardown_time == 45
     assert update(setup_time=None, teardown_time=None).setup_time is None
-    assert vc.VenueUpdate(**{key: value for key, value in update().model_dump().items() if key not in {"setup_time", "teardown_time"}}).setup_time is None
+    assert vc.VenueUpdate(accessible=1).setup_time is None
 
 
-@tc("BE-VCAT-034", "VenueUpdate", "A setup or teardown duration is negative, fractional, non-numeric or too large.", "Validation error for every invalid value.", data="-1, 2.5, \"45\", 2147483648", steps="1. Instantiate VenueUpdate with each invalid duration.", kind="Negative")
+@tc("BE-VCAT-008", "VenueUpdate", "A setup or teardown duration is negative, fractional, non-numeric or too large.", "Validation error for every invalid value.",
+    data="-1, 2.5, \"45\", 2147483648, True", steps="1. Instantiate VenueUpdate with each invalid duration.", kind="Negative")
 def test_update_invalid_durations():
     for bad in (-1, 2.5, "45", 2_147_483_648, True):
         with pytest.raises(ValidationError):
             update(setup_time=bad)
+        with pytest.raises(ValidationError):
+            update(teardown_time=bad)
 
 
-@tc("BE-VCAT-018", "VenueUpdate", "Accessibility details have padding, or exceed 1000 characters.", "Padding is trimmed; over-length is rejected.", data="\"  ramp  \"; 1001 chars", steps="1. Instantiate with padded text. 2. Instantiate with 1001 characters.", kind="Edge")
-def test_update_details():
-    assert update(accessibility_details="  ramp  ").accessibility_details == "ramp"
-    invalid(accessibility_details="x" * 1001)
-
-
-@tc("BE-VCAT-019", "VenueUpdate", "An unknown top-level field is sent.", "Validation error (extra fields forbidden).", data="capacity = 5", steps="1. Instantiate VenueUpdate with an extra field.", kind="Security")
+@tc("BE-VCAT-009", "VenueUpdate", "An unknown top-level field is sent.", "Validation error because extra fields are forbidden.",
+    data="capacity = 5", steps="1. Instantiate VenueUpdate with an extra field.", kind="Security")
 def test_update_extra_field():
     invalid(capacity=5)
 
 
-@tc("BE-VCAT-020", "unavailable", "The helper is asked for an error response.", "An HTTP 503 with a retry message is returned.", steps="1. Call unavailable(Exception()).", kind="Negative")
+@tc("BE-VCAT-010", "VenueAvailability", "Venue is marked available.", "The update is accepted and any supplied unavailability reason is cleared.",
+    data="is_available=True", steps="1. Instantiate VenueAvailability as available.")
+def test_availability_available():
+    out = availability(unavailability_reason="No longer relevant")
+    assert out.is_available is True
+    assert out.unavailability_reason == ""
+
+
+@tc("BE-VCAT-011", "VenueAvailability", "Venue is marked unavailable with a reason.", "The reason is trimmed and retained.",
+    data="is_available=False, reason=' Maintenance '", steps="1. Instantiate VenueAvailability as unavailable with a reason.")
+def test_availability_unavailable_with_reason():
+    out = availability(is_available=False, unavailability_reason="  Maintenance  ")
+    assert out.is_available is False
+    assert out.unavailability_reason == "Maintenance"
+
+
+@tc("BE-VCAT-012", "VenueAvailability", "Venue is marked unavailable without a reason.", "Validation error requiring an unavailability reason.",
+    data="is_available=False, reason blank", steps="1. Instantiate VenueAvailability without a reason.", kind="Negative")
+def test_availability_unavailable_requires_reason():
+    with pytest.raises(ValidationError, match="reason for venue unavailability"):
+        availability(is_available=False, unavailability_reason="   ")
+
+
+@tc("BE-VCAT-013", "VenueAvailability", "An unavailability reason exceeds 1000 characters.", "Validation error.",
+    data="1001 characters", steps="1. Instantiate VenueAvailability with an over-length reason.", kind="Edge")
+def test_availability_reason_limit():
+    with pytest.raises(ValidationError):
+        availability(is_available=False, unavailability_reason="x" * 1001)
+
+
+@tc("BE-VCAT-014", "VenueAvailability", "An unknown field is supplied.", "Validation error because extra fields are forbidden.",
+    data="status = Closed", steps="1. Instantiate VenueAvailability with an extra field.", kind="Security")
+def test_availability_extra_field():
+    with pytest.raises(ValidationError):
+        vc.VenueAvailability(is_available=True, status="Closed")
+
+
+@tc("BE-VCAT-015", "unavailable", "The helper is asked for an error response.", "An HTTP 503 with a retry message is returned.",
+    steps="1. Call unavailable(Exception()).", kind="Negative")
 def test_unavailable():
     error = vc.unavailable(Exception("x"))
     assert (error.status_code, "try again" in error.detail) == (503, True)
 
 
-@tc("BE-VCAT-021", "list_venues", "The catalogue is requested.", "All venues are returned ordered by name.", pre="Two venues stored out of order.", steps="1. Call list_venues().")
+@tc("BE-VCAT-016", "list_venues", "The catalogue is requested.", "All venues are returned ordered by name.",
+    pre="Two venues stored out of order.", steps="1. Call list_venues().")
 def test_list_venues(use_db):
     use_db(world([venue(1, name="Zeta"), venue(2, name="Alpha")]), vc)
     assert [v["name"] for v in vc.list_venues(user={})] == ["Alpha", "Zeta"]
 
 
-@tc("BE-VCAT-022", "list_venues", "There are no venues.", "Empty list.", steps="1. Call list_venues() on an empty table.", kind="Edge")
+@tc("BE-VCAT-017", "list_venues", "There are no venues.", "Empty list.",
+    steps="1. Call list_venues() on an empty table.", kind="Edge")
 def test_list_empty(use_db):
     use_db(world([]), vc)
     assert vc.list_venues(user={}) == []
 
 
-@tc("BE-VCAT-023", "list_venues", "The database fails with an API error or a network error.", "HTTP 503 for both.", pre="Venues table raises.", steps="1. Raise APIError. 2. Raise httpx.ConnectError.", kind="Negative")
+@tc("BE-VCAT-018", "list_venues", "The database fails with an API error or a network error.", "HTTP 503 for both.",
+    pre="Venues table raises.", steps="1. Raise APIError. 2. Raise httpx.ConnectError.", kind="Negative")
 def test_list_unavailable(use_db):
     client = use_db(world(), vc)
     client.fail_tables.add("Venues")
@@ -203,19 +191,22 @@ def test_list_unavailable(use_db):
         assert err(vc.list_venues, user={})[0] == 503
 
 
-@tc("BE-VCAT-024", "venue_detail", "An existing venue is requested.", "The venue row is returned.", steps="1. Call venue_detail(1).")
+@tc("BE-VCAT-019", "venue_detail", "An existing venue is requested.", "The venue row is returned.",
+    steps="1. Call venue_detail(1).")
 def test_detail_found(use_db):
     use_db(world(), vc)
     assert vc.venue_detail(1, user={})["name"] == "Hall 1"
 
 
-@tc("BE-VCAT-025", "venue_detail", "The venue does not exist.", "HTTP 404 \"Venue not found.\"", steps="1. Call venue_detail(99).", kind="Negative")
+@tc("BE-VCAT-020", "venue_detail", "The venue does not exist.", "HTTP 404 \"Venue not found.\"",
+    steps="1. Call venue_detail(99).", kind="Negative")
 def test_detail_missing(use_db):
     use_db(world(), vc)
     assert err(vc.venue_detail, 99, user={}) == (404, "Venue not found.")
 
 
-@tc("BE-VCAT-026", "venue_detail", "The database fails.", "HTTP 503.", steps="1. Make the Venues table raise APIError. 2. Call venue_detail(1).", kind="Negative")
+@tc("BE-VCAT-021", "venue_detail", "The database fails.", "HTTP 503.",
+    steps="1. Make the Venues table raise APIError. 2. Call venue_detail(1).", kind="Negative")
 def test_detail_unavailable(use_db):
     client = use_db(world(), vc)
     client.fail_tables.add("Venues")
@@ -223,28 +214,72 @@ def test_detail_unavailable(use_db):
     assert err(vc.venue_detail, 1, user={})[0] == 503
 
 
-@tc("BE-VCAT-027", "update_venue", "Venue staff saves valid changes.", "The venue row is updated with the new hours, lists and accessibility, and returned.", steps="1. Call update_venue(1, update, staff).")
+@tc("BE-VCAT-022", "update_venue", "Venue staff saves valid changes.", "The venue row is updated with accessibility, safety and duration fields and returned.",
+    steps="1. Call update_venue(1, update, staff).")
 def test_update_venue_ok(use_db):
     client = use_db(world(), vc)
-    out = vc.update_venue(1, update(facilities=["Stage"], accessible=0, setup_time=120, teardown_time=45), user={"role": "venue staff"})
-    assert out["facilities"] == ["Stage"] and out["accessible"] == 0 and out["operating_hours"]["monday"] == WEEK["monday"]
+    out = vc.update_venue(1, update(accessible=0, emergency_access="Rear exit", venue_restrictions="No open flames",
+                                   setup_time=120, teardown_time=45), user={"role": "venue staff"})
+    assert out["accessible"] == 0
+    assert out["emergency_access"] == "Rear exit"
+    assert out["venue_restrictions"] == "No open flames"
     assert out["setup_time"] == 120 and out["teardown_time"] == 45
-    assert client.tables["Venues"][1]["facilities"] == ["Stage"]
-    assert client.tables["Venues"][1]["setup_time"] == 120 and client.tables["Venues"][1]["teardown_time"] == 45
+    assert client.tables["Venues"][1]["accessible"] == 0
+    assert client.tables["Venues"][1]["emergency_access"] == "Rear exit"
 
 
-@tc("BE-VCAT-028", "update_venue", "The venue does not exist.", "HTTP 404 \"Venue not found. Changes were not saved.\"", steps="1. Call update_venue(99, update, staff).", kind="Negative")
+@tc("BE-VCAT-023", "update_venue", "The venue does not exist.", "HTTP 404 \"Venue not found. Changes were not saved.\"",
+    steps="1. Call update_venue(99, update, staff).", kind="Negative")
 def test_update_venue_missing(use_db):
     use_db(world(), vc)
     assert err(vc.update_venue, 99, update(), user={})[1] == "Venue not found. Changes were not saved."
 
 
-@tc("BE-VCAT-029", "update_venue", "The database fails while saving.", "HTTP 503.", steps="1. Make the update raise httpx.ReadTimeout.", kind="Negative")
+@tc("BE-VCAT-024", "update_venue", "The database fails while saving.", "HTTP 503.",
+    steps="1. Make the update raise httpx.ReadTimeout.", kind="Negative")
 def test_update_venue_unavailable(use_db):
     client = use_db(world(), vc)
     client.fail_tables.add(("Venues", "update"))
     client.fail_error = httpx.ReadTimeout("slow")
     assert err(vc.update_venue, 1, update(), user={})[0] == 503
+
+
+@tc("BE-VCAT-025", "update_availability", "Venue staff marks a venue unavailable with a reason.", "The availability fields are updated and returned.",
+    data="is_available=False, reason=Maintenance", steps="1. Call update_availability for venue 1.")
+def test_update_availability_ok(use_db):
+    client = use_db(world(), vc)
+    out = vc.update_availability(1, availability(is_available=False, unavailability_reason="Maintenance"),
+                                 user={"role": "venue staff"})
+    assert out["is_available"] is False
+    assert out["unavailability_reason"] == "Maintenance"
+    assert client.tables["Venues"][1]["is_available"] is False
+
+
+@tc("BE-VCAT-026", "update_availability", "Venue staff marks a venue available again.", "The unavailability reason is cleared.",
+    pre="Venue is currently unavailable.", steps="1. Mark venue 1 available.")
+def test_update_availability_clears_reason(use_db):
+    use_db(world([venue(1, is_available=False, unavailability_reason="Maintenance")]), vc)
+    out = vc.update_availability(1, availability(), user={"role": "venue staff"})
+    assert out["is_available"] is True
+    assert out["unavailability_reason"] == ""
+
+
+@tc("BE-VCAT-027", "update_availability", "The venue does not exist.", "HTTP 404 \"Venue not found. Changes were not saved.\"",
+    steps="1. Update availability for venue 99.", kind="Negative")
+def test_update_availability_missing(use_db):
+    use_db(world(), vc)
+    assert err(vc.update_availability, 99, availability(is_available=False, unavailability_reason="Maintenance"),
+               user={}) == (404, "Venue not found. Changes were not saved.")
+
+
+@tc("BE-VCAT-028", "update_availability", "The database fails while saving availability.", "HTTP 503.",
+    steps="1. Make the Venues update raise an API error.", kind="Negative")
+def test_update_availability_unavailable(use_db):
+    client = use_db(world(), vc)
+    client.fail_tables.add(("Venues", "update"))
+    client.fail_error = api_error()
+    assert err(vc.update_availability, 1, availability(is_available=False, unavailability_reason="Maintenance"),
+               user={})[0] == 503
 
 
 def http(role, monkeypatch, client=None):
@@ -255,33 +290,98 @@ def http(role, monkeypatch, client=None):
     return TestClient(app)
 
 
-BODY = {"operating_hours": WEEK, "facilities": ["Wi-Fi"], "accessible": 1, "accessibility_details": "", "layouts": [], "setup_time": 60, "teardown_time": 30}
+UPDATE_BODY = {
+    "accessible": 1,
+    "accessibility_details": "Step-free",
+    "emergency_access": "Emergency exit beside main entrance",
+    "venue_restrictions": "Keep emergency exits clear",
+    "setup_time": 60,
+    "teardown_time": 30,
+}
+
+AVAILABILITY_BODY = {
+    "is_available": False,
+    "unavailability_reason": "Maintenance",
+}
 
 
-@tc("BE-VCAT-030", "PUT /api/venue-catalogue/{id}", "A Technical Support user tries to edit a venue.", "HTTP 403 (read-only role) and nothing is saved.", pre="Caller role = technical support staff.", steps="1. PUT a valid body as technical support.", kind="Security")
-def test_http_put_forbidden_for_technical_support(monkeypatch):
-    client = world()
-    assert http("technical support staff", monkeypatch, client).put("/api/venue-catalogue/1", json=BODY).status_code == 403
-    assert not client.writes("Venues", "update")
-
-
-@tc("BE-VCAT-031", "GET /api/venue-catalogue", "Technical support and coordinators request the catalogue over HTTP.", "Both roles get 200.", steps="1. GET as technical support. 2. GET as event coordinator.", kind="Security")
+@tc("BE-VCAT-029", "GET /api/venue-catalogue", "Technical Support, Event Coordinator and Event Coordinator Lead request the catalogue over HTTP.", "All three roles get 200.",
+    steps="1. GET as Technical Support. 2. GET as Event Coordinator. 3. GET as Event Coordinator Lead.", kind="Security")
 def test_http_get_roles(monkeypatch):
     assert http("technical support staff", monkeypatch).get("/api/venue-catalogue").status_code == 200
     assert http("event coordinator", monkeypatch).get("/api/venue-catalogue").status_code == 200
+    assert http("event coordinator lead", monkeypatch).get("/api/venue-catalogue").status_code == 200
 
 
-@tc("BE-VCAT-032", "PUT /api/venue-catalogue/{id}", "Venue staff sends an invalid body over HTTP (a day missing).", "HTTP 422 and nothing is saved.", data="monday..saturday only", steps="1. PUT a body with six days as venue staff.", kind="Negative")
+@tc("BE-VCAT-030", "GET /api/venue-catalogue", "Event Organiser and Attendee request the catalogue over HTTP.", "Both roles get HTTP 403.",
+    steps="1. GET as Event Organiser. 2. GET as Attendee.", kind="Security")
+def test_http_get_forbidden_roles(monkeypatch):
+    assert http("event organiser", monkeypatch).get("/api/venue-catalogue").status_code == 403
+    assert http("attendee", monkeypatch).get("/api/venue-catalogue").status_code == 403
+
+
+@tc("BE-VCAT-031", "PUT /api/venue-catalogue/{id}", "A Technical Support user tries to edit a venue.", "HTTP 403 and nothing is saved.",
+    pre="Caller role = technical support staff.", steps="1. PUT a valid body as Technical Support.", kind="Security")
+def test_http_put_forbidden_for_technical_support(monkeypatch):
+    client = world()
+    assert http("technical support staff", monkeypatch, client).put("/api/venue-catalogue/1", json=UPDATE_BODY).status_code == 403
+    assert not client.writes("Venues", "update")
+
+
+@tc("BE-VCAT-032", "PUT /api/venue-catalogue/{id}", "Venue staff sends an invalid body over HTTP.", "HTTP 422 and nothing is saved.",
+    data="accessible = 2", steps="1. PUT an invalid accessibility value as Venue Staff.", kind="Negative")
 def test_http_put_validation(monkeypatch):
     client = world()
-    bad = {**BODY, "operating_hours": {d: WEEK[d] for d in vc.DAYS[:-1]}}
+    bad = {**UPDATE_BODY, "accessible": 2}
     assert http("venue staff", monkeypatch, client).put("/api/venue-catalogue/1", json=bad).status_code == 422
     assert not client.writes("Venues", "update")
 
 
-@tc("BE-VCAT-035", "PUT /api/venue-catalogue/{id}", "Venue staff sends a fractional setup duration.", "HTTP 422 and nothing is saved.", data="setup_time = 2.5", steps="1. PUT a valid body with setup_time 2.5 as venue staff.", kind="Negative")
+@tc("BE-VCAT-033", "PUT /api/venue-catalogue/{id}", "Venue staff sends a fractional setup duration.", "HTTP 422 and nothing is saved.",
+    data="setup_time = 2.5", steps="1. PUT a valid body with setup_time 2.5 as Venue Staff.", kind="Negative")
 def test_http_put_rejects_fractional_duration(monkeypatch):
     client = world()
-    bad = {**BODY, "setup_time": 2.5}
+    bad = {**UPDATE_BODY, "setup_time": 2.5}
     assert http("venue staff", monkeypatch, client).put("/api/venue-catalogue/1", json=bad).status_code == 422
     assert not client.writes("Venues", "update")
+
+
+@tc("BE-VCAT-034", "PATCH /api/venue-catalogue/{id}/availability", "Venue Staff marks a venue unavailable over HTTP.", "HTTP 200 and the venue is updated.",
+    steps="1. PATCH venue 1 availability as Venue Staff.")
+def test_http_patch_availability(monkeypatch):
+    client = world()
+    response = http("venue staff", monkeypatch, client).patch("/api/venue-catalogue/1/availability", json=AVAILABILITY_BODY)
+    assert response.status_code == 200
+    assert response.json()["is_available"] is False
+    assert response.json()["unavailability_reason"] == "Maintenance"
+
+
+@tc("BE-VCAT-035", "PATCH /api/venue-catalogue/{id}/availability", "Technical Support tries to change venue availability.", "HTTP 403 and nothing is saved.",
+    steps="1. PATCH venue 1 availability as Technical Support.", kind="Security")
+def test_http_patch_forbidden_for_technical_support(monkeypatch):
+    client = world()
+    assert http("technical support staff", monkeypatch, client).patch("/api/venue-catalogue/1/availability", json=AVAILABILITY_BODY).status_code == 403
+    assert not client.writes("Venues", "update")
+
+
+@tc("BE-VCAT-036", "PATCH /api/venue-catalogue/{id}/availability", "Venue Staff marks a venue unavailable without a reason.", "HTTP 422 and nothing is saved.",
+    data="is_available=False, reason blank", steps="1. PATCH an invalid availability body.", kind="Negative")
+def test_http_patch_requires_reason(monkeypatch):
+    client = world()
+    bad = {"is_available": False, "unavailability_reason": "   "}
+    assert http("venue staff", monkeypatch, client).patch("/api/venue-catalogue/1/availability", json=bad).status_code == 422
+    assert not client.writes("Venues", "update")
+
+
+@tc("BE-VCAT-037", "HTTP authentication", "An anonymous user accesses venue catalogue endpoints.", "Authentication rejects the requests.",
+    steps="1. GET catalogue. 2. GET venue detail. 3. PUT venue update. 4. PATCH venue availability.", kind="Security")
+def test_anonymous_requests_rejected(monkeypatch):
+    app = FastAPI()
+    app.include_router(vc.router)
+    monkeypatch.setattr(vc, "db", lambda: world())
+    client = TestClient(app)
+
+    assert client.get("/api/venue-catalogue").status_code == 401
+    assert client.get("/api/venue-catalogue/1").status_code == 401
+    assert client.put("/api/venue-catalogue/1", json=UPDATE_BODY).status_code == 401
+    assert client.patch("/api/venue-catalogue/1/availability", json=AVAILABILITY_BODY).status_code == 401

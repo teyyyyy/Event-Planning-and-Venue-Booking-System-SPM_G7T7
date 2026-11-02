@@ -12,6 +12,44 @@ function formatDateTime(value) {
   });
 }
 
+function formatEventDate(value) {
+  if (!value) return '—';
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-SG', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatEventTime(value) {
+  if (!value) return '—';
+  const [hour, minute] = value.split(':').map(Number);
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date.toLocaleTimeString('en-SG', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatEventPeriod(event) {
+  if (!event?.event_date) return '—';
+
+  const startDate = formatEventDate(event.event_date);
+  const endDate = formatEventDate(event.event_end_date || event.event_date);
+  const startTime = formatEventTime(event.start_time);
+  const endTime = formatEventTime(event.end_time);
+
+  if (!event.event_end_date || event.event_end_date === event.event_date) {
+    return `${startDate}, ${startTime} – ${endTime}`;
+  }
+
+  return `${startDate}, ${startTime} – ${endDate}, ${endTime}`;
+}
+
 function deepCopy(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -23,22 +61,10 @@ function makeEditableRequests(requests) {
     items: (request.items || []).map((item) => ({
       ...item,
       requested_quantity: String(item.requested_quantity),
-      _isNew: false,
       _originalEquipmentId: item.equipment_id,
       _localId: `existing-${request.request_id}-${item.equipment_id}`,
     })),
   }));
-}
-
-function newEquipmentItem() {
-  return {
-    equipment_id: '',
-    requested_quantity: '',
-    technical_requirements: '',
-    _isNew: true,
-    _originalEquipmentId: null,
-    _localId: `new-${Date.now()}-${Math.random()}`,
-  };
 }
 
 export default function EquipmentUpdate({ user }) {
@@ -108,11 +134,6 @@ export default function EquipmentUpdate({ user }) {
   }
 
   function buildItemChanges(requestId, item) {
-    if (item._isNew) {
-      if (!item.equipment_id) return ['New equipment item added'];
-      return [`Added ${equipmentName(item.equipment_id)}${item.requested_quantity !== '' ? ` × ${item.requested_quantity}` : ''}`];
-    }
-
     const original = findOriginalItem(requestId, item._originalEquipmentId);
     if (!original) return [];
 
@@ -155,48 +176,13 @@ export default function EquipmentUpdate({ user }) {
     );
   }
 
-  function addEquipment(requestId) {
-    setRequests((currentRequests) =>
-      currentRequests.map((request) => {
-        if (request.request_id !== requestId) return request;
-        return { ...request, items: [...request.items, newEquipmentItem()] };
-      }),
-    );
-  }
-
-  function removeNewEquipment(requestId, localId) {
-    setRequests((currentRequests) =>
-      currentRequests.map((request) => {
-        if (request.request_id !== requestId) return request;
-        return { ...request, items: request.items.filter((item) => item._localId !== localId) };
-      }),
-    );
-  }
 
   function validateChanges() {
     const changedRequests = requests.filter((request) => requestHasChanges(request));
     if (changedRequests.length === 0) return { valid: false, message: 'There are no changes to confirm.' };
 
     for (const request of changedRequests) {
-      const equipmentIds = [];
-
       for (const item of request.items) {
-        if (!item.equipment_id) {
-          return {
-            valid: false,
-            message: `Request #${request.request_id} contains an equipment row without an equipment type.`,
-          };
-        }
-
-        if (equipmentIds.includes(item.equipment_id)) {
-          return {
-            valid: false,
-            message: `Request #${request.request_id} contains ${equipmentName(item.equipment_id)} more than once.`,
-          };
-        }
-
-        equipmentIds.push(item.equipment_id);
-
         if (item.requested_quantity === '') {
           return {
             valid: false,
@@ -210,9 +196,6 @@ export default function EquipmentUpdate({ user }) {
           return { valid: false, message: 'Quantity must be a whole number of 0 or more.' };
         }
 
-        if (item._isNew && quantity === 0) {
-          return { valid: false, message: 'New equipment must have a quantity greater than 0.' };
-        }
       }
     }
 
@@ -305,7 +288,7 @@ export default function EquipmentUpdate({ user }) {
                 <thead>
                   <tr>
                     <th>Event</th>
-                    <th>Event Date</th>
+                    <th>Event Period</th>
                     <th>Requests</th>
                     <th>Combined Equipment</th>
                     <th>Status</th>
@@ -316,7 +299,7 @@ export default function EquipmentUpdate({ user }) {
                   {summaries.map((summary) => (
                     <tr key={summary.event_id}>
                       <td><strong>{summary.event_name}</strong></td>
-                      <td>{summary.event_date}</td>
+                      <td>{formatEventPeriod(summary)}</td>
                       <td>{summary.request_count}</td>
                       <td>{summary.equipment_description}</td>
                       <td>
@@ -363,7 +346,7 @@ export default function EquipmentUpdate({ user }) {
         </button>
 
         <div className="technical-event-date">
-          Event date: <strong>{selectedEvent?.event_date}</strong>
+          Event period: <strong>{formatEventPeriod(selectedEvent)}</strong>
         </div>
       </div>
 
@@ -396,61 +379,21 @@ export default function EquipmentUpdate({ user }) {
                 <div className="equipment-update-item-heading">
                   <h3>
                     Equipment {index + 1}
-                    {item._isNew && <span className="new-equipment-badge">New</span>}
                   </h3>
-
-                  {item._isNew && (
-                    <button
-                      type="button"
-                      className="remove-equipment"
-                      onClick={() => removeNewEquipment(request.request_id, item._localId)}
-                    >
-                      Remove
-                    </button>
-                  )}
                 </div>
 
                 <div className="form-grid">
                   <label>
                     Equipment
 
-                    {item._isNew ? (
-                      <select
-                        value={item.equipment_id}
-                        onChange={(event) =>
-                          changeItem(request.request_id, item._localId, 'equipment_id', event.target.value)
-                        }
-                      >
-                        <option value="">Select equipment</option>
-
-                        {equipmentCatalogue.map((equipment) => {
-                          const alreadyUsed = request.items.some(
-                            (requestItem) =>
-                              requestItem._localId !== item._localId &&
-                              requestItem.equipment_id === equipment.equipment_id,
-                          );
-
-                          return (
-                            <option
-                              key={equipment.equipment_id}
-                              value={equipment.equipment_id}
-                              disabled={alreadyUsed}
-                            >
-                              {equipment.equipment_name}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    ) : (
-                      <input type="text" value={equipmentName(item.equipment_id)} readOnly />
-                    )}
+                    <input type="text" value={equipmentName(item.equipment_id)} readOnly />
                   </label>
 
                   <label>
                     Final quantity
                     <input
                       type="number"
-                      min={item._isNew ? '1' : '0'}
+                      min="0"
                       step="1"
                       inputMode="numeric"
                       value={item.requested_quantity}
@@ -459,9 +402,7 @@ export default function EquipmentUpdate({ user }) {
                       }
                     />
                     <span className="availability-hint">
-                      {item._isNew
-                        ? 'Enter the quantity required.'
-                        : 'Set quantity to 0 to cancel it. It will be removed after confirmation.'}
+                      Set quantity to 0 to cancel it. It will be removed after confirmation.
                     </span>
                   </label>
 
@@ -493,12 +434,6 @@ export default function EquipmentUpdate({ user }) {
               </div>
             );
           })}
-
-          <div className="equipment-update-add-row">
-            <button type="button" className="secondary" onClick={() => addEquipment(request.request_id)}>
-              + Add equipment
-            </button>
-          </div>
 
           {request.updated_by && (
             <div className="equipment-update-last-updated">

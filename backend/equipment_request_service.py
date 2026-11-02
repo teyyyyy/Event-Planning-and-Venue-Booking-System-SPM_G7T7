@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from supabase import Client
 from postgrest.exceptions import APIError
 from datetime import datetime, timezone
+import json
 
 from availability_service import AvailabilityService
 from equipment_constants import (
@@ -10,6 +11,7 @@ from equipment_constants import (
     REQUEST_TABLE,
     REQUEST_ITEM_TABLE,
     RESERVATION_TABLE,
+    RESERVATION_ITEM_TABLE,
     USER_TABLE,
 )
 
@@ -19,6 +21,52 @@ class EquipmentRequestService:
 
     def __init__(self, client: Client):
         self.client = client
+
+    @staticmethod
+    def parse_equipment_required(value):
+        """Normalise Event Details.equipment_required into a list of names."""
+        if not value:
+            return []
+
+        if isinstance(value, (list, tuple, set)):
+            return [
+                str(item).strip()
+                for item in value
+                if str(item).strip()
+            ]
+
+        if isinstance(value, str):
+            value = value.strip()
+
+            if not value:
+                return []
+
+            # JSON array format, e.g.
+            # ["Laptop", "Video camera", "Extension cord"]
+            try:
+                parsed = json.loads(value)
+
+                if isinstance(parsed, list):
+                    return [
+                        str(item).strip()
+                        for item in parsed
+                        if str(item).strip()
+                    ]
+            except json.JSONDecodeError:
+                pass
+
+            # PostgreSQL array format, e.g.
+            # {Laptop,"Video camera","Extension cord"}
+            if value.startswith("{") and value.endswith("}"):
+                value = value[1:-1]
+
+            return [
+                item.strip().strip('"').strip("'")
+                for item in value.split(",")
+                if item.strip().strip('"').strip("'")
+            ]
+
+        return [str(value).strip()]
 
     def get_coordinator_event(
         self,
@@ -50,6 +98,7 @@ class EquipmentRequestService:
     def validate_request_items(
         request_items,
         availability_rows,
+        event=None,
     ):
         if not request_items:
             raise HTTPException(
@@ -81,6 +130,69 @@ class EquipmentRequestService:
             for row in availability_rows
         }
 
+        equipment_required = (
+            EquipmentRequestService.parse_equipment_required(
+                event.get("equipment_required")
+            )
+            if event
+            else []
+        )
+
+        organiser_equipment = {
+            str(item).strip().lower()
+            for item in equipment_required
+        }
+
+        invalid_equipment = []
+
+        requested_equipment = set()
+
+        for item in request_items:
+            equipment_id = item.equipment_id
+
+            if equipment_id in availability_map:
+                equipment_name = (
+                    availability_map[equipment_id].get("equipment_name")
+                    or equipment_id
+                )
+
+                normalised_name = equipment_name.strip().lower()
+                requested_equipment.add(normalised_name)
+
+                if (
+                    event is not None
+                    and normalised_name not in organiser_equipment
+                ):
+                    invalid_equipment.append(equipment_name)
+
+        missing_equipment = [
+            equipment_name
+            for equipment_name in equipment_required
+            if str(equipment_name).strip().lower() not in requested_equipment
+        ]
+
+        if invalid_equipment or missing_equipment:
+            messages = []
+
+            if invalid_equipment:
+                messages.append(
+                    f"{', '.join(invalid_equipment)} were not included in the "
+                    "Event Organiser's equipment requirements. Remove these "
+                    "equipment rows."
+                )
+
+            if missing_equipment:
+                messages.append(
+                    f"{', '.join(missing_equipment)} were required by the "
+                    "Event Organiser but are missing from the equipment request. "
+                    "Add these equipment rows."
+                )
+
+            raise HTTPException(
+                status_code=400,
+                detail=" ".join(messages),
+            )
+
         for item in request_items:
             equipment_id = item.equipment_id.strip()
 
@@ -91,6 +203,8 @@ class EquipmentRequestService:
                 )
 
             equipment = availability_map[equipment_id]
+            equipment_name = equipment.get("equipment_name") or equipment_id
+
             available_quantity = int(
                 equipment.get("available_quantity") or 0
             )
@@ -113,19 +227,27 @@ class EquipmentRequestService:
             request.event_id,
         )
 
+        if event.get("status") != "Planning":
+            raise HTTPException(
+                status_code=409,
+                detail="Equipment requests can only be submitted for events in Planning status.",
+            )
+
         existing = (
             self.client.table(REQUEST_TABLE)
-            .select("request_id")
+            .select("request_id,status")
             .eq("event_id", request.event_id)
             .execute()
             .data or []
         )
 
+        existing = self.live_requests(existing)
+
         if existing:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "An equipment request has already been submitted "
+                    "An active equipment request already exists "
                     "for this event. Edit the existing request instead."
                 ),
             )
@@ -139,6 +261,7 @@ class EquipmentRequestService:
         self.validate_request_items(
             request.items,
             availability_rows,
+            event,
         )
 
         items = [
@@ -190,13 +313,19 @@ class EquipmentRequestService:
 
     @staticmethod
     def live_requests(headers: list) -> list:
-        """Drop requests replaced after an approved event change."""
+        """Return only current active equipment requests."""
+        inactive_statuses = {
+            "superseded",
+            "cancelled",
+            "rejected",
+        }
+
         return [
             header
             for header in headers
             if str(
                 header.get("status") or ""
-            ).strip().lower() != "superseded"
+            ).strip().lower() not in inactive_statuses
         ]
 
     @staticmethod
@@ -287,6 +416,7 @@ class EquipmentRequestService:
         self.validate_request_items(
             payload.items,
             availability_rows,
+            event,
         )
 
         existing_items = (
@@ -321,12 +451,12 @@ class EquipmentRequestService:
 
         now = datetime.now(timezone.utc).isoformat()
 
-        request_items_changed = (
+        reservation_recheck_required = (
             existing_equipment_ids
             != submitted_equipment_ids
         )
 
-        if not request_items_changed:
+        if not reservation_recheck_required:
             for item in payload.items:
                 equipment_id = item.equipment_id.strip()
                 existing = existing_map[equipment_id]
@@ -334,12 +464,8 @@ class EquipmentRequestService:
                 if (
                     existing["requested_quantity"]
                     != item.requested_quantity
-                    or existing["technical_requirements"]
-                    != (
-                        item.technical_requirements or ""
-                    ).strip()
                 ):
-                    request_items_changed = True
+                    reservation_recheck_required = True
                     break
 
         removed_equipment_ids = (
@@ -396,7 +522,7 @@ class EquipmentRequestService:
             .execute()
         )
 
-        if request_items_changed:
+        if reservation_recheck_required:
             self.mark_reservation_for_recheck(
                 request_id,
                 now,
@@ -406,7 +532,7 @@ class EquipmentRequestService:
             "message": "Equipment request updated successfully.",
             "request_id": request_id,
             "event_id": header["event_id"],
-            "reservation_recheck_required": request_items_changed,
+            "reservation_recheck_required": reservation_recheck_required,
         }
 
     def get_requests(self, coordinator_id: str):
@@ -435,7 +561,7 @@ class EquipmentRequestService:
         event_rows = (
             self.client.table(EVENT_TABLE)
             .select(
-                "id,event_name,event_date,start_time,end_time"
+                "id,event_name,event_date,event_end_date,start_time,end_time"
             )
             .in_("id", event_ids)
             .execute()
@@ -567,6 +693,10 @@ class EquipmentRequestService:
                     "event_date",
                     "",
                 ),
+                "event_end_date": event.get(
+                    "event_end_date",
+                    "",
+                ),
                 "start_time": event.get("start_time"),
                 "end_time": event.get("end_time"),
                 "status": header.get(
@@ -601,6 +731,7 @@ class EquipmentRequestService:
             self.client.table(EVENT_TABLE)
             .select("*")
             .eq("coordinator_id", coordinator_id)
+            .eq("status", "Planning")
             .order("event_date")
             .execute()
             .data or []
@@ -616,10 +747,14 @@ class EquipmentRequestService:
 
         existing_requests = (
             self.client.table(REQUEST_TABLE)
-            .select("event_id")
+            .select("event_id,status")
             .in_("event_id", event_ids)
             .execute()
             .data or []
+        )
+
+        existing_requests = self.live_requests(
+            existing_requests
         )
 
         requested_event_ids = {
@@ -770,7 +905,7 @@ class EquipmentRequestService:
         event_rows = (
             self.client.table(EVENT_TABLE)
             .select(
-                "id,event_name,event_date,"
+                "id,event_name,event_date,event_end_date,"
                 "start_time,end_time"
             )
             .in_("id", event_ids)
@@ -863,6 +998,7 @@ class EquipmentRequestService:
                 ),
                 "event_date": event.get("event_date"),
                 "start_time": event.get("start_time"),
+                "event_end_date": event.get("event_end_date"),
                 "end_time": event.get("end_time"),
                 "request_id": header["request_id"],
                 "request_count": 1,
@@ -1018,8 +1154,17 @@ class EquipmentRequestService:
 
             updated_by = header.get("updated_by")
 
+            availability_service = AvailabilityService(self.client)
+            request_availability = (
+                availability_service.calculate_request_edit_availability(
+                    event,
+                    header["request_id"],
+                )
+            )
+
             response_requests.append({
                 "request_id": header["request_id"],
+                "availability": request_availability,
                 "status": header.get(
                     "status",
                     "Submitted",
@@ -1059,6 +1204,15 @@ class EquipmentRequestService:
     ):
         staff = self.require_technical_support(staff_id)
         event = self.get_event(event_id)
+
+        equipment_required = self.parse_equipment_required(
+            event.get("equipment_required")
+        )
+
+        organiser_equipment = {
+            str(item).strip().lower()
+            for item in equipment_required
+        }
 
         if not payload.requests:
             raise HTTPException(
@@ -1164,21 +1318,68 @@ class EquipmentRequestService:
                 submitted_equipment_ids
             )
 
-            # Existing rows must still be included in the
-            # TSS payload. Quantity 0 is the explicit
-            # cancellation mechanism.
-            missing_existing = (
-                existing_equipment_ids
-                - submitted_equipment_set
-            )
+            invalid_equipment = []
+            final_requested_equipment = set()
 
-            if missing_existing:
+            for item in request_update.items:
+                equipment_id = item.equipment_id.strip()
+                equipment_info = availability_map.get(equipment_id)
+
+                if not equipment_info:
+                    continue
+
+                equipment_name = (
+                    equipment_info.get("equipment_name")
+                    or equipment_id
+                )
+                normalised_name = equipment_name.strip().lower()
+
+                if item.requested_quantity > 0:
+                    final_requested_equipment.add(normalised_name)
+
+                    if normalised_name not in organiser_equipment:
+                        invalid_equipment.append(equipment_name)
+
+            missing_equipment = [
+                equipment_name
+                for equipment_name in equipment_required
+                if str(equipment_name).strip().lower()
+                not in final_requested_equipment
+            ]
+
+            if invalid_equipment or missing_equipment:
+                messages = []
+
+                if invalid_equipment:
+                    messages.append(
+                        f"{', '.join(invalid_equipment)} were not included in the "
+                        "Event Organiser's equipment requirements. Remove these "
+                        "equipment rows."
+                    )
+
+                if missing_equipment:
+                    messages.append(
+                        f"{', '.join(missing_equipment)} were required by the "
+                        "Event Organiser but are missing from the final equipment "
+                        "request. Add these equipment rows with a quantity greater "
+                        "than 0."
+                    )
+
+                raise HTTPException(
+                    status_code=400,
+                    detail=" ".join(messages),
+                )
+
+            # Technical Support may change quantity and
+            # technical requirements, but may not add or remove
+            # equipment types from the Coordinator's request.
+            if submitted_equipment_set != existing_equipment_ids:
                 raise HTTPException(
                     status_code=400,
                     detail=(
-                        "Existing equipment cannot be removed "
-                        "from a Technical Support update. Set "
-                        "its quantity to 0 to cancel it."
+                        "Technical Support cannot add or remove "
+                        "equipment types. Only the quantity and "
+                        "technical requirements may be changed."
                     ),
                 )
 
@@ -1198,42 +1399,33 @@ class EquipmentRequestService:
                         ),
                     )
 
-                is_new = (
-                    equipment_id
-                    not in existing_equipment_ids
+                if item.requested_quantity < 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Equipment quantity must be a whole "
+                            "number greater than 0."
+                        ),
+                    )
+
+                available = int(
+                    equipment_info[
+                        "available_quantity"
+                    ]
                 )
 
                 if (
-                    is_new
-                    and item.requested_quantity == 0
+                    item.requested_quantity
+                    > available
                 ):
                     raise HTTPException(
                         status_code=400,
                         detail=(
-                            "New equipment must have "
-                            "a quantity greater than 0."
+                            f"{equipment_info['equipment_name']} "
+                            f"has only {available} available "
+                            "for this event."
                         ),
                     )
-
-                if item.requested_quantity > 0:
-                    available = int(
-                        equipment_info[
-                            "available_quantity"
-                        ]
-                    )
-
-                    if (
-                        item.requested_quantity
-                        > available
-                    ):
-                        raise HTTPException(
-                            status_code=400,
-                            detail=(
-                                f"{equipment_info['equipment_name']} "
-                                f"has only {available} available "
-                                "for this event."
-                            ),
-                        )
 
             validated_requests.append({
                 "update": request_update,
@@ -1266,6 +1458,7 @@ class EquipmentRequestService:
             ]
 
             latest_changes = []
+            quantity_changed_any = False
 
             for item in request_update.items:
                 equipment_id = item.equipment_id.strip()
@@ -1290,125 +1483,65 @@ class EquipmentRequestService:
                     or equipment_id
                 )
 
-                # Existing request item.
-                if equipment_id in existing_equipment_ids:
-                    old_item = existing_item_map[
-                        equipment_id
-                    ]
+                old_item = existing_item_map[
+                    equipment_id
+                ]
 
-                    old_quantity = int(
-                        old_item.get("requested_quantity")
-                        or 0
+                old_quantity = int(
+                    old_item.get("requested_quantity")
+                    or 0
+                )
+
+                old_requirements = (
+                    old_item.get(
+                        "technical_requirements"
                     )
+                    or ""
+                ).strip()
 
-                    old_requirements = (
-                        old_item.get(
-                            "technical_requirements"
-                        )
-                        or ""
-                    ).strip()
+                quantity_changed = (
+                    old_quantity != new_quantity
+                )
 
-                    # Quantity 0 means cancellation.
-                    if new_quantity == 0:
-                        latest_changes.append(
-                            f"{equipment_name}: "
-                            f"{old_quantity} → 0 (Cancelled)"
-                        )
+                requirements_changed = (
+                    old_requirements
+                    != new_requirements
+                )
 
-                        (
-                            self.client
-                            .table(REQUEST_ITEM_TABLE)
-                            .delete()
-                            .eq(
-                                "request_id",
-                                request_update.request_id,
-                            )
-                            .eq(
-                                "equipment_id",
-                                equipment_id,
-                            )
-                            .execute()
-                        )
-
-                        continue
-
-                    quantity_changed = (
-                        old_quantity != new_quantity
-                    )
-
-                    requirements_changed = (
-                        old_requirements
-                        != new_requirements
-                    )
-
-                    if quantity_changed:
-                        latest_changes.append(
-                            f"{equipment_name} quantity: "
-                            f"{old_quantity} → {new_quantity}"
-                        )
-
-                    if requirements_changed:
-                        old_display = (
-                            old_requirements
-                            if old_requirements
-                            else "None"
-                        )
-
-                        new_display = (
-                            new_requirements
-                            if new_requirements
-                            else "None"
-                        )
-
-                        latest_changes.append(
-                            f'{equipment_name} requirements: '
-                            f'"{old_display}" → '
-                            f'"{new_display}"'
-                        )
-
-                    if (
-                        quantity_changed
-                        or requirements_changed
-                    ):
-                        (
-                            self.client
-                            .table(REQUEST_ITEM_TABLE)
-                            .update({
-                                "requested_quantity": (
-                                    new_quantity
-                                ),
-                                "technical_requirements": (
-                                    new_requirements
-                                ),
-                                "updated_by": staff_id,
-                                "updated_at": now,
-                            })
-                            .eq(
-                                "request_id",
-                                request_update.request_id,
-                            )
-                            .eq(
-                                "equipment_id",
-                                equipment_id,
-                            )
-                            .execute()
-                        )
-
-                # New equipment added by TSS.
-                else:
+                if quantity_changed:
+                    quantity_changed_any = True
                     latest_changes.append(
-                        f"{equipment_name}: "
-                        f"Added × {new_quantity}"
+                        f"{equipment_name} quantity: "
+                        f"{old_quantity} → {new_quantity}"
                     )
 
+                if requirements_changed:
+                    old_display = (
+                        old_requirements
+                        if old_requirements
+                        else "None"
+                    )
+
+                    new_display = (
+                        new_requirements
+                        if new_requirements
+                        else "None"
+                    )
+
+                    latest_changes.append(
+                        f'{equipment_name} requirements: '
+                        f'"{old_display}" → '
+                        f'"{new_display}"'
+                    )
+
+                if (
+                    quantity_changed
+                    or requirements_changed
+                ):
                     (
                         self.client
                         .table(REQUEST_ITEM_TABLE)
-                        .insert({
-                            "request_id": (
-                                request_update.request_id
-                            ),
-                            "equipment_id": equipment_id,
+                        .update({
                             "requested_quantity": (
                                 new_quantity
                             ),
@@ -1418,12 +1551,18 @@ class EquipmentRequestService:
                             "updated_by": staff_id,
                             "updated_at": now,
                         })
+                        .eq(
+                            "request_id",
+                            request_update.request_id,
+                        )
+                        .eq(
+                            "equipment_id",
+                            equipment_id,
+                        )
                         .execute()
                     )
 
             # Frontend should only send changed requests.
-            # Do not overwrite a useful latest update
-            # with an empty one.
             if not latest_changes:
                 continue
 
@@ -1449,14 +1588,136 @@ class EquipmentRequestService:
                 .execute()
             )
 
-            # Do not automatically change reservation
-            # quantities. The existing reservation remains
-            # active, but TSS must review it against the
-            # newly updated request.
-            self.mark_reservation_for_recheck(
-                request_update.request_id,
-                now,
-            )
+            # A TSS quantity change immediately updates the
+            # event's active reservation to the same quantity.
+            # Technical-requirement-only changes do not affect
+            # the reservation.
+            if quantity_changed_any:
+                reservations = (
+                    self.client.table(RESERVATION_TABLE)
+                    .select("*")
+                    .eq("event_id", event_id)
+                    .neq("status", "Cancelled")
+                    .order("reservation_id", desc=True)
+                    .execute()
+                    .data or []
+                )
+
+                if reservations:
+                    reservation = reservations[0]
+                    reservation_id = reservation[
+                        "reservation_id"
+                    ]
+
+                    start_datetime = datetime.fromisoformat(
+                        f"{event['event_date']}T{event['start_time']}"
+                    )
+                    event_end_date = (
+                        event.get("event_end_date")
+                        or event["event_date"]
+                    )
+                    end_datetime = datetime.fromisoformat(
+                        f"{event_end_date}T{event['end_time']}"
+                    )
+
+                    current_reservation_items = (
+                        self.client
+                        .table(RESERVATION_ITEM_TABLE)
+                        .select("*")
+                        .eq(
+                            "reservation_id",
+                            reservation_id,
+                        )
+                        .execute()
+                        .data or []
+                    )
+
+                    current_reservation_map = {
+                        row["equipment_id"]: row
+                        for row in current_reservation_items
+                    }
+
+                    request_equipment_ids = {
+                        item.equipment_id.strip()
+                        for item in request_update.items
+                    }
+
+                    for row in current_reservation_items:
+                        if (
+                            row["equipment_id"]
+                            not in request_equipment_ids
+                        ):
+                            (
+                                self.client
+                                .table(RESERVATION_ITEM_TABLE)
+                                .delete()
+                                .eq(
+                                    "reservation_item_id",
+                                    row["reservation_item_id"],
+                                )
+                                .execute()
+                            )
+
+                    for item in request_update.items:
+                        equipment_id = item.equipment_id.strip()
+                        existing_reservation_item = (
+                            current_reservation_map.get(
+                                equipment_id
+                            )
+                        )
+
+                        item_data = {
+                            "reserved_quantity":
+                                int(item.requested_quantity),
+                            "start_datetime":
+                                start_datetime.isoformat(),
+                            "end_datetime":
+                                end_datetime.isoformat(),
+                            "updated_at": now,
+                        }
+
+                        if existing_reservation_item:
+                            (
+                                self.client
+                                .table(RESERVATION_ITEM_TABLE)
+                                .update(item_data)
+                                .eq(
+                                    "reservation_item_id",
+                                    existing_reservation_item[
+                                        "reservation_item_id"
+                                    ],
+                                )
+                                .execute()
+                            )
+                        else:
+                            (
+                                self.client
+                                .table(RESERVATION_ITEM_TABLE)
+                                .insert({
+                                    "reservation_id":
+                                        reservation_id,
+                                    "equipment_id":
+                                        equipment_id,
+                                    **item_data,
+                                })
+                                .execute()
+                            )
+
+                    (
+                        self.client
+                        .table(RESERVATION_TABLE)
+                        .update({
+                            "request_id":
+                                request_update.request_id,
+                            "status": "Reserved",
+                            "updated_at": now,
+                        })
+                        .eq(
+                            "reservation_id",
+                            reservation_id,
+                        )
+                        .execute()
+                    )
 
             updated_request_ids.append(
                 request_update.request_id

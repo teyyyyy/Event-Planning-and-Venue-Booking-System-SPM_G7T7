@@ -145,4 +145,132 @@ describe('EventChangeHistory', () => {
       expect(screen.queryByText('Significant change')).toBeNull();
       expect(screen.queryByRole('alert')).toBeNull();
     });
+
+  tc('FE-EVCHG-011', 'classifyChange', 'Equipment selections contain the same values in a different array order.', 'The selections compare equal and do not create a significant change.',
+    { kind: 'Edge', data: '["Projector", "Microphone"] vs ["Microphone", "Projector"]', steps: '1. Classify equivalent equipment arrays in different orders.' },
+    () => {
+      const current = { ...EVENT, equipment_required: ['Projector', 'Microphone'] };
+      const proposed = proposal({ equipment_required: ['Microphone', 'Projector'] });
+      expect(classifyChange(current, proposed)).toEqual({
+        significant: false,
+        significantFields: [],
+        affectsVenue: false,
+        affectsEquipment: false,
+      });
+    });
+
+  tc('FE-EVCHG-012', 'classifyChange', 'Equipment selections are stored as a PostgreSQL-style serialized list.', 'The serialized list is normalised and compares equal to the proposed array.',
+    { kind: 'Edge', data: '{"Microphone","Projector"}', steps: '1. Compare a serialized equipment list with an equivalent array.' },
+    () => {
+      const current = { ...EVENT, equipment_required: '{"Projector","Microphone"}' };
+      const proposed = proposal({ equipment_required: ['Microphone', 'Projector'] });
+      expect(classifyChange(current, proposed).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-013', 'classifyChange', 'Facilities are stored as a bracketed serialized list containing quoted values.', 'The serialized facilities are normalised and compare equal to the proposed array.',
+    { kind: 'Edge', data: '["Stage","Aircon"]', steps: '1. Compare a bracketed serialized facility list with an equivalent array.' },
+    () => {
+      const current = { ...EVENT, facilities_required: '["Stage","Aircon"]' };
+      const proposed = proposal({ facilities_required: ['Aircon', 'Stage'] });
+      expect(classifyChange(current, proposed).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-014', 'classifyChange', 'An array selection contains blank values and surrounding whitespace.', 'Blank selections are ignored and remaining values are trimmed before comparison.',
+    { kind: 'Edge', data: '[" Microphone ", "", "Projector"]', steps: '1. Compare selections containing whitespace and blanks.' },
+    () => {
+      const current = { ...EVENT, equipment_required: [' Microphone ', '', 'Projector'] };
+      const proposed = proposal({ equipment_required: ['Projector', 'Microphone'] });
+      expect(classifyChange(current, proposed).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-015', 'classifyChange', 'An array field is null, blank or an empty serialized value.', 'Each representation is normalised as an empty selection.',
+    { kind: 'Edge', steps: '1. Compare null, blank and empty serialized selections with an empty array.' },
+    () => {
+      expect(classifyChange(
+        { ...EVENT, equipment_required: null },
+        proposal({ equipment_required: [] }),
+      ).significant).toBe(false);
+
+      expect(classifyChange(
+        { ...EVENT, equipment_required: '' },
+        proposal({ equipment_required: [] }),
+      ).significant).toBe(false);
+
+      expect(classifyChange(
+        { ...EVENT, equipment_required: '   ' },
+        proposal({ equipment_required: [] }),
+      ).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-016', 'classifyChange', 'A non-array non-string selection value is compared.', 'The value is converted to text before comparison.',
+    { kind: 'Edge', data: 'equipment_required = 123', steps: '1. Compare a numeric selection value with its string representation.' },
+    () => {
+      expect(classifyChange(
+        { ...EVENT, equipment_required: 123 },
+        proposal({ equipment_required: ['123'] }),
+      ).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-017', 'classifyChange', 'The proposed equipment selection differs from the current selection.', 'The change is significant and affects equipment but not venue.',
+    { data: 'Microphone → Projector', steps: '1. Classify a changed equipment requirement.' },
+    () => {
+      const result = classifyChange(
+        { ...EVENT, equipment_required: ['Microphone'] },
+        proposal({ equipment_required: ['Projector'] }),
+      );
+
+      expect(result).toEqual({
+        significant: true,
+        significantFields: ['equipment_required'],
+        affectsVenue: false,
+        affectsEquipment: true,
+      });
+    });
+
+  tc('FE-EVCHG-018', 'classifyChange', 'Accessibility changes from not required to required.', 'The change is significant and affects the venue only.',
+    { data: 'accessibility_required 0 → 1', steps: '1. Classify an accessibility change.' },
+    () => {
+      const result = classifyChange(
+        { ...EVENT, accessibility_required: 0 },
+        proposal({ accessibility_required: 1 }),
+      );
+
+      expect(result).toEqual({
+        significant: true,
+        significantFields: ['accessibility_required'],
+        affectsVenue: true,
+        affectsEquipment: false,
+      });
+    });
+
+  tc('FE-EVCHG-019', 'classifyChange', 'Accessibility values use equivalent numeric and string representations.', 'The values compare equal and do not create a change.',
+    { kind: 'Edge', data: '1 vs "1"', steps: '1. Compare equivalent accessibility representations.' },
+    () => {
+      expect(classifyChange(
+        { ...EVENT, accessibility_required: 1 },
+        proposal({ accessibility_required: '1' }),
+      ).significant).toBe(false);
+    });
+
+  tc('FE-EVCHG-020', 'classifyChange', 'A field exists on the current event but is omitted from the proposal.', 'The omitted field is ignored rather than treated as changed.',
+    { kind: 'Edge', steps: '1. Classify a partial proposal that omits a significant field.' },
+    () => {
+      const result = classifyChange(
+        { ...EVENT, equipment_required: ['Microphone'] },
+        { event_name: 'Gala' },
+      );
+
+      expect(result).toEqual({
+        significant: false,
+        significantFields: [],
+        affectsVenue: false,
+        affectsEquipment: false,
+      });
+    });
+
+  tc('FE-EVCHG-021', 'arrangementLabel', 'A change affects neither venue nor equipment.', 'The arrangement label is empty.',
+    { kind: 'Edge', steps: '1. Format an arrangement with both impact flags false.' },
+    () => {
+      expect(arrangementLabel(false, false)).toBe('');
+    });
 });

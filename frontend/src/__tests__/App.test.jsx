@@ -28,6 +28,7 @@ vi.mock('../VenueCatalogue', () => ({ default: ({ canEdit }) => <div>VENUE CATAL
 
 vi.mock('../Notifications', () => ({ default: () => <div>NOTIFICATIONS</div> }));
 vi.mock('../AttendeeWorkspace', () => ({ default: ({ logout }) => <div>ATTENDEE WORKSPACE<button onClick={logout}>Log out</button></div> }));
+vi.mock('../ResetPassword', () => ({ default: () => <div>RESET PASSWORD SCREEN</div> }));
 
 import App from '../App';
 
@@ -282,3 +283,11 @@ describe('App', () => {
     });
 });
 
+tc('FE-APP-026', 'App (password recovery)', 'The user is in password-recovery mode.', 'The Reset Password screen is shown instead of Login.',
+  { kind: 'State', pre: 'recovery is true.', steps: '1. Render App with recovery = true.' },
+  () => {
+    auth.value = { user: null, loading: false, recovery: true, logout };
+    render(<App />);
+    expect(screen.getByText('RESET PASSWORD SCREEN')).toBeInTheDocument();
+    expect(screen.queryByText('LOGIN SCREEN')).toBeNull();
+  });

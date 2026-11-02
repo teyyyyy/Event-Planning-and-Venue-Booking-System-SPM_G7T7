@@ -13,6 +13,42 @@ function format12HourTime(time24) {
   return `${hours}:${minutes} ${ampm}`;
 }
 
+function formatEventDate(date) {
+  if (!date) return "";
+
+  return new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatEventPeriod(event) {
+  if (!event?.event_date) return "—";
+
+  const startDate = formatEventDate(event.event_date);
+  const endDate = formatEventDate(event.event_end_date || event.event_date);
+  const startTime = format12HourTime(event.start_time);
+  const endTime = format12HourTime(event.end_time);
+
+  if (event.event_end_date && event.event_end_date !== event.event_date) {
+    return `${startDate}, ${startTime} – ${endDate}, ${endTime}`;
+  }
+
+  return `${startDate}, ${startTime} – ${endTime}`;
+}
+
+function formatVenueOccupiedPeriod(event, setupTime = 0, teardownTime = 0) {
+  const window = eventWindow(event);
+  if (!window) return "—";
+
+  const start = new Date(window.start.getTime() - Number(setupTime || 0) * 60000);
+  const end = new Date(window.end.getTime() + Number(teardownTime || 0) * 60000);
+  const options = { day: "2-digit", month: "short", year: "numeric", hour: "numeric", minute: "2-digit", hour12: true };
+
+  return `${start.toLocaleString("en-GB", options)} – ${end.toLocaleString("en-GB", options)}`;
+}
+
 // The API returns SGT (+08:00) timestamps, so slicing the string keeps them in SGT.
 const formatSgt = (value) =>
   value ? `${value.replace("T", " ").slice(0, 16)} SGT` : "";
@@ -77,6 +113,22 @@ function VenueDetail({ venue, onClose }) {
         <div>
           <strong>Accessibility:</strong>{" "}
           {venue.accessible === 1 ? "Yes" : "No"}
+        </div>
+        <div>
+          <strong>Setup / teardown:</strong>{" "}
+          {venue.setup_time ?? 0} / {venue.teardown_time ?? 0} minutes
+        </div>
+        <div className="wide">
+          <strong>Accessibility details:</strong>{" "}
+          {venue.accessibility_details || "Not specified"}
+        </div>
+        <div className="wide">
+          <strong>Emergency access:</strong>{" "}
+          {venue.emergency_access || "Not specified"}
+        </div>
+        <div className="wide">
+          <strong>Venue restrictions:</strong>{" "}
+          {venue.venue_restrictions || "Not specified"}
         </div>
         <div className="wide">
           <strong>Facilities:</strong> {venue.facilities?.join(", ") || "None"}
@@ -285,14 +337,18 @@ export default function VenueRequest({ user }) {
 
       if (user?.id) {
         const eventRes = await fetch(
-          `${API}/event-coordinators/${user.id}/events`,
+          `${API}/venue-bookings/coordinators/${user.id}/events`,
         );
         const eventData = await eventRes.json();
         if (!eventRes.ok)
           throw new Error(
             eventData.detail || "Unable to load assigned events.",
           );
-        setEvents(Array.isArray(eventData) ? eventData : []);
+        setEvents(
+          Array.isArray(eventData)
+            ? eventData.filter((event) => event.status === 'Planning')
+            : []
+        );
 
         const submittedRequestsRes = await fetch(
           `${API}/venue-booking-requests/coordinators/${user.id}`,
@@ -597,8 +653,7 @@ export default function VenueRequest({ user }) {
                   <thead>
                     <tr>
                       <th style={{ textAlign: "left" }}>Event Name</th>
-                      <th style={{ textAlign: "left" }}>Date</th>
-                      <th style={{ textAlign: "left" }}>Timing</th>
+                      <th style={{ textAlign: "left" }}>Event Period</th>
                       <th style={{ textAlign: "left" }}>Capacity</th>
                       <th style={{ textAlign: "left" }}>Layout</th>
                       <th style={{ textAlign: "left" }}>Facilities</th>
@@ -610,16 +665,8 @@ export default function VenueRequest({ user }) {
                       <td data-label="Event Name">
                         <strong>{selectedEvent.event_name}</strong>
                       </td>
-                      <td data-label="Date">{selectedEvent.event_date}</td>
-                      <td data-label="Timing">
-                        {selectedEvent.start_time && selectedEvent.end_time ? (
-                          <>
-                            {format12HourTime(selectedEvent.start_time)} -{" "}
-                            {format12HourTime(selectedEvent.end_time)}
-                          </>
-                        ) : (
-                          "—"
-                        )}
+                      <td data-label="Event Period">
+                        {formatEventPeriod(selectedEvent)}
                       </td>
                       <td data-label="Capacity">
                         {selectedEvent.event_capacity ||
@@ -685,13 +732,15 @@ export default function VenueRequest({ user }) {
                   }}
                 >
                   <p style={{ margin: "0 0 8px 0" }}>
-                    <strong>Date:</strong> {selectedEvent.event_date}
+                    <strong>Event period:</strong> {formatEventPeriod(selectedEvent)}
+                  </p>
+                  <p style={{ margin: "0 0 8px 0" }}>
+                    <strong>Setup / teardown:</strong>{" "}
+                    {selectedVenue.setup_time ?? 0} / {selectedVenue.teardown_time ?? 0} minutes
                   </p>
                   <p style={{ margin: "0" }}>
-                    <strong>Time:</strong>{" "}
-                    {format12HourTime(selectedEvent.start_time)}
-                    {" - "}
-                    {format12HourTime(selectedEvent.end_time)}
+                    <strong>Venue occupied period:</strong>{" "}
+                    {formatVenueOccupiedPeriod(selectedEvent, selectedVenue.setup_time, selectedVenue.teardown_time)}
                   </p>
                 </div>
               </div>
@@ -985,9 +1034,11 @@ export default function VenueRequest({ user }) {
                   req.status
                 ] || ["#fff3cd", "#856404"];
                 const eventName =
+                  req["Event Details"]?.event_name ||
                   events.find((e) => String(e.id) === String(req.event_id))
                     ?.event_name || req.event_id;
                 const venueName =
+                  req.venue_name ||
                   venues.find(
                     (v) => String(v.venue_id) === String(req.venue_id),
                   )?.name || req.venue_id;
@@ -1032,22 +1083,16 @@ export default function VenueRequest({ user }) {
                           </td>
                         </tr>
                         <tr>
-                          <th scope="row">Start</th>
-                          <td>
-                            {req["Event Details"]?.event_date ?? ""}
-                            {req["Event Details"]?.start_time &&
-                              ` · ${format12HourTime(req["Event Details"].start_time)}`}
-                          </td>
+                          <th scope="row">Event period</th>
+                          <td>{formatEventPeriod(req["Event Details"])}</td>
                         </tr>
                         <tr>
-                          <th scope="row">End</th>
-                          <td>
-                            {req["Event Details"]?.event_end_date ||
-                              req["Event Details"]?.event_date ||
-                              ""}
-                            {req["Event Details"]?.end_time &&
-                              ` · ${format12HourTime(req["Event Details"].end_time)}`}
-                          </td>
+                          <th scope="row">Setup / teardown</th>
+                          <td>{req.setup_time ?? 0} / {req.teardown_time ?? 0} minutes</td>
+                        </tr>
+                        <tr>
+                          <th scope="row">Venue occupied period</th>
+                          <td>{formatVenueOccupiedPeriod(req["Event Details"], req.setup_time, req.teardown_time)}</td>
                         </tr>
                       </tbody>
                     </table>
@@ -1246,6 +1291,34 @@ export default function VenueRequest({ user }) {
                       </div>
                     </>
                   )}
+                <p>
+                  <strong>Event period:</strong>{" "}
+                  {formatEventPeriod(selectedSubmission["Event Details"])}
+                </p>
+                <p>
+                  <strong>Setup / teardown:</strong>{" "}
+                  {selectedSubmission.setup_time ?? 0} / {selectedSubmission.teardown_time ?? 0} minutes
+                </p>
+                <p>
+                  <strong>Venue occupied period:</strong>{" "}
+                  {formatVenueOccupiedPeriod(
+                    selectedSubmission["Event Details"],
+                    selectedSubmission.setup_time,
+                    selectedSubmission.teardown_time,
+                  )}
+                </p>
+                <p>
+                  <strong>Accessibility details:</strong>{" "}
+                  {selectedSubmission.accessibility_details || "Not specified"}
+                </p>
+                <p>
+                  <strong>Emergency access:</strong>{" "}
+                  {selectedSubmission.emergency_access || "Not specified"}
+                </p>
+                <p>
+                  <strong>Venue restrictions:</strong>{" "}
+                  {selectedSubmission.venue_restrictions || "Not specified"}
+                </p>
                 {selectedSubmission.decided_at && (
                   <p>
                     <strong>Decided At:</strong>{" "}

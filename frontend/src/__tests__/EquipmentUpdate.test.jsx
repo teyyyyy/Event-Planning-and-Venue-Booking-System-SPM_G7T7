@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
 
@@ -114,58 +114,55 @@ describe('EquipmentUpdate', () => {
   tc('FE-EQUPD-011', 'EquipmentUpdate (changes)', 'Staff edits technical requirements.', 'The change reads Technical requirements: "wireless" → "HDMI".', { data: '"wireless" -> "HDMI"', steps: '1. Edit the requirements textarea.' },
     async () => { backend(); await openDetail(); fireEvent.change(screen.getByDisplayValue('wireless'), { target: { value: 'HDMI' } }); expect(screen.getByText('Technical requirements: "wireless" → "HDMI"')).toBeInTheDocument(); });
 
-  tc('FE-EQUPD-012', 'EquipmentUpdate (add)', 'Staff clicks "+ Add equipment".', 'A "New" row appears summarised as "New equipment item added" and can be removed again.', { steps: '1. Click "+ Add equipment". 2. Click "Remove".' },
+  tc('FE-EQUPD-012', 'EquipmentUpdate (changes)', 'Technical support reviews an existing equipment item.', 'The equipment type is read-only and there is no control to add or remove equipment types.', { kind: 'State', steps: '1. Open a detail. 2. Inspect the equipment controls.' },
     async () => {
       backend();
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
-      expect(screen.getByText('New')).toBeInTheDocument();
-      expect(screen.getByText('New equipment item added')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
-      expect(screen.queryByText('New')).toBeNull();
+      expect(screen.getByDisplayValue('Microphone')).toHaveAttribute('readonly');
+      expect(screen.queryByRole('button', { name: '+ Add equipment' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
     });
 
-  tc('FE-EQUPD-013', 'EquipmentUpdate (add)', 'Staff chooses Projector for the new row and enters 1.', 'The change reads "Added Projector × 1"; Microphone is disabled in the select because it is already in the request.', { steps: '1. Add a row. 2. Choose Projector. 3. Enter 1.' },
+  tc('FE-EQUPD-013', 'EquipmentUpdate (changes)', 'Staff clears an existing technical requirement.', 'The change summary shows the requirement changing from "wireless" to "None".', { steps: '1. Open a detail. 2. Clear the technical requirements field.' },
     async () => {
       backend();
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
-      const select = document.querySelector('select');
-      expect(within(select).getByRole('option', { name: 'Microphone' })).toBeDisabled();
-      fireEvent.change(select, { target: { value: 'PRJ' } });
-      fireEvent.change(document.querySelectorAll('input[type=number]')[1], { target: { value: '1' } });
-      expect(screen.getByText('Added Projector × 1')).toBeInTheDocument();
+      fireEvent.change(screen.getByDisplayValue('wireless'), { target: { value: '' } });
+      expect(screen.getByText('Technical requirements: "wireless" → "None"')).toBeInTheDocument();
+      expect(confirm()).toBeEnabled();
     });
 
-  tc('FE-EQUPD-014', 'EquipmentUpdate (validation)', 'Staff confirms with a new row that has no equipment chosen.', 'Error dialog: "Request #7 contains an equipment row without an equipment type." and no PUT is sent.', { kind: 'Negative', steps: '1. Add a row. 2. Click Confirm.' },
+  tc('FE-EQUPD-014', 'EquipmentUpdate (validation)', 'Staff enters a negative quantity for existing equipment.', 'Error dialog: "Quantity must be a whole number of 0 or more." and no PUT is sent.', { kind: 'Negative', data: '-1', steps: '1. Open a detail. 2. Enter -1. 3. Click Confirm.' },
     async () => {
       const f = backend();
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.change(qty(), { target: { value: '-1' } });
       fireEvent.click(confirm());
-      expect(await screen.findByText('Request #7 contains an equipment row without an equipment type.')).toBeInTheDocument();
+      expect(await screen.findByText('Quantity must be a whole number of 0 or more.')).toBeInTheDocument();
       expect(callsTo(f, '/requests', 'PUT')).toHaveLength(0);
     });
 
-  tc('FE-EQUPD-015', 'EquipmentUpdate (validation)', 'A new row has equipment but no quantity.', 'Error dialog: "Please enter a quantity for every equipment item in request #7."', { kind: 'Negative', steps: '1. Add a row. 2. Choose Projector. 3. Click Confirm.' },
+  tc('FE-EQUPD-015', 'EquipmentUpdate (validation)', 'Staff clears the quantity for existing equipment.', 'Error dialog: "Please enter a quantity for every equipment item in request #7." and no PUT is sent.', { kind: 'Negative', steps: '1. Open a detail. 2. Clear the quantity. 3. Click Confirm.' },
     async () => {
-      backend();
+      const f = backend();
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
-      fireEvent.change(document.querySelector('select'), { target: { value: 'PRJ' } });
+      fireEvent.change(qty(), { target: { value: '' } });
       fireEvent.click(confirm());
       expect(await screen.findByText('Please enter a quantity for every equipment item in request #7.')).toBeInTheDocument();
+      expect(callsTo(f, '/requests', 'PUT')).toHaveLength(0);
     });
 
-  tc('FE-EQUPD-016', 'EquipmentUpdate (validation)', 'A new row has quantity 0.', 'Error dialog: "New equipment must have a quantity greater than 0."', { kind: 'Negative', data: 'Projector x0', steps: '1. Add a row. 2. Choose Projector, quantity 0. 3. Click Confirm.' },
+  tc('FE-EQUPD-016', 'EquipmentUpdate (changes)', 'Staff changes two equipment requests in the same event.', 'The footer reports that two requests contain changes.', { data: 'request 7: 2 -> 4; request 8: 1 -> 2', steps: '1. Open two requests. 2. Change both quantities.' },
     async () => {
-      backend();
-      await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
-      fireEvent.change(document.querySelector('select'), { target: { value: 'PRJ' } });
-      fireEvent.change(document.querySelectorAll('input[type=number]')[1], { target: { value: '0' } });
-      fireEvent.click(confirm());
-      expect(await screen.findByText('New equipment must have a quantity greater than 0.')).toBeInTheDocument();
+      backend({ detail: DETAIL([REQ(), REQ({ request_id: 8, items: [{ equipment_id: 'PRJ', equipment_name: 'Projector', requested_quantity: 1, technical_requirements: '' }] })]) });
+      render(<EquipmentUpdate user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View full details' }));
+      await screen.findByText('Request #8');
+      const quantities = document.querySelectorAll('input[type=number]');
+      fireEvent.change(quantities[0], { target: { value: '4' } });
+      fireEvent.change(quantities[1], { target: { value: '2' } });
+      expect(screen.getByText('2 requests contain changes.')).toBeInTheDocument();
+      expect(confirm()).toBeEnabled();
     });
 
   tc('FE-EQUPD-017', 'EquipmentUpdate (validation)', 'Quantity is a decimal.', 'Error dialog: "Quantity must be a whole number of 0 or more."', { kind: 'Negative', data: '2.5', steps: '1. Enter 2.5. 2. Click Confirm.' },
@@ -235,22 +232,18 @@ describe('EquipmentUpdate', () => {
       expect(screen.getByText(/Submitted by/)).toHaveTextContent('invalid-date');
     });
 
-  tc('FE-EQUPD-024', 'EquipmentUpdate (changes)', 'Staff adds a new row and clears its quantity.', 'Validation catches the empty quantity on the new item.', { kind: 'Negative', steps: '1. Add new row. 2. Choose equipment but leave quantity blank. 3. Click Confirm.' },
+  tc('FE-EQUPD-024', 'EquipmentUpdate (details)', 'A request was updated but the updater name is unavailable.', 'The updater id is shown as the fallback name.', { kind: 'Edge', steps: '1. Open a detail with updated_by but no updated_by_name.' },
     async () => {
-      backend();
+      backend({ detail: DETAIL([REQ({ updated_by: 't1', updated_by_name: null, updated_at: '2026-09-02T10:00:00Z', status: 'Updated' })]) });
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
-      fireEvent.change(document.querySelector('select'), { target: { value: 'PRJ' } });
-      fireEvent.change(document.querySelectorAll('input[type=number]')[1], { target: { value: '' } });
-      fireEvent.click(confirm());
-      expect(await screen.findByText('Please enter a quantity for every equipment item in request #7.')).toBeInTheDocument();
+      expect(screen.getByText(/Last updated by/)).toHaveTextContent('t1');
     });
 
-  tc('FE-EQUPD-025', 'EquipmentUpdate (notice)', 'Staff closes the notice modal.', 'The notice dialog is dismissed and disappears from view.', { kind: 'State', steps: '1. Trigger an error notice. 2. Click Close on the notice.' },
+  tc('FE-EQUPD-025', 'EquipmentUpdate (notice)', 'Staff closes the notice modal.', 'The notice dialog is dismissed and disappears from view.', { kind: 'State', steps: '1. Enter an invalid decimal quantity. 2. Confirm to trigger an error notice. 3. Click Close.' },
     async () => {
       backend();
       await openDetail();
-      fireEvent.click(screen.getByRole('button', { name: '+ Add equipment' }));
+      fireEvent.change(qty(), { target: { value: '2.5' } });
       fireEvent.click(confirm());
       expect(await screen.findByRole('alertdialog')).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
@@ -262,5 +255,176 @@ describe('EquipmentUpdate', () => {
       backend({ summary: json({ error: 'invalid format' }) });
       render(<EquipmentUpdate user={USER} />);
       expect(await screen.findByText('There are currently no equipment requests.')).toBeInTheDocument();
+    });
+  
+  tc('FE-EQUPD-027', 'EquipmentUpdate (summary)', 'A same-day event has start and end times.', 'The summary displays the formatted event date and time range.', { kind: 'Edge', data: '09:00 to 17:00', steps: '1. Return a summary with start and end times. 2. Inspect the event period.' },
+    async () => {
+      backend({ summary: [{ ...SUMMARY[0], start_time: '09:00:00', end_time: '17:00:00' }] });
+      render(<EquipmentUpdate user={USER} />);
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(row).toHaveTextContent(/01 Oct 2026.*09:00.*05:00/);
+    });
+
+  tc('FE-EQUPD-028', 'EquipmentUpdate (summary)', 'An event spans multiple days.', 'The summary displays both the start and end dates with their times.', { kind: 'Edge', data: '1 Oct 2026 09:00 to 3 Oct 2026 17:00', steps: '1. Return a multi-day event. 2. Inspect the event period.' },
+    async () => {
+      backend({
+        summary: [{
+          ...SUMMARY[0],
+          event_end_date: '2026-10-03',
+          start_time: '09:00:00',
+          end_time: '17:00:00',
+        }],
+      });
+      render(<EquipmentUpdate user={USER} />);
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(row).toHaveTextContent(/01 Oct 2026.*09:00.*03 Oct 2026.*05:00/);
+    });
+
+  tc('FE-EQUPD-029', 'EquipmentUpdate (summary)', 'An event has no event date.', 'The event period is displayed as a dash.', { kind: 'Edge', steps: '1. Return an event without event_date. 2. Inspect the event period.' },
+    async () => {
+      backend({ summary: [{ ...SUMMARY[0], event_date: null }] });
+      render(<EquipmentUpdate user={USER} />);
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(row).toHaveTextContent('—');
+    });
+
+  tc('FE-EQUPD-030', 'EquipmentUpdate (summary)', 'Loading the summary fails without a backend detail message.', 'The default summary error is displayed.', { kind: 'Negative', steps: '1. Return a failed summary response without detail. 2. Wait for loading to finish.' },
+    async () => {
+      backend({ summary: () => json({}, 500) });
+      render(<EquipmentUpdate user={USER} />);
+      expect(await screen.findByText('Unable to load equipment requests.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-031', 'EquipmentUpdate (details)', 'Loading request details fails without a backend detail message.', 'The default request-detail error is displayed.', { kind: 'Negative', steps: '1. Return a failed detail response without detail. 2. Open the event.' },
+    async () => {
+      backend({ detail: () => json({}, 500) });
+      render(<EquipmentUpdate user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View full details' }));
+      expect(await screen.findByText('Unable to load request details.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-032', 'EquipmentUpdate (details)', 'The detail response omits the requests list.', 'The missing requests list defaults to empty and the page shows no equipment requests.', { kind: 'Edge', steps: '1. Return detail data without requests. 2. Open the event.' },
+    async () => {
+      backend({
+        detail: {
+          event: { id: 1, event_name: 'Gala', event_date: '2026-10-01' },
+          equipment_catalogue: CATALOGUE,
+        },
+      });
+      render(<EquipmentUpdate user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View full details' }));
+      expect(await screen.findByText('No equipment requests exist for this event.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-033', 'EquipmentUpdate (details)', 'The submitter has no display name.', 'The submitter ID is shown as the fallback.', { kind: 'Edge', data: 'created_by = c1', steps: '1. Return a request without created_by_name. 2. Open the event.' },
+    async () => {
+      backend({ detail: DETAIL([REQ({ created_by_name: null })]) });
+      await openDetail();
+      expect(screen.getByText(/Submitted by/)).toHaveTextContent('c1');
+    });
+
+  tc('FE-EQUPD-034', 'EquipmentUpdate (details)', 'The updater has no display name.', 'The updater ID is shown as the fallback.', { kind: 'Edge', data: 'updated_by = t1', steps: '1. Return an updated request without updated_by_name. 2. Open the event.' },
+    async () => {
+      backend({
+        detail: DETAIL([REQ({
+          updated_by: 't1',
+          updated_by_name: null,
+          updated_at: '2026-09-02T10:00:00Z',
+        })]),
+      });
+      await openDetail();
+      expect(screen.getByText(/Last updated by/)).toHaveTextContent('t1');
+    });
+
+  tc('FE-EQUPD-035', 'EquipmentUpdate (changes)', 'Technical requirements are cleared.', 'The change summary shows the previous requirement changing to None.', { data: 'wireless -> blank', steps: '1. Open a request. 2. Clear technical requirements.' },
+    async () => {
+      backend();
+      await openDetail();
+      fireEvent.change(screen.getByDisplayValue('wireless'), { target: { value: '' } });
+      expect(screen.getByText('Technical requirements: "wireless" → "None"')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-036', 'EquipmentUpdate (changes)', 'Two equipment requests are edited.', 'The footer uses the plural changed-request message.', { data: '2 changed requests', steps: '1. Open two requests. 2. Change both quantities.' },
+    async () => {
+      backend({
+        detail: DETAIL([
+          REQ(),
+          REQ({
+            request_id: 8,
+            items: [{
+              equipment_id: 'PRJ',
+              equipment_name: 'Projector',
+              requested_quantity: 1,
+              technical_requirements: '',
+            }],
+          }),
+        ]),
+      });
+      render(<EquipmentUpdate user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View full details' }));
+      await screen.findByText('Request #8');
+
+      const quantities = document.querySelectorAll('input[type=number]');
+      fireEvent.change(quantities[0], { target: { value: '3' } });
+      fireEvent.change(quantities[1], { target: { value: '2' } });
+
+      expect(screen.getByText('2 requests contain changes.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-037', 'EquipmentUpdate (save)', 'The backend rejects an update without a detail message.', 'The default update error is displayed.', { kind: 'Negative', steps: '1. Return a failed PUT without detail. 2. Edit a quantity. 3. Confirm.' },
+    async () => {
+      backend({ put: () => json({}, 500) });
+      await openDetail();
+      fireEvent.change(qty(), { target: { value: '4' } });
+      fireEvent.click(confirm());
+      expect(await screen.findByText('Unable to update equipment requests.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-038', 'EquipmentUpdate (save)', 'The successful backend response returns updated_request_ids instead of updated_requests.', 'The number of updated request IDs is used in the success message.', { kind: 'Edge', data: 'updated_request_ids = [7, 8]', steps: '1. Edit a request. 2. Return two updated_request_ids. 3. Confirm.' },
+    async () => {
+      backend({ put: () => json({ updated_request_ids: [7, 8] }) });
+      await openDetail();
+      fireEvent.change(qty(), { target: { value: '4' } });
+      fireEvent.click(confirm());
+      expect(await screen.findByText('2 equipment requests updated successfully.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-039', 'EquipmentUpdate (save)', 'The successful backend response contains no updated-request count.', 'The number of locally changed requests is used as the fallback.', { kind: 'Edge', steps: '1. Edit one request. 2. Return an empty success response. 3. Confirm.' },
+    async () => {
+      backend({ put: () => json({}) });
+      await openDetail();
+      fireEvent.change(qty(), { target: { value: '4' } });
+      fireEvent.click(confirm());
+      expect(await screen.findByText('1 equipment request updated successfully.')).toBeInTheDocument();
+    });
+  
+  tc('FE-EQUPD-040', 'EquipmentUpdate (details)', 'An equipment item is not present in the equipment catalogue.', 'The equipment ID is displayed as the fallback equipment name.', { kind: 'Edge', data: 'equipment_id = UNKNOWN', steps: '1. Return an equipment item not present in the catalogue. 2. Open the event.' },
+    async () => {
+      backend({
+        detail: DETAIL([REQ({
+          items: [{
+            equipment_id: 'UNKNOWN',
+            requested_quantity: 2,
+            technical_requirements: '',
+          }],
+        })]),
+      });
+      await openDetail();
+      expect(screen.getByDisplayValue('UNKNOWN')).toBeInTheDocument();
+    });
+
+  tc('FE-EQUPD-041', 'EquipmentUpdate (details)', 'An equipment item has no equipment ID and is not present in the catalogue.', 'The generic Equipment label is used as the final name fallback.', { kind: 'Edge', steps: '1. Return an existing item without an equipment ID. 2. Open the event.' },
+    async () => {
+      backend({
+        detail: DETAIL([REQ({
+          items: [{
+            equipment_id: '',
+            requested_quantity: 2,
+            technical_requirements: '',
+          }],
+        })]),
+      });
+      await openDetail();
+      expect(screen.getByDisplayValue('Equipment')).toBeInTheDocument();
     });
 });

@@ -49,6 +49,25 @@ def get_all_venues():
     response = supabase.table(VENUES_TABLE).select('*').execute()
     return response.data
 
+@router.get(
+    "/api/venue-bookings/coordinators/{coordinator_id}/events",
+    dependencies=[Depends(require_coordinator_path)]
+)
+def get_available_events_for_venue(coordinator_id: str):
+    """Returns Planning events assigned to this coordinator for venue requests."""
+    supabase = get_supabase()
+
+    response = (
+        supabase.table(EVENTS_TABLE)
+        .select("*")
+        .eq("coordinator_id", coordinator_id)
+        .eq("status", "Planning")
+        .order("event_date")
+        .execute()
+    )
+
+    return response.data or []
+
 @router.post("/api/venue-bookings")
 def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coordinator_or_staff)):
     """Submits a new venue booking request."""
@@ -61,6 +80,12 @@ def create_venue_booking(booking: VenueBookingCreate, user=Depends(require_coord
     )
     if not event or str(event.get("coordinator_id")) != str(user["id"]):
         raise HTTPException(status_code=403, detail="You can only request venues for events assigned to you.")
+
+    if event.get("status") != "Planning":
+        raise HTTPException(
+            status_code=409,
+            detail="Venue requests can only be submitted for events in Planning status.",
+        )
     
     venue = supabase.table(VENUES_TABLE).select("*").eq("venue_id", booking.venue_id).maybe_single().execute().data
     if not venue:
@@ -117,12 +142,42 @@ def list_requests_by_coordinator(coordinator_id: str):
     client = get_supabase()
     bookings = (
         client.table(BOOKING_TABLE)
-        .select(f'*, "{EVENTS_TABLE}"(layout_required, facilities_required, accessibility_required, event_date, event_end_date, start_time, end_time)')
+        .select(f'*, "{EVENTS_TABLE}"(event_name, layout_required, facilities_required, accessibility_required, event_date, event_end_date, start_time, end_time)')
         .eq("coordinator_id", coordinator_id)
         .execute()
         .data or []
     )
-    return [{**booking, **hold_fields(booking)} for booking in bookings]
+    venue_ids = list({booking["venue_id"] for booking in bookings if booking.get("venue_id") is not None})
+    venues = {
+        str(venue["venue_id"]): venue
+        for venue in (
+            client.table(VENUES_TABLE)
+            .select(
+                "venue_id,name,setup_time,teardown_time,"
+                "accessible,accessibility_details,"
+                "emergency_access,venue_restrictions"
+            )
+            .in_("venue_id", venue_ids)
+            .execute()
+            .data or []
+        )
+    } if venue_ids else {}
+
+    result = []
+    for booking in bookings:
+        venue = venues.get(str(booking.get("venue_id")), {})
+        result.append({
+            **booking,
+            **hold_fields(booking),
+            "venue_name": venue.get("name"),
+            "setup_time": venue.get("setup_time"),
+            "teardown_time": venue.get("teardown_time"),
+            "venue_accessible": venue.get("accessible"),
+            "accessibility_details": venue.get("accessibility_details"),
+            "emergency_access": venue.get("emergency_access"),
+            "venue_restrictions": venue.get("venue_restrictions"),
+        })
+    return result
 
 
 @router.post("/api/venue-booking-requests/coordinators/{coordinator_id}/{request_id}/alternative")

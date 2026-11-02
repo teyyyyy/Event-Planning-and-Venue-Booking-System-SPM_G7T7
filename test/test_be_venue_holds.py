@@ -287,9 +287,9 @@ def test_staff_list(monkeypatch):
 
 @tc("BE-VHOLD-017", "POST /api/venue-bookings", "A coordinator requests a venue that is held or booked for an overlapping time.",
     "HTTP 409 explains the venue is booked or on hold; nothing is inserted. A request for the same time at an expired hold's venue is accepted.",
-    pre="Event 1 (c1) 10:00-12:00; event 2 holds Hall A 11:00-13:00.", steps="1. Request Hall A with the hold active. 2. With an approved booking. 3. With the hold expired.", kind="Negative")
+    pre="Event 1 (c1) in Planning 10:00-12:00; event 2 holds Hall A 11:00-13:00.", steps="1. Request Hall A with the hold active. 2. With an approved booking. 3. With the hold expired.", kind="Negative")
 def test_create_blocked(monkeypatch):
-    events = [event(1), event(2, start="11:00:00", end="13:00:00")]
+    events = [event(1, status="Planning"), event(2, start="11:00:00", end="13:00:00")]
     request = vr.VenueBookingCreate(event_id=1, venue_id=1, coordinator_id="c1")
     message = "This venue is already booked or on hold for this event's time. Please choose a different venue."
     for competing in (booking(2, 2, "On Hold", hold_expires_at=at(days=1)), booking(2, 2, "Approved")):
@@ -333,3 +333,73 @@ def test_list_by_coordinator(monkeypatch):
 def test_live_arrangements_skip_expired():
     client = FakeClient({BOOKING: [booking(1, 1, "Expired"), booking(2, 1, "On Hold", venue_id=2)], "Equipment Request": []})
     assert ec.live_arrangements(client, [1])["1"]["venue_requests"] == [{"request_id": 2, "status": "On Hold"}]
+
+
+@tc("BE-VHOLD-021", "POST /api/venue-bookings", "A coordinator requests a venue that is marked unavailable.",
+    "HTTP 409 explains that the venue is unavailable and nothing is inserted.",
+    pre="Event 1 is assigned to c1 and Hall A is marked unavailable.", steps="1. Request Hall A for event 1.", kind="Negative")
+def test_create_unavailable_venue(monkeypatch):
+    venues = [{"venue_id": 1, "name": "Hall A", "is_available": False}]
+    client = world(monkeypatch, [event(1, status="Planning")], venues=venues)
+    request = vr.VenueBookingCreate(event_id=1, venue_id=1, coordinator_id="c1")
+    assert err(vr.create_venue_booking, request, COORDINATOR) == (
+        409, "This venue is unavailable. Please select another venue.")
+    assert client.tables[BOOKING] == []
+
+
+@tc("BE-VHOLD-022", "decide", "Venue staff try to approve a booking that requires a replacement venue.",
+    "HTTP 409 explains that the booking needs a replacement venue and the request remains unchanged.",
+    pre="Request 1 is Pending with replacement_required=True.", steps="1. Approve request 1.", kind="Negative")
+def test_approve_replacement_required(monkeypatch):
+    client = world(monkeypatch, [event(1)], [booking(1, 1, replacement_required=True)])
+    assert err(va.approve_request, 1, STAFF) == (
+        409, "This booking needs a replacement venue and cannot be approved.")
+    assert client.tables[BOOKING][0]["status"] == "Pending"
+
+
+@tc("BE-VHOLD-023", "decide", "Venue staff try to approve a request after its venue becomes unavailable.",
+    "HTTP 409 explains that the booking needs a replacement venue and the request remains Pending.",
+    pre="Request 1 is Pending but Hall A is now marked unavailable.", steps="1. Approve request 1.", kind="Negative")
+def test_approve_unavailable_venue(monkeypatch):
+    venues = [{"venue_id": 1, "name": "Hall A", "is_available": False}]
+    client = world(monkeypatch, [event(1)], [booking(1, 1)], venues)
+    assert err(va.approve_request, 1, STAFF) == (
+        409, "This booking needs a replacement venue and cannot be approved.")
+    assert client.tables[BOOKING][0]["status"] == "Pending"
+
+
+@tc("BE-VHOLD-024", "GET /api/venue-booking-requests/{id}/alternative-venue-availability",
+    "Venue staff check alternative venues when some are unavailable, already requested, held, booked or free.",
+    "Each venue is marked available or unavailable with the reason that currently prevents it from being offered.",
+    pre="Event 1 has request 1 for Hall A; Hall B is unavailable; Hall C already has another active request for event 1; Hall D is held by event 2; Hall E is free.",
+    steps="1. Call alternative_venue_availability(1, staff).")
+def test_alternative_venue_availability(monkeypatch):
+    venues = [
+        {"venue_id": 1, "name": "Hall A"},
+        {"venue_id": 2, "name": "Hall B", "is_available": False, "unavailability_reason": "Maintenance"},
+        {"venue_id": 3, "name": "Hall C"},
+        {"venue_id": 4, "name": "Hall D"},
+        {"venue_id": 5, "name": "Hall E"},
+    ]
+    events = [event(1), event(2)]
+    bookings = [
+        booking(1, 1, venue_id=1),
+        booking(2, 1, venue_id=3),
+        booking(3, 2, "On Hold", venue_id=4, hold_expires_at=at(days=1)),
+    ]
+    world(monkeypatch, events, bookings, venues)
+    rows = {row["venue_id"]: row for row in va.alternative_venue_availability(1, STAFF)}
+    assert rows[2] == {"venue_id": 2, "available": False, "reason": "Maintenance"}
+    assert rows[3] == {"venue_id": 3, "available": False, "reason": "This event already has an active request for this venue."}
+    assert rows[4]["available"] is False
+    assert rows[4]["reason"].startswith("Venue is on hold until ")
+    assert rows[5] == {"venue_id": 5, "available": True, "reason": None}
+
+
+@tc("BE-VHOLD-025", "GET /api/venue-booking-requests/{id}/alternative-venue-availability",
+    "The booking exists but its event cannot be found.",
+    "HTTP 404 \"Event not found.\"",
+    pre="Request 1 references event 99, which does not exist.", steps="1. Call alternative_venue_availability(1, staff).", kind="Negative")
+def test_alternative_venue_availability_missing_event(monkeypatch):
+    world(monkeypatch, bookings=[booking(1, 99)])
+    assert err(va.alternative_venue_availability, 1, STAFF) == (404, "Event not found.")

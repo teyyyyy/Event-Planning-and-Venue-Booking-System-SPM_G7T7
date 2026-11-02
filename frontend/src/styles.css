@@ -728,6 +728,36 @@ tr:last-child td {
 .embedded-existing-page .shell > .content {
   width: 100%;
   max-width: none;
+  min-width: 0;
+}
+
+.embedded-existing-page,
+.embedded-existing-page .shell,
+.embedded-existing-page .shell > .content,
+.embedded-existing-page .equipment-page,
+.embedded-existing-page .request-form {
+  overflow: visible;
+}
+
+.embedded-existing-page .request-form {
+  width: 100%;
+  min-width: 0;
+}
+
+.embedded-existing-page .form-grid {
+  min-width: 0;
+}
+
+.embedded-existing-page .form-grid label {
+  min-width: 0;
+}
+
+.embedded-existing-page .form-grid select,
+.embedded-existing-page .form-grid input,
+.embedded-existing-page .form-grid textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .equipment-page {
   width: 100%;
@@ -2103,3 +2133,4 @@ tr:last-child td {
   border: 0;
   accent-color: #192541;
 }
+

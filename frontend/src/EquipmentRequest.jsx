@@ -14,6 +14,29 @@ function formatDateTime(value) {
   return date.toLocaleString('en-SG', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function formatEventDate(value) {
+  if (!value) return '—';
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString('en-SG', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatEventTime(value) {
+  if (!value) return '—';
+  const [hour, minute] = value.split(':').map(Number);
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  return date.toLocaleTimeString('en-SG', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function EquipmentRequest({ user }) {
   const [activeTab, setActiveTab] = useState('submission');
   const [events, setEvents] = useState([]);
@@ -353,7 +376,15 @@ export default function EquipmentRequest({ user }) {
               <select value={eventId} onChange={(event) => setEventId(event.target.value)} required>
                 <option value="">Select assigned event</option>
                 {events.map((event) => (
-                  <option key={event.id} value={event.id}>{event.event_name} — {event.event_date}</option>
+                  <option key={event.id} value={event.id}>
+                    {event.event_name} — {formatEventDate(event.event_date)}
+                    {event.event_end_date &&
+                      event.event_end_date !== event.event_date
+                      ? ` – ${formatEventDate(event.event_end_date)}`
+                      : ''}
+                    {' · '}
+                    {formatEventTime(event.start_time)} – {formatEventTime(event.end_time)}
+                  </option>
                 ))}
               </select>
             </label>
@@ -461,7 +492,7 @@ export default function EquipmentRequest({ user }) {
                   <tr>
                     <th>Request ID</th>
                     <th>Event</th>
-                    <th>Event Date</th>
+                    <th>Event Period</th>
                     <th>Equipment Details</th>
                     <th>Latest Technical Support Update</th>
                     <th>Status</th>
@@ -476,7 +507,17 @@ export default function EquipmentRequest({ user }) {
                     <tr key={request.request_id}>
                       <td>#{request.request_id}</td>
                       <td><strong>{request.event_name}</strong></td>
-                      <td>{request.event_date}</td>
+                      <td>
+                        <div>
+                          {formatEventDate(request.event_date)}
+                          {request.event_end_date &&
+                            request.event_end_date !== request.event_date &&
+                            ` – ${formatEventDate(request.event_end_date)}`}
+                        </div>
+                        <div className="request-time-note">
+                          {formatEventTime(request.start_time)} – {formatEventTime(request.end_time)}
+                        </div>
+                      </td>
 
                       <td>
                         <div className="request-equipment-list">
@@ -516,6 +557,12 @@ export default function EquipmentRequest({ user }) {
                         <span className={`request-status request-status-${request.status?.toLowerCase().replaceAll(' ', '-')}`}>
                           {request.status}
                         </span>
+
+                        {request.status === 'Pending' && (
+                          <div className="request-time-note">
+                            Event requirements changed. Review and resubmit this request.
+                          </div>
+                        )}
                       </td>
 
                       <td>
@@ -531,7 +578,7 @@ export default function EquipmentRequest({ user }) {
 
                       <td>
                         <div className="request-update-time">{formatDateTime(request.updated_at || request.created_at)}</div>
-                        <div className="request-time-note">{request.status === 'Updated' ? 'Updated' : 'Submitted'}</div>
+                        <div className="request-time-note">{request.status === 'Pending' ? 'Pending review' : request.status === 'Updated' ? 'Updated' : 'Submitted'}</div>
                       </td>
 
                       <td>
@@ -541,7 +588,7 @@ export default function EquipmentRequest({ user }) {
                           disabled={checkingEditAvailability}
                           onClick={() => startEditingRequest(request)}
                         >
-                          Edit Request
+                          {request.status === 'Pending' ? 'Review Request' : 'Edit Request'}
                         </button>
                       </td>
                     </tr>
@@ -557,20 +604,43 @@ export default function EquipmentRequest({ user }) {
         <form className="request-form" onSubmit={saveEditedRequest}>
           <div className="form-heading">
             <div>
-              <h2>Edit equipment request #{editingRequest.request_id}</h2>
-              <p>{editingRequest.event_name} — {editingRequest.event_date}</p>
+              <h2>
+                {editingRequest.status === 'Pending' ? 'Review' : 'Edit'} equipment request #{editingRequest.request_id}
+              </h2>
+              <p>
+                {editingRequest.event_name} — {formatEventDate(editingRequest.event_date)}
+                {editingRequest.event_end_date &&
+                  editingRequest.event_end_date !== editingRequest.event_date &&
+                  ` – ${formatEventDate(editingRequest.event_end_date)}`}
+                {' · '}
+                {formatEventTime(editingRequest.start_time)} – {formatEventTime(editingRequest.end_time)}
+              </p>
+              {editingRequest.status === 'Pending' && (
+                <p className="field-warning">
+                  This request was created because the event requirements changed.
+                  Review the equipment and quantities before resubmitting.
+                </p>
+              )}
             </div>
 
             <div className="form-actions">
               <button type="button" className="secondary" onClick={cancelEditingRequest} disabled={savingEdit}>Cancel</button>
-              <button type="submit" className="primary" disabled={savingEdit || checkingEditAvailability || !editFormIsValid()}>
-                {savingEdit ? 'Saving…' : 'Save Changes'}
+              <button
+                type="submit"
+                className="primary"
+                disabled={savingEdit || checkingEditAvailability || !editFormIsValid()}
+              >
+                {savingEdit
+                  ? 'Saving…'
+                  : editingRequest.status === 'Pending'
+                    ? 'Resubmit Request'
+                    : 'Save Changes'}
               </button>
             </div>
           </div>
 
           <p className="field-warning">
-            Existing equipment types cannot be changed directly because request ID and equipment ID form the primary key.
+            Existing equipment types cannot be changed directly.
             To replace an equipment type, remove it and add the new equipment.
           </p>
 

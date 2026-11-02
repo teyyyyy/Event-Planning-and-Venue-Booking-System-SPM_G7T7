@@ -139,21 +139,6 @@ def test_enrich_no_users():
     assert out[0]["coordinator_name"] is None and not any(t == "users" for t, *_ in client.log)
 
 
-@tc("BE-VENUE-020", "owned_booking", "Assigned staff opens their booking.", "The booking row is returned.", steps="1. Call owned_booking(client, 1, STAFF).")
-def test_owned_ok():
-    assert va.owned_booking(world(), 1, STAFF)["request_id"] == 1
-
-
-@tc("BE-VENUE-021", "owned_booking", "Request id does not exist.", "HTTP 404 \"Venue booking request not found.\"", steps="1. Call owned_booking(client, 99, STAFF).", kind="Negative")
-def test_owned_missing():
-    assert err(va.owned_booking, world(), 99, STAFF) == (404, "Venue booking request not found.")
-
-
-@tc("BE-VENUE-022", "owned_booking", "Booking is assigned to another staff member.", "HTTP 403.", data="staff id s2 vs assigned s1", steps="1. Call owned_booking with staff s2.", kind="Security")
-def test_owned_other_staff():
-    assert err(va.owned_booking, world(), 1, {"id": "s2"})[0] == 403
-
-
 @tc("BE-VENUE-023", "decide", "Pending request is approved.", "Status is stored as Approved with a decided_at timestamp and the enriched booking is returned.", pre="Booking 1 Pending, owned by s1.",
     steps="1. Call decide(1, STAFF, {\"status\": \"Approved\"}).")
 def test_decide_approve(use_db):
@@ -168,17 +153,19 @@ def test_decide_twice(use_db):
     assert err(va.decide, 1, STAFF, {"status": "Rejected"}) == (409, "This request has already been approved.")
 
 
-@tc("BE-VENUE-025", "decide", "Another staff member tries to decide.", "HTTP 403 and nothing is written.", steps="1. Call decide with staff s2.", kind="Security")
-def test_decide_other_staff(use_db):
+@tc("BE-VENUE-025", "decide", "Another venue staff member decides a request from the shared queue.", "The request is approved because venue booking requests are shared across venue staff.", steps="1. Call decide with staff s2.")
+def test_decide_shared_queue(use_db):
     client = use_db(world(), va)
-    assert err(va.decide, 1, {"id": "s2"}, {"status": "Approved"})[0] == 403 and not client.writes(va.BOOKING_TABLE, "update")
+    out = va.decide(1, {"id": "s2"}, {"status": "Approved"})
+    assert out["status"] == "Approved"
+    assert client.tables[va.BOOKING_TABLE][0]["status"] == "Approved"
 
 
-@tc("BE-VENUE-026", "decide", "Row is decided by someone else between the read and the guarded update.", "HTTP 409 \"This request was just decided by someone else.\"", pre="Update matches no rows.",
+@tc("BE-VENUE-026", "decide", "Row is decided by someone else between the read and the guarded update.", "HTTP 409 \"This request was just decided by another venue staff member.\"", pre="Update matches no rows.",
     steps="1. Simulate empty update. 2. Call decide.", kind="Edge")
 def test_decide_race(use_db):
     use_db(world(), va).empty_updates = True
-    assert err(va.decide, 1, STAFF, {"status": "Approved"}) == (409, "This request was just decided by someone else.")
+    assert err(va.decide, 1, STAFF, {"status": "Approved"}) == (409, "This request was just decided by another venue staff member.")
 
 
 @tc("BE-VENUE-027", "approve_request", "Staff approves a pending request.", "Status Approved; rejection reason and alternative venue are cleared.", pre="Booking has stale rejection fields.",
@@ -203,21 +190,21 @@ def test_reject_details(use_db):
 def test_reject_no_body(use_db):
     use_db(world(), va)
     out = va.reject_request(1, None, STAFF)
-    assert out["status"] == "Rejected" and out["rejection_reason"] is None
+    assert out["status"] == "Rejected" and out["rejection_reason"] is None and out["alternative_venue_id"] is None
 
 
-@tc("BE-VENUE-030", "list_requests", "Staff lists their requests.", "Only their own bookings are returned, newest created_at first.", pre="Two bookings for s1, one for s2.",
+@tc("BE-VENUE-030", "list_requests", "Venue staff list the shared request queue.", "Bookings are returned regardless of venue_staff_id, newest created_at first.", pre="Two bookings have venue_staff_id s1 and one has s2.",
     steps="1. Call list_requests(STAFF).")
 def test_list_requests(use_db):
     bookings = [BOOKING, {**BOOKING, "request_id": 2, "created_at": "2026-09-05T00:00:00+00:00"}, {**BOOKING, "request_id": 3, "venue_staff_id": "s2"}]
     use_db(world(bookings), va)
-    assert [r["request_id"] for r in va.list_requests(STAFF)] == [2, 1]
+    assert [r["request_id"] for r in va.list_requests(STAFF)] == [2, 1, 3]
 
 
-@tc("BE-VENUE-031", "list_requests", "Staff has no requests.", "Empty list.", steps="1. Call list_requests for a staff member with none.", kind="Edge")
-def test_list_empty(use_db):
+@tc("BE-VENUE-031", "list_requests", "A venue staff member with no individually assigned requests opens the queue.", "The shared venue booking queue is still returned.", steps="1. Call list_requests for another venue staff id.", kind="Edge")
+def test_list_shared_queue(use_db):
     use_db(world(), va)
-    assert va.list_requests({"id": "nobody"}) == []
+    assert [r["request_id"] for r in va.list_requests({"id": "nobody"})] == [1]
 
 
 @tc("BE-VENUE-032", "get_request", "Staff fetches one of their requests.", "The enriched booking is returned.", steps="1. Call get_request(1, STAFF).")
@@ -226,10 +213,11 @@ def test_get_request(use_db):
     assert va.get_request(1, STAFF)["venue_name"] == "Hall A"
 
 
-@tc("BE-VENUE-033", "get_request", "Staff fetches another staff member's request.", "HTTP 403.", steps="1. Call get_request(1, {\"id\": \"s2\"}).", kind="Security")
-def test_get_request_forbidden(use_db):
+@tc("BE-VENUE-033", "get_request", "Another venue staff member opens a request from the shared queue.", "The enriched booking is returned.", steps="1. Call get_request(1, {\"id\": \"s2\"}).")
+def test_get_request_shared_queue(use_db):
     use_db(world(), va)
-    assert err(va.get_request, 1, {"id": "s2"})[0] == 403
+    out = va.get_request(1, {"id": "s2"})
+    assert out["request_id"] == 1 and out["venue_name"] == "Hall A"
 
 
 @tc("BE-VENUE-034", "view", "A booking was initiated by processing an approved event change request; an older one was not.",
@@ -332,3 +320,104 @@ def test_alternative_venue_availability_reasons(use_db):
     assert statuses[7]["available"] is False and statuses[7]["reason"].startswith("Venue is on hold until")
     assert statuses[8] == {"venue_id": 8, "available": True, "reason": None}
     assert statuses[9] == {"venue_id": 9, "available": False, "reason": "Renovation"}
+
+@tc("BE-VENUE-041", "reject_request", "Venue staff propose an alternative venue that does not exist.",
+    "HTTP 409 reports the suggested venue as unavailable and no alternative offer is saved.",
+    pre="Venue 6 does not exist.", steps="1. Reject request 1 and propose venue 6.", kind="Negative")
+def test_alternative_offer_missing_venue(use_db):
+    client = use_db(world(), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(reason="Use another venue", alternative_venue_id=6), STAFF) == (
+        409,
+        "The suggested venue is unavailable.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-042", "reject_request", "Venue staff propose an alternative venue that is administratively unavailable.",
+    "HTTP 409 explains that the alternative venue is unavailable and no alternative offer is saved.",
+    pre="Hall B exists but is_available=False.", steps="1. Reject request 1 and propose Hall B.", kind="Negative")
+def test_alternative_offer_unavailable_venue(use_db):
+    client = use_db(world(
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "is_available": False, "unavailability_reason": "Renovation"}),
+    ), va)
+    assert err(va.reject_request, 1, va.RejectionDetails(reason="Use another venue", alternative_venue_id=6), STAFF) == (
+        409,
+        "The suggested venue is unavailable.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-043", "reject_request", "Venue staff propose an alternative venue that is currently on hold for an overlapping event.",
+    "HTTP 409 explains that the suggested venue is on hold and no alternative offer is saved.",
+    pre="Hall B is actively held by another overlapping event.", steps="1. Reject request 1 and propose Hall B.", kind="Negative")
+def test_alternative_offer_blocked_by_active_hold(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "On Hold",
+         "hold_expires_at": "2099-02-01T10:00:00+00:00"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    status, detail = err(
+        va.reject_request,
+        1,
+        va.RejectionDetails(reason="Use another venue", alternative_venue_id=6),
+        STAFF,
+    )
+    assert (status, detail) == (
+        409,
+        "The suggested venue is already booked during this event time.",
+    )
+    assert client.tables[va.BOOKING_TABLE][0].get("alternative_venue_id") is None
+
+
+@tc("BE-VENUE-044", "reject_request", "An expired hold exists on the proposed alternative venue.",
+    "The expired hold does not block the alternative offer.",
+    pre="Hall B has an expired hold from another overlapping event.", steps="1. Reject request 1 and propose Hall B.")
+def test_alternative_offer_ignores_expired_hold(use_db):
+    other_event = {**EVENT, "id": 11}
+    bookings = [
+        BOOKING,
+        {**BOOKING, "request_id": 2, "event_id": 11, "venue_id": 6, "status": "On Hold",
+         "hold_expires_at": "2020-01-01T00:00:00+00:00"},
+    ]
+    client = use_db(world(
+        bookings,
+        events=(EVENT, other_event),
+        venues=(VENUE, {"venue_id": 6, "name": "Hall B", "setup_time": 0, "teardown_time": 0}),
+    ), va)
+    out = va.reject_request(
+        1,
+        va.RejectionDetails(reason="Use another venue", alternative_venue_id=6),
+        STAFF,
+    )
+    assert out["status"] == "Alternative Offered"
+    assert out["alternative_venue_id"] == 6
+    assert client.tables[va.BOOKING_TABLE][0]["alternative_venue_id"] == 6
+
+
+@tc("BE-VENUE-045", "alternative_venue_availability", "Venue staff request alternative availability for a booking that does not exist.",
+    "HTTP 404 \"Venue booking request not found.\"",
+    steps="1. Query alternative venue availability for request 99.", kind="Negative")
+def test_alternative_availability_missing_request(use_db):
+    use_db(world(), va)
+    assert err(va.alternative_venue_availability, 99, STAFF) == (
+        404,
+        "Venue booking request not found.",
+    )
+
+
+@tc("BE-VENUE-046", "alternative_venue_availability", "The booking exists but its linked event cannot be found.",
+    "HTTP 404 \"Event not found.\"",
+    pre="Booking 1 references event 10 but Event Details contains no event 10.",
+    steps="1. Query alternative venue availability for request 1.", kind="Negative")
+def test_alternative_availability_missing_event(use_db):
+    use_db(world(events=()), va)
+    assert err(va.alternative_venue_availability, 1, STAFF) == (
+        404,
+        "Event not found.",
+    )

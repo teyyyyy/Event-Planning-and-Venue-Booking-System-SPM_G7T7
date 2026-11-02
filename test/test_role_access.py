@@ -15,6 +15,7 @@ import equipment_update as eu
 import event_changes as ec
 import event_organiser as eo
 import main
+import operational_feasibility_check as ofc
 import venue_approval as va
 import venue_catalogue as vc
 import venue_holds as vh
@@ -66,7 +67,10 @@ ROLE_PATHS = {
         "/api/venue-booking-requests/coordinators/{user_id}",
         "/api/venue-catalogue",
     ),
-    "Safety Officer": (),
+    "Safety Officer": (
+        "/api/safety-check/events",
+        "/api/safety-check/events/3",
+    ),
     "Venue Staff": (
         "/api/venue-booking-requests",
         "/api/venue-booking-requests/1/alternative-venue-availability",
@@ -116,12 +120,11 @@ ROLE_ACTIONS = (
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/hold", {"expires_at": "2099-01-01T09:00"}, {200}),
     ("Venue Staff", "DELETE", "/api/venue-booking-requests/1/hold", None, {200}),
     ("Venue Staff", "POST", "/api/venue-booking-requests/1/approve", None, {200}),
+    ("Safety Officer", "POST", "/api/safety-check/events/3/decision", {"decision": "Approved"}, {200}),
     ("Venue Staff", "PUT", "/api/venue-catalogue/1", {
-        "operating_hours": {day: {"closed": False, "opens": "09:00", "closes": "18:00"} for day in (
-            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
-        )},
-        "facilities": ["Wi-Fi"], "accessible": 1, "accessibility_details": "",
-        "layouts": [], "setup_time": 60, "teardown_time": 30,
+        "accessible": 1, "accessibility_details": "",
+        "emergency_access": "Emergency exit beside the main entrance.",
+        "venue_restrictions": "No open flames.", "setup_time": 60, "teardown_time": 30,
     }, {200}),
     ("Technical Support Staff", "PUT", "/api/equipment-update/{user_id}/events/1/requests", {"requests": []}, {400}),
     # Reach the handler without writing: request 2 is not event 1's request, reservation 999 does not exist.
@@ -160,17 +163,29 @@ def client_for_role(monkeypatch, role):
         "users": users,
         "Event Details": [event_row, {**event_row, "id": "1"}, {
             **event_row, "id": "2", "status": "Draft",
+        }, {
+            **event_row, "id": 3, "status": "Planning",
         }],
         "Venue Booking Requests": [{
             "request_id": 1, "venue_id": 1, "event_id": 1,
             "coordinator_id": USER_IDS["Event Coordinator"],
             "venue_staff_id": USER_IDS["Venue Staff"], "status": "Pending",
             "created_at": "2026-09-01T00:00:00+00:00",
+        }, {
+            "request_id": 2, "venue_id": 2, "event_id": 3,
+            "coordinator_id": USER_IDS["Event Coordinator"],
+            "venue_staff_id": USER_IDS["Venue Staff"], "status": "Approved",
+            "created_at": "2026-09-01T00:00:00+00:00",
         }],
-        "Venues": [{"venue_id": 1, "name": "Hall A"}],
+        "Venues": [
+            {"venue_id": 1, "name": "Hall A"},
+            {"venue_id": 2, "name": "Hall B"},
+        ],
         "Equipment Request": [{"request_id": 1, "event_id": 1, "status": "Submitted", "created_by": USER_IDS["Event Coordinator"]}],
         "Equipment Request Item": [{"request_id": 1, "equipment_id": "MIC", "requested_quantity": 1, "technical_requirements": ""}],
         "Equipment": [{"equipment_id": "MIC", "equipment_name": "Microphone", "total_quantity": 5, "under_maintenance_count": 0}],
+        "Equipment Reservation": [{"reservation_id": 1, "event_id": 3, "request_id": 1, "status": "Reserved"}],
+        "Equipment Reservation Item": [{"reservation_item_id": 1, "reservation_id": 1, "equipment_id": "MIC", "reserved_quantity": 1}],
         "event_change_log": [{"id": 1, "event_id": 1, "change_type": "Significant", "changed_by": USER_IDS["Event Coordinator"]}],
         "event_change_requests": [{
             "id": 1, "event_id": 1, "organiser_id": USER_IDS["Event Organiser"],
@@ -185,7 +200,7 @@ def client_for_role(monkeypatch, role):
     })
     for module, attribute in (
         (ca, "db"), (eo, "db"), (er, "db"), (eu, "db"), (ea, "db"), (rs, "db"),
-        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"), (vh, "db"),
+        (va, "db"), (vc, "db"), (vr, "get_supabase"), (ar, "db"), (nt, "db"), (ec, "db"), (vh, "db"), (ofc, "db"),
     ):
         monkeypatch.setattr(module, attribute, lambda fake=fake: fake)
     fake.tables["notifications"] = [{"id": 1, "recipient_id": user_id, "record_type": "event", "record_id": "1", "is_read": False}]
@@ -290,6 +305,12 @@ def assert_role_access(client, role, user_id):
         "description": "Role access test",
         "start_time": "09:00",
         "end_time": "17:00",
+        "layout_required": "Banquet",
+        "equipment_required": ["Microphone", "Projector"],
+        "accessibility_required": 1,
+        "equipment_placement": "Projector at the stage.",
+        "crowd_movement": "Keep the center aisle clear.",
+        "facilities_required": ["Aircon", "Stage"],
     }
     change_response = client.post(change_request_path, json=proposal)
     if role == "Event Organiser":
@@ -460,7 +481,7 @@ def test_event_coordinator_lead_access(monkeypatch):
 
 
 @tc("BE-ROLE-012", "Role access matrix", "A Safety Officer requests permitted and restricted route families.",
-    "Only notifications and profile routes are accessible until safety check request features are implemented; all other routes are denied.",
+    "Operational Safety Check event list, event detail and decision routes, notifications and profile routes are accessible; unrelated routes are denied.",
     steps="1. Authenticate as a Safety Officer. 2. Request each route in the role matrix.", kind="Security")
 def test_safety_officer_access(monkeypatch):
     client, user_id = client_for_role(monkeypatch, "Safety Officer")

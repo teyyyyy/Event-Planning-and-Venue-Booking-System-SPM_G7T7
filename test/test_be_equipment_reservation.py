@@ -103,7 +103,7 @@ def test_lookups_ok():
     data="event 404; event 1 without a request", steps="1. Call get_event(client, 404). 2. Call get_request on an event without a request.", kind="Negative")
 def test_lookups_missing():
     assert err(rs.get_event, w(), 404) == (404, "Event was not found.")
-    assert err(rs.get_request, world(), 1) == (404, "This event does not have an equipment request.")
+    assert err(rs.get_request, world(), 1) == (404, "This event does not have an active equipment request.")
 
 
 @tc("BE-EQRES-007", "event_datetimes", "The event has a date and start/end times.", "A (start, end) datetime pair on the event date is returned.", data="2026-10-01 09:00-17:00", steps="1. Call event_datetimes(EVENT).")
@@ -172,13 +172,13 @@ def test_no_duplicates():
 
 
 @tc("BE-EQRES-015", "validate_request_items", "Reserved items are compared with the equipment request.",
-    "Accepted within the requested quantities; HTTP 400 for equipment not in the request or more than was requested.",
-    data="MIC x2 (ok); PRJ x2 (requested 1); CAM x1 (not requested)", steps="1. Validate MIC x2. 2. Validate PRJ x2. 3. Validate CAM x1.", kind="Negative")
+    "The reservation must exactly match the equipment types and quantities in the current request.",
+    data="Request: MIC x2, PRJ x1; test exact match, missing PRJ and wrong MIC quantity", steps="1. Validate the exact request. 2. Validate with PRJ missing. 3. Validate with MIC x1.", kind="Negative")
 def test_validate_against_request():
     client = w()
-    rs.validate_request_items(client, 7, [Item(equipment_id="MIC", reserved_quantity=2)])
-    assert err(rs.validate_request_items, client, 7, [Item(equipment_id="PRJ", reserved_quantity=2)]) == (400, "Reserved quantity for PRJ cannot exceed the requested quantity of 1.")
-    assert err(rs.validate_request_items, client, 7, [Item(equipment_id="CAM", reserved_quantity=1)]) == (400, "CAM is not part of this equipment request.")
+    rs.validate_request_items(client, 7, [Item(equipment_id="MIC", reserved_quantity=2), Item(equipment_id="PRJ", reserved_quantity=1)])
+    assert err(rs.validate_request_items, client, 7, [Item(equipment_id="MIC", reserved_quantity=2)]) == (400, "The reservation equipment must exactly match the current equipment request.")
+    assert err(rs.validate_request_items, client, 7, [Item(equipment_id="MIC", reserved_quantity=1), Item(equipment_id="PRJ", reserved_quantity=1)]) == (400, "Reserved quantity for MIC must match the requested quantity of 2.")
 
 
 @tc("BE-EQRES-016", "reservation_response", "The reservation and the current request list different equipment.",
@@ -322,15 +322,15 @@ def test_create_rollback(use_db):
 
 # ---- update ----------------------------------------------------------------------------
 
-@tc("BE-EQRES-028", "update_reservation", "Technical support lowers MIC, drops PRJ and keeps the rest.",
-    "MIC is updated, PRJ (quantity 0) is deleted, an omitted line is deleted, and the header becomes Modified.",
-    pre="Reservation 50: MIC x2, PRJ x1 and a stale CAM line.", data="MIC x1, PRJ x0", steps="1. Call update_reservation(\"t1\", 50, [MIC x1, PRJ x0]).", kind="State")
+@tc("BE-EQRES-028", "update_reservation", "Technical support updates a reservation to match the current equipment request.",
+    "MIC x2 and PRJ x1 are retained, a stale CAM line is deleted, and the header becomes Modified.",
+    pre="Reservation 50: MIC x2, PRJ x1 and a stale CAM line.", data="MIC x2, PRJ x1", steps="1. Call update_reservation(\"t1\", 50, [MIC x2, PRJ x1]).", kind="State")
 def test_update_ok(use_db):
-    client = booked()
+    client = booked("Needs Recheck")
     client.tables["Equipment Reservation Item"].append(line(50, "CAM", 1, item_id=503))
     use_db(client, rs)
-    out = update(Item(equipment_id="MIC", reserved_quantity=1), Item(equipment_id="PRJ", reserved_quantity=0))
-    assert [(i["equipment_id"], i["reserved_quantity"]) for i in client.tables["Equipment Reservation Item"]] == [("MIC", 1)]
+    out = update(Item(equipment_id="MIC", reserved_quantity=2), Item(equipment_id="PRJ", reserved_quantity=1))
+    assert [(i["equipment_id"], i["reserved_quantity"]) for i in client.tables["Equipment Reservation Item"]] == [("MIC", 2), ("PRJ", 1)]
     assert (client.tables["Equipment Reservation"][0]["status"], out["message"]) == ("Modified", "Equipment reservation updated successfully.")
 
 
@@ -355,32 +355,32 @@ def test_update_closed(use_db):
     assert err(update, Item(equipment_id="MIC", reserved_quantity=1)) == (400, "A completed reservation cannot be modified.")
 
 
-@tc("BE-EQRES-031", "update_reservation", "Every item is set to 0, an item is duplicated, or more is reserved than was requested.",
-    "HTTP 400 asking to cancel instead; HTTP 400 for duplicates; HTTP 400 naming the requested limit.", data="all x0; MIC twice; MIC x3 (requested 2)",
-    steps="1. Update with all zeros. 2. Update with MIC twice. 3. Update with MIC x3.", kind="Negative")
+@tc("BE-EQRES-031", "update_reservation", "Every item is set to 0, an item is duplicated, or a reserved quantity differs from the request.",
+    "HTTP 400 asking to cancel instead; HTTP 400 for duplicates; HTTP 400 naming the required requested quantity.", data="all x0; MIC twice; MIC x3 and PRJ x1",
+    steps="1. Update with all zeros. 2. Update with MIC twice. 3. Update with MIC x3 and PRJ x1.", kind="Negative")
 def test_update_invalid(use_db):
     use_db(booked(), rs)
     assert err(update, Item(equipment_id="MIC", reserved_quantity=0)) == (400, "At least one item must remain reserved. Cancel the reservation instead.")
     assert err(update, Item(equipment_id="MIC", reserved_quantity=1), Item(equipment_id="MIC", reserved_quantity=1))[0] == 400
-    assert err(update, Item(equipment_id="MIC", reserved_quantity=3))[1] == "Reserved quantity for MIC cannot exceed the requested quantity of 2."
+    assert err(update, Item(equipment_id="MIC", reserved_quantity=3), Item(equipment_id="PRJ", reserved_quantity=1))[1] == "Reserved quantity for MIC must match the requested quantity of 2."
 
 
 @tc("BE-EQRES-032", "update_reservation", "Another event has booked the projectors in the meantime.",
     "The reservation's own lines are not counted against it, but other reservations are: HTTP 409 when nothing is left.",
-    pre="Reservation 50 holds PRJ x1; reservation 60 (event 99) holds 3 PRJ.", data="PRJ x1", steps="1. Call update_reservation with PRJ x1.", kind="Negative")
+    pre="Reservation 50 holds MIC x2 and PRJ x1; reservation 60 (event 99) holds 3 PRJ.", data="MIC x2, PRJ x1", steps="1. Call update_reservation with MIC x2 and PRJ x1.", kind="Negative")
 def test_update_unavailable(use_db):
     client = booked()
     client.tables["Equipment Reservation"].append(header(60, event_id=99))
     client.tables["Equipment Reservation Item"].append(line(60, "PRJ", 3))
     use_db(client, rs)
-    assert err(update, Item(equipment_id="PRJ", reserved_quantity=1)) == (409, "Projector only has 0 available during this event period.")
+    assert err(update, Item(equipment_id="MIC", reserved_quantity=2), Item(equipment_id="PRJ", reserved_quantity=1)) == (409, "Projector only has 0 available during this event period.")
 
 
 @tc("BE-EQRES-033", "update_reservation", "The header update returns no row.", "HTTP 500 \"Equipment reservation could not be updated.\"", pre="Updates return empty data.",
     steps="1. Simulate empty updates. 2. Call update_reservation.", kind="Negative")
 def test_update_header_fails(use_db):
     use_db(booked(), rs).empty_updates = True
-    assert err(update, Item(equipment_id="MIC", reserved_quantity=1)) == (500, "Equipment reservation could not be updated.")
+    assert err(update, Item(equipment_id="MIC", reserved_quantity=2), Item(equipment_id="PRJ", reserved_quantity=1)) == (500, "Equipment reservation could not be updated.")
 
 
 # ---- cancel ----------------------------------------------------------------------------
@@ -418,7 +418,7 @@ http = TestClient(main.app)
 ROUTES = (
     ("GET", "/api/equipment-reservation/t1/reservations", None),
     ("GET", "/api/equipment-reservation/t1/events/1", None),
-    ("PUT", "/api/equipment-reservation/t1/50", {"items": [{"equipment_id": "MIC", "reserved_quantity": 1}]}),
+    ("PUT", "/api/equipment-reservation/t1/50", {"items": [{"equipment_id": "MIC", "reserved_quantity": 2}, {"equipment_id": "PRJ", "reserved_quantity": 1}]}),
     ("DELETE", "/api/equipment-reservation/t1/50", None),
     ("POST", "/api/equipment-reservation/t1", {"event_id": 1, "request_id": 7}),
 )
@@ -486,3 +486,62 @@ def test_datetimes_multi_day():
 def test_overlap_multi_day():
     client = w([header(5, "Reserved")], [line(5, "MIC", 4, start="2026-10-02T09:00:00", end="2026-10-02T17:00:00")])
     assert rs.overlapping_reserved_quantities(client, dict(MULTI_DAY)) == {"MIC": 4}
+
+
+@tc("BE-EQRES-043", "confirm_reservation", "Technical support confirms a reservation that Needs Recheck.",
+    "The reservation is changed back to Reserved and its items are synchronised with the current equipment request.",
+    pre="Reservation 50 Needs Recheck; current request 7 contains MIC x2 and PRJ x1.", steps="1. Call confirm_reservation(\"t1\", 50).", kind="State")
+def test_confirm_needs_recheck(use_db):
+    client = use_db(booked("Needs Recheck"), rs)
+    out = rs.confirm_reservation("t1", 50)
+    assert (client.tables["Equipment Reservation"][0]["status"], out["message"]) == ("Reserved", "Equipment reservation confirmed successfully.")
+    assert {(i["equipment_id"], i["reserved_quantity"]) for i in client.tables["Equipment Reservation Item"]} == {("MIC", 2), ("PRJ", 1)}
+
+
+@tc("BE-EQRES-044", "confirm_reservation", "Technical support confirms a Modified reservation.",
+    "The reservation is changed back to Reserved.", pre="Reservation 50 has status Modified and matches the current request.",
+    steps="1. Call confirm_reservation(\"t1\", 50).", kind="State")
+def test_confirm_modified(use_db):
+    client = use_db(booked("Modified"), rs)
+    out = rs.confirm_reservation("t1", 50)
+    assert (client.tables["Equipment Reservation"][0]["status"], out["status"]) == ("Reserved", "Reserved")
+
+
+@tc("BE-EQRES-045", "confirm_reservation", "Technical support tries to confirm a reservation that is already Reserved.",
+    "HTTP 409 because only Needs Recheck or Modified reservations can be confirmed.", pre="Reservation 50 has status Reserved.",
+    steps="1. Call confirm_reservation(\"t1\", 50).", kind="Negative")
+def test_confirm_reserved_rejected(use_db):
+    use_db(booked("Reserved"), rs)
+    assert err(rs.confirm_reservation, "t1", 50) == (409, "Only a reservation that needs recheck or has been modified can be confirmed.")
+
+
+@tc("BE-EQRES-046", "confirm_reservation", "Technical support tries to confirm a reservation that does not exist.",
+    "HTTP 404 \"Equipment reservation was not found.\"", data="reservation_id = 999",
+    steps="1. Call confirm_reservation(\"t1\", 999).", kind="Negative")
+def test_confirm_missing(use_db):
+    use_db(w(), rs)
+    assert err(rs.confirm_reservation, "t1", 999) == (404, "Equipment reservation was not found.")
+
+
+@tc("BE-EQRES-047", "confirm_reservation", "A reservation Needs Recheck but another event now uses all available projectors.",
+    "HTTP 409 because the current request can no longer be fully reserved.", pre="Reservation 50 Needs Recheck; another event reserves all 3 PRJ.",
+    data="Current request requires MIC x2 and PRJ x1.", steps="1. Call confirm_reservation(\"t1\", 50).", kind="Negative")
+def test_confirm_unavailable(use_db):
+    client = booked("Needs Recheck")
+    client.tables["Equipment Reservation"].append(header(60, event_id=99))
+    client.tables["Equipment Reservation Item"].append(line(60, "PRJ", 3))
+    use_db(client, rs)
+    assert err(rs.confirm_reservation, "t1", 50) == (409, "Projector only has 0 available during this event period.")
+
+
+@tc("BE-EQRES-048", "reservation_for_event", "An existing reservation belongs to an older equipment request.",
+    "The reservation is linked to the current request and changed to Needs Recheck.", pre="Reservation 50 points to request 6 while the event's current active request is 7.",
+    steps="1. Call reservation_for_event(\"t1\", 1).", kind="State")
+def test_for_event_old_request_needs_recheck(use_db):
+    client = booked()
+    client.tables["Equipment Reservation"][0]["request_id"] = 6
+    use_db(client, rs)
+    out = rs.reservation_for_event("t1", 1)
+    saved = client.tables["Equipment Reservation"][0]
+    assert (saved["request_id"], saved["status"]) == (7, "Needs Recheck")
+    assert (out["mode"], out["request_id"], out["status"]) == ("existing", 7, "Needs Recheck")

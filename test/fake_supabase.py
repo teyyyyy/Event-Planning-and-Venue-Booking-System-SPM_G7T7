@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 
+
 PKS = {
     "Event Details": "id", "users": "id", "Equipment": "equipment_id",
     "Equipment Request": "request_id", "Venue Booking Requests": "request_id",
@@ -14,6 +15,24 @@ PKS = {
 class Result(SimpleNamespace):
     pass
 
+class _NotFilter:
+    """Minimal support for Supabase .not_.is_(column, value)."""
+
+    def __init__(self, query):
+        self.query = query
+
+    def is_(self, key, value):
+        if value == "null":
+            self.query.filters.append(
+                lambda row: row.get(key) is not None
+            )
+        else:
+            self.query.filters.append(
+                lambda row: row.get(key) != value
+            )
+
+        return self.query
+
 
 class Query:
     def __init__(self, client, name):
@@ -21,6 +40,9 @@ class Query:
         self.op, self.payload = "select", None
         self.filters, self.orders, self.single = [], [], False
         self.page = None
+        # Supports Supabase syntax such as:
+        # .not_.is_("coordinator_id", "null")
+        self.not_ = _NotFilter(self)
 
     def select(self, *_): return self
     def insert(self, payload): self.op, self.payload = "insert", payload; return self
@@ -109,6 +131,12 @@ class FakeClient:
                         "proposed_event_end_date": params["p_event_end_date"],
                         "proposed_event_capacity": params["p_event_capacity"],
                         "proposed_description": params["p_description"],
+                        "proposed_layout_required": params["p_layout_required"],
+                        "proposed_equipment_required": params["p_equipment_required"],
+                        "proposed_facilities_required": params["p_facilities_required"],
+                        "proposed_accessibility_required": params["p_accessibility_required"],
+                        "proposed_equipment_placement": params["p_equipment_placement"],
+                        "proposed_crowd_movement": params["p_crowd_movement"],
                         "proposed_start_time": params["p_start_time"],
                         "proposed_end_time": params["p_end_time"],
                     }
@@ -154,6 +182,56 @@ class FakeClient:
                 except Exception:
                     self.tables = snapshot
                     raise
+
+            if name == "update_event_change_request":
+                request = next(
+                    (row for row in self.tables.get("event_change_requests", [])
+                     if str(row.get("id")) == str(params["p_request_id"])),
+                    None,
+                )
+                if not request:
+                    raise APIError({"message": "Event change request not found.", "code": "P0002", "details": None, "hint": None})
+                if str(request.get("organiser_id")) != str(params["p_organiser_id"]):
+                    raise APIError({"message": "You can only update your own change request.", "code": "42501", "details": None, "hint": None})
+                if request.get("review_status") != "Pending":
+                    raise APIError({"message": "Only pending change requests can be updated.", "code": "55000", "details": None, "hint": None})
+                request_text = str(params.get("p_request_text") or "").strip()
+                if not request_text or len(request_text) > 5000:
+                    raise APIError({"message": "Change requests must contain 1 to 5,000 characters.", "code": "22023", "details": None, "hint": None})
+                request.update({
+                    "request_text": request_text,
+                    "proposed_event_name": params["p_event_name"],
+                    "proposed_event_type": params["p_event_type"],
+                    "proposed_event_date": params["p_event_date"],
+                    "proposed_event_end_date": params["p_event_end_date"],
+                    "proposed_event_capacity": params["p_event_capacity"],
+                    "proposed_description": params["p_description"],
+                    "proposed_layout_required": params["p_layout_required"],
+                    "proposed_equipment_required": params["p_equipment_required"],
+                    "proposed_facilities_required": params["p_facilities_required"],
+                    "proposed_accessibility_required": params["p_accessibility_required"],
+                    "proposed_equipment_placement": params["p_equipment_placement"],
+                    "proposed_crowd_movement": params["p_crowd_movement"],
+                    "proposed_start_time": params["p_start_time"],
+                    "proposed_end_time": params["p_end_time"],
+                })
+                return Result(data=dict(request))
+
+            if name == "cancel_event_change_request":
+                request = next(
+                    (row for row in self.tables.get("event_change_requests", [])
+                     if str(row.get("id")) == str(params["p_request_id"])),
+                    None,
+                )
+                if not request:
+                    raise APIError({"message": "Event change request not found.", "code": "P0002", "details": None, "hint": None})
+                if str(request.get("organiser_id")) != str(params["p_organiser_id"]):
+                    raise APIError({"message": "You can only cancel your own change request.", "code": "42501", "details": None, "hint": None})
+                if request.get("review_status") != "Pending":
+                    raise APIError({"message": "Only pending change requests can be cancelled.", "code": "55000", "details": None, "hint": None})
+                request["review_status"] = "Cancelled"
+                return Result(data=dict(request))
+
             if name == "review_event_change_request":
                 request = next(
                     (
@@ -194,6 +272,12 @@ class FakeClient:
                             "event_end_date": request.get("proposed_event_end_date"),
                             "event_capacity": request.get("proposed_event_capacity"),
                             "description": request.get("proposed_description"),
+                            "layout_required": request.get("proposed_layout_required"),
+                            "equipment_required": request.get("proposed_equipment_required"),
+                            "facilities_required": request.get("proposed_facilities_required"),
+                            "accessibility_required": request.get("proposed_accessibility_required"),
+                            "equipment_placement": request.get("proposed_equipment_placement"),
+                            "crowd_movement": request.get("proposed_crowd_movement"),
                             "start_time": request.get("proposed_start_time"),
                             "end_time": request.get("proposed_end_time"),
                         })
@@ -215,6 +299,7 @@ class FakeClient:
                 except Exception:
                     self.tables = snapshot
                     raise
+
             if name != "submit_equipment_request":
                 raise NotImplementedError(name)
             snapshot = deepcopy(self.tables)

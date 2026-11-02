@@ -153,4 +153,63 @@ describe('EquipmentAvailability', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Update Equipment Request' }));
       expect(onUpdate).toHaveBeenCalledWith(1);
     });
+
+  tc('FE-EQAVAIL-017', 'EquipmentAvailability', 'An event spans multiple days.', 'The event date shows the formatted start and end dates as a range.', { kind: 'Edge', data: '2026-10-01 to 2026-10-03', steps: '1. Return a multi-day event. 2. Inspect the event date.' },
+    async () => {
+      backend({ list: [listEvent({ event_end_date: '2026-10-03' })] });
+      render(<EquipmentAvailability user={USER} />);
+      expect(await screen.findByText(/01 Oct 2026.*03 Oct 2026/)).toBeInTheDocument();
+    });
+
+  tc('FE-EQAVAIL-018', 'EquipmentAvailability', 'An event has no event date.', 'The event date cell shows "—".', { kind: 'Edge', data: 'event_date = null', steps: '1. Return an event without an event date. 2. Inspect the event row.' },
+    async () => {
+      backend({ list: [listEvent({ event_date: null })] });
+      render(<EquipmentAvailability user={USER} />);
+      const row = (await screen.findByText('Gala')).closest('tr');
+      expect(within(row).getAllByText('—').length).toBeGreaterThan(0);
+    });
+
+  tc('FE-EQAVAIL-019', 'EquipmentAvailability (check)', 'The availability API fails without an error detail.', 'The default "Unable to check equipment availability." message is shown.', { kind: 'Negative', steps: '1. Return a failed detail response without detail. 2. Click "Check Availability".' },
+    async () => {
+      backend({ extra: (url) => (/\/events\/\d+$/.test(url) ? json({}, 500) : null) });
+      render(<EquipmentAvailability user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Check Availability' }));
+      expect(await screen.findByText('Unable to check equipment availability.')).toBeInTheDocument();
+    });
+
+  tc('FE-EQAVAIL-020', 'EquipmentAvailability (check)', 'The availability request encounters a network error.', 'The network error message is shown and the events list remains visible.', { kind: 'Negative', steps: '1. Reject the detail request. 2. Click "Check Availability".' },
+    async () => {
+      backend({ extra: (url) => { if (/\/events\/\d+$/.test(url)) throw new Error('Failed to fetch'); return null; } });
+      render(<EquipmentAvailability user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Check Availability' }));
+      expect(await screen.findByText('Failed to fetch')).toBeInTheDocument();
+      expect(screen.getByText('Availability by event')).toBeInTheDocument();
+    });
+
+  tc('FE-EQAVAIL-021', 'EquipmentAvailability (catalogue)', 'The catalogue API returns something other than a list.', 'The catalogue is treated as empty without crashing.', { kind: 'Edge', data: '{"unexpected": true}', steps: '1. Open an event. 2. Return an object for the catalogue. 3. Click "View Full Catalogue".' },
+    async () => {
+      backend({ cat: { unexpected: true } });
+      render(<EquipmentAvailability user={USER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Check Availability' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'View Full Catalogue' }));
+      expect(await screen.findByRole('button', { name: 'Hide Catalogue' })).toBeInTheDocument();
+      expect(document.querySelectorAll('.availability-catalogue-table tbody tr')).toHaveLength(0);
+    });
+
+  tc('FE-EQAVAIL-022', 'EquipmentAvailability (check)', 'An availability check is still in progress.', 'Check Availability buttons are disabled and a second request cannot be started until the first finishes.', { kind: 'State', steps: '1. Hold the detail response. 2. Click "Check Availability". 3. Verify the checking state. 4. Resolve the response.' },
+    async () => {
+      let finish;
+      const pending = new Promise((resolve) => { finish = resolve; });
+      const f = backend({ extra: (url) => (/\/events\/\d+$/.test(url) ? pending : null) });
+      render(<EquipmentAvailability user={USER} />);
+      const button = await screen.findByRole('button', { name: 'Check Availability' });
+      fireEvent.click(button);
+      expect(await screen.findByRole('button', { name: 'Checking…' })).toBeDisabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Checking…' }));
+      expect(callsTo(f, '/events/1')).toHaveLength(1);
+      finish(json(detail()));
+      expect(await screen.findByText('All requested equipment is available')).toBeInTheDocument();
+    });
+
 });
+

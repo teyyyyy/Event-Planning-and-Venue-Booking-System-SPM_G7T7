@@ -69,6 +69,17 @@ begin
     where event_id = p_event_id
       and coordinator_id is distinct from p_coordinator_id;
 
+  update public."Equipment Request"
+    set created_by = p_coordinator_id
+    where event_id = p_event_id
+      and created_by is distinct from p_coordinator_id;
+  
+  update public.event_change_requests
+    set coordinator_id = p_coordinator_id
+    where event_id = p_event_id
+      and coordinator_id is distinct from p_coordinator_id
+      and review_status = 'Pending';
+
   update public.users u set active_event_count = (
     select count(*) from public."Event Details" e
     where e.coordinator_id = u.id

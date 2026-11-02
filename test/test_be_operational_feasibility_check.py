@@ -11,6 +11,8 @@ VENUE = {
     "venue_name": "Seminar Room 1",
     "capacity": 100,
     "location": "School of Computing",
+    "emergency_access": "Emergency exit beside the main entrance.",
+    "venue_restrictions": "Keep emergency exits clear.",
 }
 
 APPROVED_BOOKING = {
@@ -36,11 +38,15 @@ SAFETY_OFFICER = {
 
 def safety_world(**tables):
     data = {
-        "Event Details": [dict(EVENT)],
+        "Event Details": [{
+            **EVENT,
+            "equipment_placement": "Near the stage.",
+            "crowd_movement": "Keep the center aisle clear.",
+        }],
         "Venue Booking Requests": [dict(APPROVED_BOOKING)],
         "Venues": [dict(VENUE)],
         "Equipment Reservation": [dict(RESERVED_EQUIPMENT)],
-        "Operational Safety Check": [],
+        "event_change_log": [],
         "users": [dict(SAFETY_OFFICER)],
     }
     data.update(tables)
@@ -101,19 +107,19 @@ def test_equipment_needs_recheck():
     "BE-SAFETY-004",
     "event_is_ready_for_safety_check",
     "Equipment reservation has been Modified.",
-    "Returns True.",
+    "Returns False because only Reserved equipment is ready for safety review.",
     pre="Venue Approved; equipment Modified.",
     steps="1. Check whether event 1 is ready for safety review.",
     kind="State"
 )
-def test_modified_equipment_ready():
+def test_modified_equipment_not_ready():
     client = safety_world(**{
         "Equipment Reservation": [
             {**RESERVED_EQUIPMENT, "status": "Modified"}
         ]
     })
 
-    assert ofc.event_is_ready_for_safety_check(client, 1) is True
+    assert ofc.event_is_ready_for_safety_check(client, 1) is False
 
 
 @tc(
@@ -198,21 +204,20 @@ def test_get_event_not_ready(use_db):
 @tc(
     "BE-SAFETY-009",
     "get_event_for_safety_check",
-    "Safety information not yet stored in the current schema.",
-    "Unavailable safety fields are returned as None.",
+    "Safety Officer opens an eligible event with safety information.",
+    "Current safety information and venue safety details are returned.",
     pre="Event is eligible for safety review.",
-    steps="1. Open event 1. 2. Inspect unavailable safety fields.",
-    kind="Edge"
+    steps="1. Open event 1. 2. Inspect safety information."
 )
-def test_missing_safety_fields(use_db):
+def test_safety_fields_returned(use_db):
     use_db(safety_world(), ofc)
 
     out = ofc.get_event_for_safety_check(1)
 
-    assert out["equipment_placement"] is None
-    assert out["crowd_movement"] is None
-    assert out["emergency_access"] is None
-    assert out["venue_restrictions"] is None
+    assert out["equipment_placement"] == "Near the stage."
+    assert out["crowd_movement"] == "Keep the center aisle clear."
+    assert out["emergency_access"] == ["Emergency exit beside the main entrance."]
+    assert out["venue_restrictions"] == ["Keep emergency exits clear."]
 
 
 @tc(
@@ -220,7 +225,7 @@ def test_missing_safety_fields(use_db):
     "list_events_for_safety_check",
     "Eligible event has not been reviewed.",
     "Event appears in the Safety Officer review list.",
-    pre="Venue Approved; equipment Reserved; no safety check.",
+    pre="Venue Approved; equipment Reserved; no safety decision.",
     steps="1. List events requiring safety review."
 )
 def test_list_eligible_event(use_db):
@@ -237,18 +242,20 @@ def test_list_eligible_event(use_db):
     "list_events_for_safety_check",
     "Event already has Safety Officer approval.",
     "Event is excluded from the review list.",
-    pre="Event has an Approved Operational Safety Check.",
+    pre="Event has an Approved safety decision.",
     steps="1. List events requiring safety review.",
     kind="State"
 )
 def test_list_excludes_approved(use_db):
     client = safety_world(**{
-        "Operational Safety Check": [{
-            "check_id": 1,
-            "event_id": 1,
+        "Event Details": [{
+            **EVENT,
+            "equipment_placement": "Near the stage.",
+            "crowd_movement": "Keep the center aisle clear.",
+            "safety_decision_status": "Approved",
             "safety_officer_id": "s1",
-            "status": "Approved",
-            "comments": None,
+            "safety_comments": "Safe.",
+            "safety_decided_at": "2026-11-01T10:00:00+00:00",
         }]
     })
     use_db(client, ofc)
@@ -260,10 +267,10 @@ def test_list_excludes_approved(use_db):
     "BE-SAFETY-012",
     "submit_safety_decision",
     "Safety Officer approves an eligible event.",
-    "Safety check is stored and event moves to Preparation.",
-    pre="Event is eligible and has no existing safety check.",
+    "Safety decision is stored with the event and event moves to Confirmed.",
+    pre="Event is eligible and has no existing safety decision.",
     data="decision = Approved",
-    steps="1. Submit Approved. 2. Inspect safety check and event status."
+    steps="1. Submit Approved. 2. Inspect safety decision and event status."
 )
 def test_approve_event(use_db):
     client = use_db(safety_world(), ofc)
@@ -276,23 +283,24 @@ def test_approve_event(use_db):
     out = ofc.submit_safety_decision(1, request, SAFETY_OFFICER)
 
     assert out["decision"] == "Approved"
-    assert out["event_status"] == "Preparation"
+    assert out["event_status"] == "Confirmed"
+    assert out["affected_arrangements"] == []
 
-    check = client.tables["Operational Safety Check"][0]
-    assert check["event_id"] == 1
-    assert check["safety_officer_id"] == "s1"
-    assert check["status"] == "Approved"
-
-    assert client.tables["Event Details"][0]["status"] == "Preparation"
+    event = client.tables["Event Details"][0]
+    assert event["status"] == "Confirmed"
+    assert event["safety_decision_status"] == "Approved"
+    assert event["safety_officer_id"] == "s1"
+    assert event["safety_comments"] == "Arrangements are safe."
+    assert event["safety_affected_arrangements"] is None
 
 
 @tc(
     "BE-SAFETY-013",
     "submit_safety_decision",
     "Safety Officer rejects an event with a reason.",
-    "Safety check is stored and event returns to Planning.",
+    "Safety decision is stored and event returns to Planning without changing venue or equipment arrangements.",
     data="decision = Rejected",
-    steps="1. Submit Rejected with comments. 2. Inspect event status.",
+    steps="1. Submit Rejected with comments. 2. Inspect event and arrangement statuses.",
     kind="State"
 )
 def test_reject_event(use_db):
@@ -307,8 +315,14 @@ def test_reject_event(use_db):
 
     assert out["decision"] == "Rejected"
     assert out["event_status"] == "Planning"
-    assert client.tables["Operational Safety Check"][0]["status"] == "Rejected"
-    assert client.tables["Event Details"][0]["status"] == "Planning"
+    assert out["affected_arrangements"] == []
+
+    event = client.tables["Event Details"][0]
+    assert event["status"] == "Planning"
+    assert event["safety_decision_status"] == "Rejected"
+    assert event["safety_comments"] == "Emergency access is insufficient."
+    assert client.tables["Venue Booking Requests"][0]["status"] == "Approved"
+    assert client.tables["Equipment Reservation"][0]["status"] == "Reserved"
 
 
 @tc(
@@ -342,10 +356,10 @@ def test_reject_requires_comments(use_db):
 @tc(
     "BE-SAFETY-015",
     "submit_safety_decision",
-    "Safety Officer requests changes with a reason.",
-    "Safety check is stored and event returns to Planning.",
-    data="decision = Changes Requested",
-    steps="1. Submit Changes Requested. 2. Inspect event status.",
+    "Safety Officer requests venue changes with a reason.",
+    "Safety decision is stored and event returns to Planning while existing arrangements remain unchanged.",
+    data="decision = Changes Requested; affected_arrangements = Venue",
+    steps="1. Submit Changes Requested. 2. Inspect event and arrangement statuses.",
     kind="State"
 )
 def test_request_changes(use_db):
@@ -353,14 +367,22 @@ def test_request_changes(use_db):
 
     request = ofc.SafetyDecisionRequest(
         decision="Changes Requested",
-        comments="Please revise the venue layout."
+        comments="Please revise the venue layout.",
+        affected_arrangements=["Venue"]
     )
 
     out = ofc.submit_safety_decision(1, request, SAFETY_OFFICER)
 
     assert out["decision"] == "Changes Requested"
     assert out["event_status"] == "Planning"
-    assert client.tables["Operational Safety Check"][0]["status"] == "Changes Requested"
+    assert out["affected_arrangements"] == ["Venue"]
+
+    event = client.tables["Event Details"][0]
+    assert event["status"] == "Planning"
+    assert event["safety_decision_status"] == "Changes Requested"
+    assert event["safety_affected_arrangements"] == ["Venue"]
+    assert client.tables["Venue Booking Requests"][0]["status"] == "Approved"
+    assert client.tables["Equipment Reservation"][0]["status"] == "Reserved"
 
 
 @tc(
@@ -376,7 +398,8 @@ def test_request_changes_requires_comments(use_db):
     use_db(safety_world(), ofc)
 
     request = ofc.SafetyDecisionRequest(
-        decision="Changes Requested"
+        decision="Changes Requested",
+        affected_arrangements=["Venue"]
     )
 
     assert err(
@@ -384,7 +407,10 @@ def test_request_changes_requires_comments(use_db):
         1,
         request,
         SAFETY_OFFICER
-    )[0] == 400
+    ) == (
+        400,
+        "Comments are required when rejecting or requesting changes."
+    )
 
 
 @tc(
@@ -418,9 +444,9 @@ def test_decision_event_not_found(use_db):
     "BE-SAFETY-018",
     "submit_safety_decision",
     "Decision is submitted before arrangements are confirmed.",
-    "HTTP 400 and no safety check is created.",
+    "HTTP 400 and no safety decision is stored.",
     pre="Equipment reservation Needs Recheck.",
-    steps="1. Submit Approved. 2. Confirm no safety check was stored.",
+    steps="1. Submit Approved. 2. Confirm no safety decision was stored.",
     kind="State"
 )
 def test_decision_not_ready(use_db):
@@ -442,48 +468,147 @@ def test_decision_not_ready(use_db):
         SAFETY_OFFICER
     )[0] == 400
 
-    assert client.tables["Operational Safety Check"] == []
+    event = client.tables["Event Details"][0]
+    assert event.get("safety_decision_status") is None
 
 
 @tc(
     "BE-SAFETY-019",
-    "submit_safety_decision",
-    "Event has an existing safety check and is reviewed again.",
-    "Existing row is updated instead of creating a duplicate.",
-    pre="Existing Changes Requested safety check.",
-    data="new decision = Approved",
-    steps="1. Submit Approved. 2. Confirm the existing row is updated.",
+    "event_is_ready_for_safety_check",
+    "Event was rejected and the organiser has not revised the safety information.",
+    "Returns False until safety information is changed after the rejection.",
+    pre="Safety decision Rejected; no later safety-information change.",
+    steps="1. Check whether the rejected event is ready for another safety review.",
     kind="State"
 )
-def test_existing_check_updated(use_db):
+def test_rejected_event_requires_safety_revision():
     client = safety_world(**{
-        "Operational Safety Check": [{
-            "check_id": 5,
-            "event_id": 1,
+        "Event Details": [{
+            **EVENT,
+            "equipment_placement": "Near the stage.",
+            "crowd_movement": "Keep the center aisle clear.",
+            "safety_decision_status": "Rejected",
             "safety_officer_id": "s1",
-            "status": "Changes Requested",
-            "comments": "Old comment",
+            "safety_comments": "Revise the safety information.",
+            "safety_decided_at": "2026-11-01T10:00:00+00:00",
         }]
     })
-    use_db(client, ofc)
 
-    request = ofc.SafetyDecisionRequest(
-        decision="Approved",
-        comments="Updated arrangements are safe."
-    )
-
-    ofc.submit_safety_decision(1, request, SAFETY_OFFICER)
-
-    checks = client.tables["Operational Safety Check"]
-
-    assert len(checks) == 1
-    assert checks[0]["check_id"] == 5
-    assert checks[0]["status"] == "Approved"
-    assert checks[0]["comments"] == "Updated arrangements are safe."
+    assert ofc.event_is_ready_for_safety_check(client, 1) is False
 
 
 @tc(
     "BE-SAFETY-020",
+    "event_is_ready_for_safety_check",
+    "Event was rejected and the organiser revises safety information afterwards.",
+    "Returns True because the event may be reviewed again.",
+    pre="Safety decision Rejected; equipment_placement changed after rejection.",
+    steps="1. Record a later safety-information change. 2. Check whether the event is ready again.",
+    kind="State"
+)
+def test_rejected_event_ready_after_safety_revision():
+    client = safety_world(**{
+        "Event Details": [{
+            **EVENT,
+            "equipment_placement": "Near the stage.",
+            "crowd_movement": "Keep the center aisle clear.",
+            "safety_decision_status": "Rejected",
+            "safety_officer_id": "s1",
+            "safety_comments": "Revise the safety information.",
+            "safety_decided_at": "2026-11-01T10:00:00+00:00",
+        }],
+        "event_change_log": [{
+            "id": 1,
+            "event_id": 1,
+            "changed_fields": ["equipment_placement"],
+            "created_at": "2026-11-01T11:00:00+00:00",
+        }]
+    })
+
+    assert ofc.event_is_ready_for_safety_check(client, 1) is True
+
+
+@tc(
+    "BE-SAFETY-021",
+    "submit_safety_decision",
+    "Changes Requested has comments but no affected arrangement selected.",
+    "HTTP 400 requiring Venue, Equipment, or both.",
+    data="decision = Changes Requested; affected_arrangements omitted",
+    steps="1. Submit Changes Requested without selecting an affected arrangement.",
+    kind="Negative"
+)
+def test_request_changes_requires_affected_arrangement(use_db):
+    use_db(safety_world(), ofc)
+
+    request = ofc.SafetyDecisionRequest(
+        decision="Changes Requested",
+        comments="Please revise the arrangements."
+    )
+
+    assert err(
+        ofc.submit_safety_decision,
+        1,
+        request,
+        SAFETY_OFFICER
+    ) == (
+        400,
+        "Select whether the requested changes affect Venue, Equipment, or both."
+    )
+
+
+@tc(
+    "BE-SAFETY-022",
+    "submit_safety_decision",
+    "Changes Requested selects both Venue and Equipment with a duplicate selection.",
+    "Duplicate affected arrangements are removed and both arrangements are stored.",
+    data="affected_arrangements = Venue, Equipment, Venue",
+    steps="1. Submit Changes Requested with duplicate selections. 2. Inspect stored affected arrangements.",
+    kind="Edge"
+)
+def test_request_changes_deduplicates_affected_arrangements(use_db):
+    client = use_db(safety_world(), ofc)
+
+    request = ofc.SafetyDecisionRequest(
+        decision="Changes Requested",
+        comments="Please revise both arrangements.",
+        affected_arrangements=["Venue", "Equipment", "Venue"]
+    )
+
+    out = ofc.submit_safety_decision(1, request, SAFETY_OFFICER)
+
+    assert out["affected_arrangements"] == ["Venue", "Equipment"]
+    assert client.tables["Event Details"][0]["safety_affected_arrangements"] == ["Venue", "Equipment"]
+
+
+@tc(
+    "BE-SAFETY-023",
+    "get_safety_check",
+    "Event contains a stored safety decision.",
+    "Safety decision details are returned from the event.",
+    steps="1. Call get_safety_check with stored safety fields."
+)
+def test_get_safety_check_from_event():
+    event = {
+        **EVENT,
+        "safety_decision_status": "Changes Requested",
+        "safety_officer_id": "s1",
+        "safety_comments": "Please revise the venue.",
+        "safety_affected_arrangements": ["Venue"],
+        "safety_decided_at": "2026-11-01T10:00:00+00:00",
+    }
+
+    assert ofc.get_safety_check(event) == {
+        "event_id": 1,
+        "safety_officer_id": "s1",
+        "status": "Changes Requested",
+        "comments": "Please revise the venue.",
+        "affected_arrangements": ["Venue"],
+        "decided_at": "2026-11-01T10:00:00+00:00",
+    }
+
+
+@tc(
+    "BE-SAFETY-024",
     "submit_safety_decision",
     "Approved decision omits comments.",
     "Approval is accepted and comments are stored as None.",
@@ -500,4 +625,4 @@ def test_approve_without_comments(use_db):
 
     ofc.submit_safety_decision(1, request, SAFETY_OFFICER)
 
-    assert client.tables["Operational Safety Check"][0]["comments"] is None
+    assert client.tables["Event Details"][0]["safety_comments"] is None

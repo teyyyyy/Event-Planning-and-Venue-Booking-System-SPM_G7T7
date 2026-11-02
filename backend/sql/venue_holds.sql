@@ -1,4 +1,5 @@
 -- Stories 22.1 and 22.2: tentative venue holds and hold-expiry notifications.
+-- All authenticated Venue Staff share the same booking queue; p_staff_id records who placed a hold.
 -- Run in the Supabase SQL Editor AFTER sprint2_registration_notifications.sql and
 -- significant_event_changes.sql. Safe to rerun.
 -- Enable the pg_cron extension first (Dashboard > Integrations > Cron, or Database > Extensions)
@@ -97,9 +98,6 @@ begin
   if not found then
     raise exception 'Venue booking request not found.' using errcode = 'P0002';
   end if;
-  if booking.venue_staff_id is distinct from p_staff_id then
-    raise exception 'This venue booking request is assigned to another venue staff member.' using errcode = '42501';
-  end if;
   if booking.status is distinct from 'Pending' then
     raise exception 'Only pending requests can be placed on hold. This request is %.', lower(booking.status)
       using errcode = '55000';
@@ -149,9 +147,6 @@ begin
   select * into booking from public."Venue Booking Requests" where request_id = p_request_id for update;
   if not found then
     raise exception 'Venue booking request not found.' using errcode = 'P0002';
-  end if;
-  if booking.venue_staff_id is distinct from p_staff_id then
-    raise exception 'This venue booking request is assigned to another venue staff member.' using errcode = '42501';
   end if;
   if booking.status is distinct from 'On Hold' then
     raise exception 'This request is not on hold.' using errcode = '55000';
@@ -218,3 +213,4 @@ begin
 end $$;
 
 commit;
+

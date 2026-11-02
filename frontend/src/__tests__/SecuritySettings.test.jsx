@@ -83,4 +83,23 @@ describe('SecuritySettings', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       expect(screen.queryByRole('dialog')).toBeNull();
     });
+
+  tc('FE-SEC-006', 'SecurityButton', 'Loading authenticator devices fails without an error message.', 'The default device-loading error is shown.',
+    { kind: 'Negative', steps: '1. Make listDevices fail without a message. 2. Open Security.' },
+    async () => {
+      listDevices.mockRejectedValue(new Error(''));
+      await open();
+      expect(await screen.findByText('Unable to load your devices')).toBeInTheDocument();
+    });
+
+  tc('FE-SEC-007', 'SecurityButton', 'Starting backup-device enrolment fails without an error message.', 'The default security error is shown.',
+    { kind: 'Negative', data: 'name = Backup phone', steps: '1. Open Security. 2. Enter a device name. 3. Make enrolment fail without a message.' },
+    async () => {
+      startEnrollment.mockRejectedValue(new Error(''));
+      await open();
+      await screen.findByText('Phone');
+      fireEvent.change(screen.getByPlaceholderText('e.g. Backup phone'), { target: { value: 'Backup phone' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Add backup device' }));
+      expect(await screen.findByText('Something went wrong')).toBeInTheDocument();
+    });
 });

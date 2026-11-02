@@ -233,3 +233,130 @@ def test_missing_booking_records(world):
         world.tables['notifications'][0].update(record_type=kind, record_id='999')
         response = client.get('/api/notifications/1/record')
         assert (response.status_code, response.json()['detail']) == (404, 'Linked record not found.'), kind
+
+@tc("BE-SP2-023", "Reserved equipment in notification", "A registered attendee opens an event notification for an event with reserved equipment.", "The notification record includes the reserved equipment name, ID and quantity.", steps="1. Add registration and reserved equipment. 2. Open the notification and check the equipment.")
+def test_notification_returns_reserved_equipment(world):
+    world.tables["event_registrations"] = [{"event_id": 1, "attendee_id": "a1"}]
+    world.tables["Equipment Reservation"] = [{"reservation_id": 10, "event_id": 1, "status": "Reserved"}]
+    world.tables["Equipment Reservation Item"] = [{"reservation_id": 10, "equipment_id": "MIC", "reserved_quantity": 2}]
+    world.tables["Equipment"] = [{"equipment_id": "MIC", "equipment_name": "Wireless Microphone"}]
+
+    response = client.get("/api/notifications/1/record")
+
+    assert response.status_code == 200
+    assert response.json()["equipment"] == [
+        {"equipment_id": "MIC", "equipment_name": "Wireless Microphone", "reserved_quantity": 2}
+    ]
+
+@tc("BE-SP2-024", "Latest reserved equipment", "An event has multiple equipment reservations.", "Only items from the latest Reserved reservation are returned.", steps="1. Add two reserved reservations. 2. Open the notification and check that only the latest equipment is returned.", kind="Edge")
+def test_notification_uses_latest_reserved_equipment(world):
+    world.tables["event_registrations"] = [{"event_id": 1, "attendee_id": "a1"}]
+    world.tables["Equipment Reservation"] = [
+        {"reservation_id": 10, "event_id": 1, "status": "Reserved"},
+        {"reservation_id": 11, "event_id": 1, "status": "Reserved"},
+    ]
+    world.tables["Equipment Reservation Item"] = [
+        {"reservation_id": 10, "equipment_id": "OLD_MIC", "reserved_quantity": 1},
+        {"reservation_id": 11, "equipment_id": "NEW_MIC", "reserved_quantity": 3},
+    ]
+    world.tables["Equipment"] = [
+        {"equipment_id": "OLD_MIC", "equipment_name": "Old Microphone"},
+        {"equipment_id": "NEW_MIC", "equipment_name": "New Microphone"},
+    ]
+
+    response = client.get("/api/notifications/1/record")
+
+    assert response.status_code == 200
+    assert response.json()["equipment"] == [
+        {"equipment_id": "NEW_MIC", "equipment_name": "New Microphone", "reserved_quantity": 3}
+    ]
+
+@tc("BE-SP2-025", "No reserved equipment", "An event has no equipment reservation with Reserved status.", "The notification record returns an empty equipment list.", steps="1. Add a non-reserved equipment reservation. 2. Open the notification and check that equipment is empty.", kind="Edge")
+def test_notification_without_reserved_equipment(world):
+    world.tables["event_registrations"] = [{"event_id": 1, "attendee_id": "a1"}]
+    world.tables["Equipment Reservation"] = [{"reservation_id": 10, "event_id": 1, "status": "Needs Recheck"}]
+
+    response = client.get("/api/notifications/1/record")
+
+    assert response.status_code == 200
+    assert response.json()["equipment"] == []
+
+@tc("BE-SP2-026", "Reserved equipment filtering", "A reserved equipment reservation contains an item with zero quantity.", "Only equipment with a positive reserved quantity is returned.", steps="1. Add positive- and zero-quantity items. 2. Open the notification and check that the zero-quantity item is excluded.", kind="Edge")
+def test_notification_excludes_zero_reserved_quantity(world):
+    world.tables["event_registrations"] = [{"event_id": 1, "attendee_id": "a1"}]
+    world.tables["Equipment Reservation"] = [{"reservation_id": 10, "event_id": 1, "status": "Reserved"}]
+    world.tables["Equipment Reservation Item"] = [
+        {"reservation_id": 10, "equipment_id": "MIC", "reserved_quantity": 2},
+        {"reservation_id": 10, "equipment_id": "CAM", "reserved_quantity": 0},
+    ]
+    world.tables["Equipment"] = [
+        {"equipment_id": "MIC", "equipment_name": "Microphone"},
+        {"equipment_id": "CAM", "equipment_name": "Camera"},
+    ]
+
+    response = client.get("/api/notifications/1/record")
+
+    assert response.status_code == 200
+    assert response.json()["equipment"] == [
+        {"equipment_id": "MIC", "equipment_name": "Microphone", "reserved_quantity": 2}
+    ]
+
+@tc("BE-SP2-027", "Missing equipment name", "A reserved equipment item has no matching Equipment catalogue row.", "The equipment ID is used as the display name instead.", steps="1. Add reserved equipment without a catalogue record. 2. Open the notification and check the fallback name.", kind="Edge")
+def test_notification_equipment_name_fallback(world):
+    world.tables["event_registrations"] = [{"event_id": 1, "attendee_id": "a1"}]
+    world.tables["Equipment Reservation"] = [{"reservation_id": 10, "event_id": 1, "status": "Reserved"}]
+    world.tables["Equipment Reservation Item"] = [{"reservation_id": 10, "equipment_id": "UNKNOWN", "reserved_quantity": 1}]
+    world.tables["Equipment"] = []
+
+    response = client.get("/api/notifications/1/record")
+
+    assert response.status_code == 200
+    assert response.json()["equipment"] == [
+        {"equipment_id": "UNKNOWN", "equipment_name": "UNKNOWN", "reserved_quantity": 1}
+    ]
+
+@tc(
+    "BE-SP2-028",
+    "Coordinator Lead notification access",
+    "An Event Coordinator Lead opens notifications for submitted, assigned and non-submitted events.",
+    "The Lead can access only a Submitted event that has not yet been assigned to a coordinator.",
+    steps="1. Authenticate as Event Coordinator Lead. "
+          "2. Open an unassigned Submitted event. "
+          "3. Assign a coordinator and try again. "
+          "4. Remove the coordinator and change the status to Planning. "
+          "5. Try again.",
+    kind="Security",
+)
+def test_coordinator_lead_event_notification_access(world, monkeypatch):
+    world.tables["notifications"][0]["recipient_id"] = "lead1"
+
+    monkeypatch.setitem(
+        main.app.dependency_overrides,
+        auth.current_user,
+        lambda: {
+            "id": "lead1",
+            "role": "Event Coordinator Lead",
+        },
+    )
+
+    event = world.tables["Event Details"][0]
+
+    # Submitted + unassigned -> allowed
+    event["status"] = "Submitted"
+    event["coordinator_id"] = None
+
+    response = client.get("/api/notifications/1/record")
+    assert response.status_code == 200
+
+    # Submitted + already assigned -> denied
+    event["coordinator_id"] = "c1"
+
+    response = client.get("/api/notifications/1/record")
+    assert response.status_code == 403
+
+    # Unassigned but no longer Submitted -> denied
+    event["coordinator_id"] = None
+    event["status"] = "Planning"
+
+    response = client.get("/api/notifications/1/record")
+    assert response.status_code == 403

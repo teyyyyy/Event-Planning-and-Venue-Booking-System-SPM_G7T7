@@ -77,10 +77,12 @@ def test_can_edit_draft():
     assert eo.organiser_can_edit(row(status="Draft"), "o1")
 
 
-@tc("BE-ORG-006", "organiser_can_edit", "Owner edits a Submitted event with odd case/whitespace.", "True.", data="status = \" SUBMITTED \"",
-    steps="1. Call organiser_can_edit.", kind="Edge")
-def test_can_edit_submitted_normalised():
-    assert eo.organiser_can_edit(row(status=" SUBMITTED "), "o1")
+@tc("BE-ORG-006", "organiser_can_edit",
+    "Owner tries to directly edit a Submitted event with odd case and whitespace.",
+    "False because only Draft events can be directly edited.",
+    data='status = " SUBMITTED "', steps="1. Call organiser_can_edit.", kind="Negative")
+def test_cannot_edit_submitted_normalised():
+    assert not eo.organiser_can_edit(row(status=" SUBMITTED "), "o1")
 
 
 @tc("BE-ORG-007", "organiser_can_edit", "Owner edits an Approved event.", "False (only draft/submitted are editable).", data="status = Approved",
@@ -569,17 +571,59 @@ def test_change_request_notification_failure_rolls_back(use_db):
     assert client.tables.get("event_change_requests", []) == []
 
 
-@tc("BE-ORG-054", "update_event_change_request", "An organiser edits a pending request.",
-   "The update RPC receives the organiser and request details and its result is returned.", kind="State", steps="1. Call the update endpoint.")
+@tc("BE-ORG-054", "update_event_change_request",
+    "An organiser edits a pending request including planning and safety information.",
+    "The update RPC receives the proposal details and returns the updated request.",
+    kind="State",
+    steps="1. Build an updated proposal. 2. Call the update endpoint. "
+          "3. Verify the RPC receives the proposal fields.")
 def test_change_request_update_pending(monkeypatch):
     captured = {}
     updated = {"id": 11, "review_status": "Pending", "request_text": "Updated"}
-    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=lambda name, params: SimpleNamespace(
-        execute=lambda: (captured.update(name=name, params=params) or SimpleNamespace(data=updated)))))
-    result = eo.update_event_change_request("o1", 11, make_change_request("Updated", event_name="Updated Gala"))
+
+    def rpc(name, params):
+        captured.update(name=name, params=params)
+        return SimpleNamespace(execute=lambda: SimpleNamespace(data=updated))
+
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=rpc))
+    request = make_change_request(
+        "  Updated  ",
+        event_name="Updated Gala",
+        event_type="Seminar",
+        event_capacity=25,
+        layout_required="Theatre",
+        equipment_required=["Microphone", "Projector"],
+        facilities_required=["Aircon", "Stage"],
+        accessibility_required=1,
+        equipment_placement="Projector beside the stage.",
+        crowd_movement="Keep both side aisles clear.",
+        start_time="10:00",
+        end_time="18:00",
+    )
+
+    result = eo.update_event_change_request("o1", 11, request)
+
     assert result == updated
     assert captured["name"] == "update_event_change_request"
+    assert captured["params"]["p_request_id"] == 11
     assert captured["params"]["p_organiser_id"] == "o1"
+
+    expected = {
+        "p_request_text": "Updated",
+        "p_event_name": "Updated Gala",
+        "p_event_type": "Seminar",
+        "p_event_capacity": 25,
+        "p_layout_required": "Theatre",
+        "p_equipment_required": ["Microphone", "Projector"],
+        "p_facilities_required": ["Aircon", "Stage"],
+        "p_accessibility_required": 1,
+        "p_equipment_placement": "Projector beside the stage.",
+        "p_crowd_movement": "Keep both side aisles clear.",
+        "p_start_time": "10:00",
+        "p_end_time": "18:00",
+    }
+    for key, value in expected.items():
+        assert captured["params"][key] == value
 
 
 @tc("BE-ORG-055", "cancel_event_change_request", "An organiser cancels a pending request.",
@@ -598,3 +642,83 @@ def test_change_request_update_reviewed_rejected(monkeypatch):
     error = APIError({"message": "Only pending change requests can be edited.", "code": "55000", "details": None, "hint": None})
     monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(rpc=lambda *_: SimpleNamespace(execute=lambda: (_ for _ in ()).throw(error))))
     assert err(eo.update_event_change_request, "o1", 11, make_change_request("Updated")) == (409, str(error.message))
+
+
+@tc("BE-ORG-066", "update_event_change_request",
+    "The organiser tries to edit a change request that does not exist.",
+    "HTTP 404 is returned.",
+    steps="1. Make the update RPC return P0002. 2. Call the update endpoint.",
+    kind="Negative")
+def test_change_request_update_missing(monkeypatch):
+    error = APIError({
+        "message": "Change request not found.",
+        "code": "P0002",
+        "details": None,
+        "hint": None,
+    })
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(
+        rpc=lambda *_: SimpleNamespace(execute=execute)
+    ))
+    assert err(eo.update_event_change_request, "o1", 99, make_change_request("Updated")) == (
+        404, "Change request not found."
+    )
+
+
+@tc("BE-ORG-067", "update_event_change_request",
+    "The organiser tries to edit another organiser's change request.",
+    "HTTP 403 is returned.",
+    steps="1. Make the update RPC return 42501. 2. Call the update endpoint.",
+    kind="Security")
+def test_change_request_update_wrong_owner(monkeypatch):
+    error = APIError({
+        "message": "You can only edit your own change request.",
+        "code": "42501",
+        "details": None,
+        "hint": None,
+    })
+
+    def execute():
+        raise error
+
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(
+        rpc=lambda *_: SimpleNamespace(execute=execute)
+    ))
+    assert err(eo.update_event_change_request, "o1", 11, make_change_request("Updated")) == (
+        403, "You can only edit your own change request."
+    )
+
+
+@tc("BE-ORG-068", "update_event_change_request",
+    "The update RPC succeeds but returns no updated change request.",
+    "HTTP 500 is returned with an explicit update failure.",
+    steps="1. Make the update RPC return no data. 2. Call the update endpoint.",
+    kind="Negative")
+def test_change_request_update_empty_result(monkeypatch):
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(
+        rpc=lambda *_: SimpleNamespace(
+            execute=lambda: SimpleNamespace(data=None)
+        )
+    ))
+    assert err(eo.update_event_change_request, "o1", 11, make_change_request("Updated")) == (
+        500, "Event change request could not be updated."
+    )
+
+
+@tc("BE-ORG-069", "cancel_event_change_request",
+    "The cancellation RPC succeeds but returns no cancelled change request.",
+    "HTTP 500 is returned with an explicit cancellation failure.",
+    steps="1. Make the cancellation RPC return no data. 2. Cancel the request.",
+    kind="Negative")
+def test_change_request_cancel_empty_result(monkeypatch):
+    monkeypatch.setattr(eo, "db", lambda: SimpleNamespace(
+        rpc=lambda *_: SimpleNamespace(
+            execute=lambda: SimpleNamespace(data=None)
+        )
+    ))
+    assert err(eo.cancel_event_change_request, "o1", 11) == (
+        500, "Event change request could not be cancelled."
+    )

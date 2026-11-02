@@ -18,6 +18,7 @@ export default function Notifications() {
   const [recordError, setRecordError] = useState("");
   const [busy, setBusy] = useState(null);
   const [revision, setRevision] = useState(0);
+
   useEffect(() => {
     const changed = () => {
       setTarget(linkedId());
@@ -26,8 +27,10 @@ export default function Notifications() {
     window.addEventListener("hashchange", changed);
     return () => window.removeEventListener("hashchange", changed);
   }, []);
+
   useEffect(() => {
     let active = true;
+
     async function load() {
       setLoading(true);
       try {
@@ -42,17 +45,21 @@ export default function Notifications() {
         if (active) setLoading(false);
       }
     }
+
     load();
     const timer = window.setInterval(load, 30000);
+
     return () => {
       active = false;
       window.clearInterval(timer);
     };
   }, [revision]);
+
   useEffect(() => {
     let active = true;
     setRecord(null);
     setRecordError("");
+
     if (target)
       request(`/notifications/${target}/record`)
         .then((data) => {
@@ -61,17 +68,22 @@ export default function Notifications() {
         .catch((e) => {
           if (active) setRecordError(e.message);
         });
+
     return () => {
       active = false;
     };
   }, [target, revision]);
+
   async function markRead(id) {
     setBusy(id);
+
     try {
       await request(`/notifications/${id}/read`, { method: "PATCH" });
+
       setRows((items) =>
         items.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
       );
+
       setError("");
     } catch (e) {
       setError(e.message);
@@ -79,9 +91,11 @@ export default function Notifications() {
       setBusy(null);
     }
   }
+
   function close() {
     setOpen(false);
     setTarget(null);
+
     if (linkedId())
       window.history.replaceState(
         null,
@@ -89,7 +103,9 @@ export default function Notifications() {
         window.location.pathname + window.location.search,
       );
   }
+
   const unread = rows.filter((n) => !n.is_read).length;
+
   return (
     <>
       <button
@@ -100,6 +116,7 @@ export default function Notifications() {
       >
         Notifications{unread ? ` (${unread})` : ""}
       </button>
+
       {open && (
         <section
           id="notifications-panel"
@@ -110,14 +127,21 @@ export default function Notifications() {
             <h2>Notifications</h2>
             <button onClick={close}>Close notifications</button>
           </header>
-          <button disabled={loading} onClick={() => setRevision((r) => r + 1)}>
+
+          <button
+            disabled={loading}
+            onClick={() => setRevision((r) => r + 1)}
+          >
             Refresh notifications
           </button>
+
           {error && <p role="alert">{error}</p>}
           {loading && <p role="status">Loading notifications…</p>}
+
           {!loading && !error && rows.length === 0 && (
             <p>No notifications yet.</p>
           )}
+
           {target && (
             <section className="sprint-card" aria-label="Linked record">
               <button
@@ -128,6 +152,7 @@ export default function Notifications() {
               >
                 Back to notifications
               </button>
+
               {recordError ? (
                 <p role="alert">{recordError}</p>
               ) : !record ? (
@@ -135,6 +160,19 @@ export default function Notifications() {
               ) : (
                 <>
                   <EventDetails event={record.event} />
+
+                  <p>
+                    <strong>Equipment:</strong>{" "}
+                    {record.equipment?.length
+                      ? record.equipment
+                          .map(
+                            (item) =>
+                              `${item.equipment_name} × ${item.reserved_quantity}`,
+                          )
+                          .join(", ")
+                      : "Equipment to be reserved"}
+                  </p>
+
                   {record.record && (
                     <>
                       <h3>
@@ -143,16 +181,20 @@ export default function Notifications() {
                           : "Equipment request"}{" "}
                         #{record.record.request_id}
                       </h3>
+
                       <p>Status: {record.record.status}</p>
+
                       {record.venue && (
                         <p>
                           Requested venue: {record.venue.name} —{" "}
                           {record.venue.location}
                         </p>
                       )}
+
                       {record.record.rejection_reason && (
                         <p>Reason: {record.record.rejection_reason}</p>
                       )}
+
                       {record.alternative_venue_details && (
                         <p>
                           Alternative venue:{" "}
@@ -160,6 +202,7 @@ export default function Notifications() {
                           {record.alternative_venue_details.location}
                         </p>
                       )}
+
                       {record.items?.map((item) => (
                         <p key={item.equipment_id}>
                           {item.equipment_id} × {item.requested_quantity}{" "}
@@ -172,10 +215,12 @@ export default function Notifications() {
               )}
             </section>
           )}
+
           <ul>
             {rows.map((n) => (
               <li key={n.id} className={n.is_read ? "" : "sprint-unread"}>
                 <p>{n.description}</p>
+
                 <p>
                   <small>
                     {new Date(n.created_at).toLocaleString("en-SG", {
@@ -184,6 +229,7 @@ export default function Notifications() {
                     (SGT) · {n.is_read ? "Read" : "Unread"}
                   </small>
                 </p>
+
                 <a
                   href={`#notification/${n.id}`}
                   onClick={() => {
@@ -193,6 +239,7 @@ export default function Notifications() {
                 >
                   View record
                 </a>
+
                 {!n.is_read && (
                   <button
                     disabled={busy !== null}

@@ -2,22 +2,16 @@ import React, { useEffect, useState } from 'react';
 import { request } from './api';
 import './venue_catalogue.css';
 
-const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-const title = (day) => day[0].toUpperCase() + day.slice(1);
-const items = (value) => value.split('\n').map((item) => item.trim()).filter(Boolean);
 const showList = (value) => value?.length ? value.join(', ') : 'Not specified';
 const MAX_DURATION_MINUTES = 2147483647;
 const showMinutes = (value) => value == null ? 'Not specified' : `${value} ${Number(value) === 1 ? 'minute' : 'minutes'}`;
 
 function draftFor(venue) {
   return {
-    operating_hours: Object.fromEntries(DAYS.map((day) => [day, {
-      ...(venue.operating_hours?.[day] || { closed: false, opens: '', closes: '' }),
-    }])),
-    facilities: (venue.facilities || []).join('\n'),
-    layouts: (venue.layouts || []).join('\n'),
     accessible: Number(venue.accessible) === 1 ? 1 : 0,
     accessibility_details: venue.accessibility_details || '',
+    emergency_access: venue.emergency_access || '',
+    venue_restrictions: venue.venue_restrictions || '',
     setup_time: venue.setup_time == null ? '' : String(venue.setup_time),
     teardown_time: venue.teardown_time == null ? '' : String(venue.teardown_time),
   };
@@ -60,24 +54,13 @@ export default function VenueCatalogue({ canEdit = false }) {
     setSelectedId(id);
   }
 
-  function changeHours(day, changes) {
-    setDraft((value) => ({ ...value, operating_hours: {
-      ...value.operating_hours, [day]: { ...value.operating_hours[day], ...changes },
-    } }));
-  }
+
 
   async function save(event) {
     event.preventDefault();
     if (!canEdit || saving) return;
     setError('');
     setSuccess('');
-    for (const day of DAYS) {
-      const hours = draft.operating_hours[day];
-      if (!hours.closed && (!hours.opens || !hours.closes || hours.closes <= hours.opens)) {
-        setError(`${title(day)}: closing time must be later than opening time on the same day.`);
-        return;
-      }
-    }
     for (const [key, label] of [['setup_time', 'Setup time'], ['teardown_time', 'Teardown time']]) {
       const value = draft[key];
       if (value !== '' && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) > MAX_DURATION_MINUTES)) {
@@ -86,16 +69,14 @@ export default function VenueCatalogue({ canEdit = false }) {
       }
     }
     const payload = {
-      ...draft,
-      facilities: items(draft.facilities),
-      layouts: items(draft.layouts),
+      accessible: draft.accessible,
+      accessibility_details: draft.accessibility_details,
+      emergency_access: draft.emergency_access,
+      venue_restrictions: draft.venue_restrictions,
       setup_time: draft.setup_time === '' ? null : Number(draft.setup_time),
       teardown_time: draft.teardown_time === '' ? null : Number(draft.teardown_time),
     };
-    if ([payload.facilities, payload.layouts].some((list) => list.length > 30 || list.some((item) => item.length > 100))) {
-      setError('Enter up to 30 items per list, with no more than 100 characters per item.');
-      return;
-    }
+
     setSaving(true);
     try {
       const updated = await request(`/venue-catalogue/${venue.venue_id}`, { method: 'PUT', body: JSON.stringify(payload) });
@@ -149,51 +130,43 @@ export default function VenueCatalogue({ canEdit = false }) {
         {canEdit && <button className="primary" disabled={saving} onClick={() => { setDraft(draftFor(venue)); setError(''); setSuccess(''); }}>Edit venue</button>}
       </div>
       <section className="catalogue-availability">
-        <h3>{venue.is_available === false ? 'Unavailable' : 'Available'}</h3>
+        <h3>{venue.is_available === false ? 'Unavailable' : 'Available 24/7'}</h3>
         {venue.is_available === false && <p>{venue.unavailability_reason}</p>}
         {canEdit && <form onSubmit={changeAvailability} aria-busy={saving}>
           {venue.is_available !== false && <>
             <label>Reason for unavailability<textarea required maxLength={1000} disabled={saving} value={availabilityReason} onChange={(event) => setAvailabilityReason(event.target.value)} placeholder="Maintenance, renovation, safety issue, internal activity, or another operational reason" /></label>
-            <p>Affected upcoming requests will return to Pending and coordinators will be notified to find a replacement venue.</p>
+            <p>The venue is available 24/7 unless it is marked unavailable. Affected upcoming requests will require a replacement venue.</p>
           </>}
-          {venue.is_available === false && <p>Reopening allows new requests. Affected requests still need a replacement and will not be approved automatically.</p>}
+          {venue.is_available === false && <p>Marking the venue available again allows new requests. Existing affected requests still require a replacement and will not be approved automatically.</p>}
           <button className="secondary" disabled={saving || (venue.is_available !== false && !availabilityReason.trim())}>{saving ? 'Saving…' : venue.is_available === false ? 'Mark available' : 'Mark unavailable'}</button>
         </form>}
       </section>
-      <div className="catalogue-details"><section><h3>Operating hours</h3><dl className="catalogue-hours">{DAYS.map((day) => {
-        const hours = venue.operating_hours?.[day];
-        return <div key={day}><dt>{title(day)}</dt><dd>{!hours ? 'Not specified' : hours.closed ? 'Closed' : `${hours.opens} – ${hours.closes}`}</dd></div>;
-      })}</dl></section><section>
+      <div className="catalogue-details"><section>
         <h3>Setup time</h3><p>{showMinutes(venue.setup_time)}</p>
         <h3>Teardown time</h3><p>{showMinutes(venue.teardown_time)}</p>
-        <h3>Facilities</h3><p>{showList(venue.facilities)}</p>
         <h3>Accessibility</h3><p>{venue.accessible == null ? 'Not specified' : Number(venue.accessible) === 1 ? 'Accessible' : 'Not accessible'}</p><p>{venue.accessibility_details || 'No additional accessibility information.'}</p>
+        <h3>Emergency access</h3><p>{venue.emergency_access || 'Not specified'}</p>
+        <h3>Venue restrictions</h3><p>{venue.venue_restrictions || 'Not specified'}</p>
+      </section><section>
+        <h3>Facilities</h3><p>{showList(venue.facilities)}</p>
         <h3>Supported characteristics / layouts</h3><p>{showList(venue.layouts)}</p>
+        <p className="catalogue-muted">Facilities and supported layouts are read-only catalogue information.</p>
       </section></div>
     </article>}
 
     {!loading && venue && draft && canEdit && <form className="catalogue-panel" onSubmit={save} aria-busy={saving}>
       <h2>{venue.name}</h2><p className="catalogue-muted">{venue.location} · Capacity: {venue.capacity ?? 'Not specified'}</p>
-      <fieldset disabled={saving}><legend>Operating hours</legend><p className="catalogue-muted">Use local venue time. Closing must be later on the same day. Set each day’s times or mark it closed.</p>
-        {DAYS.map((day) => {
-          const hours = draft.operating_hours[day];
-          return <div className="catalogue-hours-row" key={day}><strong>{title(day)}</strong>
-            <label className="catalogue-checkbox"><input type="checkbox" checked={hours.closed} onChange={(event) => changeHours(day, event.target.checked ? { closed: true, opens: null, closes: null } : { closed: false, opens: '', closes: '' })} />Closed</label>
-            <label>Opens<input type="time" aria-label={`${title(day)} opening time`} disabled={hours.closed} required={!hours.closed} value={hours.opens || ''} onChange={(event) => changeHours(day, { opens: event.target.value })} /></label>
-            <label>Closes<input type="time" aria-label={`${title(day)} closing time`} disabled={hours.closed} required={!hours.closed} value={hours.closes || ''} onChange={(event) => changeHours(day, { closes: event.target.value })} /></label>
-          </div>;
-        })}
-      </fieldset>
       <fieldset disabled={saving} className="catalogue-fields"><legend>Planning information</legend>
-        <p className="catalogue-muted" id="catalogue-list-help">Facilities and layouts: one item per line, up to 30 items of 100 characters each. Leave blank if not specified.</p>
         <label>Setup time (minutes)<input type="text" inputMode="numeric" pattern="[0-9]*" value={draft.setup_time} onChange={(event) => setDraft({ ...draft, setup_time: event.target.value })} /></label>
         <label>Teardown time (minutes)<input type="text" inputMode="numeric" pattern="[0-9]*" value={draft.teardown_time} onChange={(event) => setDraft({ ...draft, teardown_time: event.target.value })} /></label>
-        <label>Facilities<textarea rows={3} aria-describedby="catalogue-list-help" value={draft.facilities} placeholder={'Wi-Fi\nProjector'} onChange={(event) => setDraft({ ...draft, facilities: event.target.value })} /></label>
         <label>Accessibility<select value={draft.accessible} onChange={(event) => setDraft({ ...draft, accessible: Number(event.target.value) })}><option value={1}>Accessible</option><option value={0}>Not accessible</option></select></label>
         <label>Accessibility notes<textarea rows={3} maxLength={1000} value={draft.accessibility_details} placeholder="For example, step-free entrance and accessible toilets" onChange={(event) => setDraft({ ...draft, accessibility_details: event.target.value })} /></label>
-        <label>Supported characteristics / layouts<textarea rows={3} aria-describedby="catalogue-list-help" value={draft.layouts} placeholder={'Theatre\nBanquet\nClassroom'} onChange={(event) => setDraft({ ...draft, layouts: event.target.value })} /></label>
+        <label>Emergency access<textarea rows={3} maxLength={1000} value={draft.emergency_access} placeholder="Describe emergency exits, evacuation routes and emergency access." onChange={(event) => setDraft({ ...draft, emergency_access: event.target.value })} /></label>
+        <label>Venue restrictions<textarea rows={3} maxLength={1000} value={draft.venue_restrictions} placeholder="Describe restrictions that event planners and safety officers should know." onChange={(event) => setDraft({ ...draft, venue_restrictions: event.target.value })} /></label>
       </fieldset>
+      <section><h3>Read-only catalogue information</h3><p><strong>Facilities:</strong> {showList(venue.facilities)}</p><p><strong>Supported characteristics / layouts:</strong> {showList(venue.layouts)}</p></section>
       <div className="catalogue-actions"><button type="button" className="secondary" disabled={saving} onClick={() => { setDraft(null); setError(''); }}>Cancel</button><button className="primary" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
     </form>}
   </main>;
 }
+

@@ -249,3 +249,26 @@ def test_safety_officer_role_guard():
     assert auth.require_safety_officer(user) is user
     assert status_of(auth.require_safety_officer, {"id": "c1", "role": "Event Coordinator"}) == (403, "Safety officer access required.")
 
+
+@tc("BE-AUTH-028", "require_full_event_details_user",
+    "Full event details are requested by allowed and unrelated roles.",
+    "Event Organiser, Event Coordinator and Safety Officer are allowed; unrelated roles receive HTTP 403.",
+    steps="1. Check the three allowed roles. 2. Check Venue Staff.",
+    kind="Security")
+def test_full_event_details_role_guard():
+    allowed = [
+        {"id": "o1", "role": "Event Organiser"},
+        {"id": "c1", "role": "Event Coordinator"},
+        {"id": "s1", "role": "Safety Officer"},
+    ]
+
+    for user in allowed:
+        assert auth.require_full_event_details_user(user) is user
+
+    assert status_of(
+        auth.require_full_event_details_user,
+        {"id": "v1", "role": "Venue Staff"},
+    ) == (
+        403,
+        "Event organiser, event coordinator, or safety officer access required.",
+    )

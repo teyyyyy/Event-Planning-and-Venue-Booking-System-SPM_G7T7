@@ -218,7 +218,7 @@ describe("Venue holds — calendar", () => {
 
 const venue = (venue_id, name) => ({ venue_id, name, location: "Singapore", capacity: 100, layouts: [], facilities: [], accessible: 1 });
 const VENUES = [venue(1, "Hall A"), venue(2, "Hall B"), venue(3, "Hall C"), venue(4, "Hall D")];
-const event = (id, name) => ({ id, event_name: name, event_date: "2026-10-05", event_end_date: "2026-10-05", start_time: "10:00:00", end_time: "12:00:00",
+const event = (id, name) => ({ id, event_name: name, status: "Planning", event_date: "2026-10-05", event_end_date: "2026-10-05", start_time: "10:00:00", end_time: "12:00:00",
   event_capacity: null, layout_required: null, facilities_required: [], accessibility_required: 0 });
 const STATUSES = [
   { venue_id: 1, status: "Available", hold_expires_at: null, request_id: null, own_event: false },
@@ -235,8 +235,8 @@ function coordinatorApi(o = {}) {
     if (url.includes("/venue-availability")) return pick(d.statuses, url);
     if (url.includes("/venue-catalogue/")) return json({ setup_time: 0, teardown_time: 0 });
     if (url.includes("/venue-booking-requests/venues/")) return pick(d.booked, url);
+    if (url.includes("/venue-bookings/coordinators/") && url.includes("/events")) return pick(d.events, url);
     if (url.includes("/venue-booking-requests/coordinators/")) return pick(d.submitted, url);
-    if (url.includes("/event-coordinators/")) return pick(d.events, url);
     if (url.endsWith("/venues")) return pick(d.venues, url);
     return json({}, 404);
   });
@@ -244,6 +244,7 @@ function coordinatorApi(o = {}) {
 const renderCoordinator = async () => {
   render(<VenueRequest user={{ id: "c1" }} />);
   await screen.findByText("Submit venue request");
+  await screen.findByRole("option", { name: /Gala/ });
 };
 const pickEvent = (id) => fireEvent.change(document.querySelector("select"), { target: { value: String(id) } });
 const venueRow = async (name) => (await screen.findByText(name)).closest("tr");

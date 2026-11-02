@@ -18,12 +18,29 @@ def test_app_metadata():
     assert (main.app.title, main.app.version) == ("Event Coordinator Assignment API", "1.0.0")
 
 
-@tc("BE-APP-002", "app routers", "All eight routers are registered.", "Routes from the coordinator, organiser, venue request, venue approval, venue catalogue and three equipment modules exist.", steps="1. Collect the route paths from main.app.openapi().")
+@tc(
+    "BE-APP-002",
+    "app routers",
+    "The application's core feature routers are registered.",
+    "Representative routes for coordinator, organiser, venue, equipment, safety and supporting event features are available.",
+    steps="1. Collect the route paths from main.app.openapi().",
+    kind="Config",
+)
 def test_routers_registered():
     paths = set(main.app.openapi()["paths"])
-    assert {"/api/health", "/api/event-organisers/{organiser_id}/requests", "/api/venue-booking-requests",
-            "/api/equipment", "/api/equipment-update/{staff_id}/requests/summary", "/api/equipment-availability/{staff_id}/events",
-            "/api/venues", "/api/venue-bookings", "/api/venue-catalogue", "/api/venue-catalogue/{venue_id}"} <= paths
+
+    assert {
+        "/api/health",
+        "/api/event-organisers/{organiser_id}/requests",
+        "/api/venue-booking-requests",
+        "/api/equipment",
+        "/api/equipment-update/{staff_id}/requests/summary",
+        "/api/equipment-availability/{staff_id}/events",
+        "/api/venues",
+        "/api/venue-bookings",
+        "/api/venue-catalogue",
+        "/api/venue-catalogue/{venue_id}",
+    } <= paths
 
 
 @tc("BE-APP-003", "GET /api/health", "Health check is called over HTTP.", "200 with {\"status\": \"ok\", ...}.", steps="1. GET /api/health.")

@@ -87,6 +87,21 @@ def require_safety_officer(user: dict[str, Any] = Depends(current_user)) -> dict
         raise HTTPException(403, "Safety officer access required.")
     return user
 
+def require_full_event_details_user(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
+    allowed_roles = {
+        ORGANISER_ROLE,
+        COORDINATOR_ROLE,
+        SAFETY_OFFICER_ROLE,
+    }
+
+    if str(user.get("role", "")).strip().lower() not in allowed_roles:
+        raise HTTPException(
+            403,
+            "Event organiser, event coordinator, or safety officer access required.",
+        )
+
+    return user
+
 def require_coordinator_or_staff(user: dict[str, Any] = Depends(current_user)) -> dict[str, Any]:
     if str(user.get("role", "")).strip().lower() not in (COORDINATOR_ROLE, COORDINATOR_LEAD_ROLE, VENUE_STAFF_ROLE):
         raise HTTPException(403, "Event coordinator OR venue staff access required.")

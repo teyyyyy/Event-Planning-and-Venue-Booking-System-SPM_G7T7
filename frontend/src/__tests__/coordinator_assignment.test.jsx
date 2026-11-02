@@ -4,12 +4,16 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { tc } from '../test/tc';
 import { json, mockFetch, callsTo } from '../test/helpers';
 
+vi.mock('../components/FullEventDetails', () => ({
+  default: ({ details, loading, error, onClose }) => <section role="dialog" aria-label="Full event details"><span>{loading ? 'Loading full details...' : details?.event?.event_title || 'Full details loaded'}</span>{error && <p role="alert">{error}</p>}<button type="button" onClick={onClose}>Close full details</button></section>,
+}));
+
 import CoordinatorAssignment from '../coordinator_assignment';
 
 const ORGANISER = { id: 'o1', role: 'Event Organiser' };
 const COORDINATOR = { id: 'c1', role: 'Event Coordinator' };
 const LEAD = { id: 'lead1', role: 'Event Coordinator Lead' };
-const ev = (o = {}) => ({ id: 1, event_title: 'Gala', event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 10, description: 'Initial plan', start_time: '09:00:00', end_time: '17:00:00', event_status: 'Submitted', assigned_coordinator_id: null, coordinator_name: null, coordinator_email: null, ...o });
+const ev = (o = {}) => ({ id: 1, event_title: 'Gala', event_name: 'Gala', event_type: 'Workshop', event_date: '2026-10-01', event_end_date: '2026-10-01', event_capacity: 10, description: 'Initial plan', start_time: '09:00:00', end_time: '17:00:00', layout_required: 'Banquet', equipment_required: ['Microphone', 'Projector'], facilities_required: ['Aircon', 'Stage'], accessibility_required: 0, equipment_placement: 'Projector at the stage.', crowd_movement: 'Keep the center aisle clear.', event_status: 'Submitted', assigned_coordinator_id: null, coordinator_name: null, coordinator_email: null, ...o });
 const changeReq = (o = {}) => ({
   id: 11,
   event_id: 1,
@@ -65,7 +69,7 @@ describe('CoordinatorAssignment', () => {
         return json({});
       });
       render(<CoordinatorAssignment user={LEAD} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'View details' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Assign coordinator' }));
       const dialog = await screen.findByRole('dialog', { name: 'Review event request' });
       expect(within(dialog).getByDisplayValue('Microphone, Projector')).toBeInTheDocument();
       expect(within(dialog).getByDisplayValue('Projector at the stage.')).toBeInTheDocument();
@@ -90,7 +94,7 @@ describe('CoordinatorAssignment', () => {
         return json([{ id: 'c1', name: 'Bob' }]);
       });
       render(<CoordinatorAssignment user={LEAD} />);
-      fireEvent.click(await screen.findByRole('button', { name: 'View details' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Assign coordinator' }));
       const dialog = await screen.findByRole('dialog', { name: 'Review event request' });
       fireEvent.change(within(dialog).getByRole('combobox', { name: 'Assign event coordinator' }), { target: { value: 'c1' } });
       fireEvent.click(within(dialog).getByRole('button', { name: 'Assign coordinator' }));
@@ -118,11 +122,11 @@ describe('CoordinatorAssignment', () => {
       expect(screen.getByText('2026-11-01')).toBeInTheDocument();
     });
 
-  tc('FE-COORD-003', 'CoordinatorAssignment', 'The organiser has no events.', '"Loading Event Request..." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
+  tc('FE-COORD-003', 'CoordinatorAssignment', 'The organiser has no events.', '"No event requests found." is shown.', { kind: 'Edge', steps: '1. Render with an empty list.' },
     async () => {
       mockFetch(() => json([]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      expect(await screen.findByText('Loading Event Request...')).toBeInTheDocument();
+      expect(await screen.findByText('No event requests found.')).toBeInTheDocument();
     });
 
   tc('FE-COORD-004', 'CoordinatorAssignment', 'The backend is unreachable when loading.', 'A message tells the user to start the backend and includes the error.',
@@ -181,16 +185,16 @@ describe('CoordinatorAssignment', () => {
     });
 
   tc('FE-COORD-009', 'CoordinatorAssignment (organiser status)', 'The organiser has only Draft events.',
-    'The Event status table excludes Draft events and displays "Loading Event Request...".',
+    'The Event status table excludes Draft events and displays "No event requests found.".',
     { pre: 'The organiser has one Draft event.', steps: '1. Render the Event status tab.' },
     async () => {
       mockFetch(() => json([ev({ event_status: 'Draft' })]));
       render(<CoordinatorAssignment user={ORGANISER} />);
-      expect(await screen.findByText('Loading Event Request...')).toBeInTheDocument();
+      expect(await screen.findByText('No event requests found.')).toBeInTheDocument();
     });
 
   tc('FE-COORD-011', 'CoordinatorAssignment (organiser status)', 'Events in different statuses are listed.',
-    'Draft is omitted; active events show Request changes unless one is already pending; Completed, Cancelled and Rejected have no action besides their change history.',
+    'Draft is omitted; active events show Request changes unless one is already pending; Completed allows full details while Cancelled and Rejected only retain change history.',
     { data: 'Draft, Submitted, Approved, Planning with pending change, Completed, Cancelled, Rejected', steps: '1. Render events in these statuses. 2. Inspect rows and actions.' },
     async () => {
       mockFetch(() => json([
@@ -211,7 +215,8 @@ describe('CoordinatorAssignment', () => {
       expect(within(row('Plan')).getByText('Pending change request')).toBeInTheDocument();
       expect(within(row('Plan')).queryByRole('button', { name: 'Request changes' })).toBeNull();
       expect(within(row('Rej')).getByText(/Reason: Please revise the event details\./)).toBeInTheDocument();
-      for (const name of ['Comp', 'Can', 'Rej']) {
+      expect(within(row('Comp')).getAllByRole('button').map((button) => button.textContent)).toEqual(['View full event details', 'History']);
+      for (const name of ['Can', 'Rej']) {
         expect(within(row(name)).getAllByRole('button').map((button) => button.textContent)).toEqual(['History']);
       }
     });
@@ -250,6 +255,12 @@ describe('CoordinatorAssignment', () => {
         description: 'Initial plan',
         start_time: '09:00',
         end_time: '17:00',
+        layout_required: 'Banquet',
+        equipment_required: ['Microphone', 'Projector'],
+        facilities_required: ['Aircon', 'Stage'],
+        accessibility_required: 0,
+        equipment_placement: 'Projector at the stage.',
+        crowd_movement: 'Keep the center aisle clear.',
         request_text: 'Add wheelchair-accessible seating',
       });
     });
@@ -1050,6 +1061,101 @@ describe('CoordinatorAssignment', () => {
       expect(rows.map((row) => within(row).getAllByRole('cell')[0].textContent)).toEqual(['Pending request', 'Newer rejected', 'Older approved']);
     });
 
+
+  tc('FE-COORD-079', 'CoordinatorAssignment (change request proposal selections)', 'Stored equipment and facility selections arrive as serialized strings and the organiser edits checkbox and accessibility choices.',
+    'Serialized selections are parsed into arrays; checkbox add/remove and accessibility radio changes are reflected in the submitted proposal.',
+    { kind: 'Edge', data: 'equipment = {"Microphone","Projector"}; facilities = ["Aircon","Stage"]; accessibility = 0', steps: '1. Open Request changes. 2. Toggle an equipment checkbox off and on. 3. Select accessibility Yes. 4. Submit and inspect the proposal.' },
+    async () => {
+      const f = mockFetch((url) => url.endsWith('/change-requests')
+        ? json({ id: 42, event_id: 1 })
+        : json([ev({ event_status: 'Approved', coordinator_name: 'A', equipment_required: '{"Microphone","Projector"}', facilities_required: '["Aircon","Stage"]' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
+      const equipment = screen.getAllByRole('checkbox')[0];
+      fireEvent.click(equipment);
+      fireEvent.click(equipment);
+      fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Change summary for the event coordinator' }), { target: { value: 'Update accessibility.' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send for coordinator approval' }));
+      await waitFor(() => expect(callsTo(f, '/requests/1/change-requests', 'POST')).toHaveLength(1));
+      const body = JSON.parse(callsTo(f, '/requests/1/change-requests', 'POST')[0][1].body);
+      expect(body.equipment_required).toEqual(['Projector', 'Microphone']);
+      expect(body.facilities_required).toEqual(['Aircon', 'Stage']);
+      expect(body.accessibility_required).toBe(1);
+    });
+
+  tc('FE-COORD-080', 'CoordinatorAssignment (full event details)', 'An organiser opens the full details for a planning event.',
+    'The full-details endpoint is loaded and the dialog can be closed.',
+    { steps: '1. Render a Planning event. 2. Open full event details. 3. Wait for the response. 4. Close the dialog.' },
+    async () => {
+      const f = mockFetch((url) => url.endsWith('/events/1/full-details')
+        ? json({ event: ev({ event_status: 'Planning', event_title: 'Detailed Gala' }), venue_requests: [], equipment_requests: [] })
+        : json([ev({ event_status: 'Planning' })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'View full event details' }));
+      const dialog = await screen.findByRole('dialog', { name: 'Full event details' });
+      expect(await within(dialog).findByText('Detailed Gala')).toBeInTheDocument();
+      expect(callsTo(f, '/events/1/full-details', 'GET')).toHaveLength(1);
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Close full details' }));
+      expect(screen.queryByRole('dialog', { name: 'Full event details' })).not.toBeInTheDocument();
+    });
+
+  tc('FE-COORD-081', 'CoordinatorAssignment (full event details errors)', 'Loading full event details fails in different ways.',
+    'A backend detail, the fallback error and a network error are displayed while the event list remains available.',
+    { kind: 'Negative', steps: '1. Open three Planning events. 2. Return a backend detail, an empty 500 and a network error respectively. 3. Verify each message.' },
+    async () => {
+      mockFetch((url) => {
+        if (url.endsWith('/events/1/full-details')) return json({ detail: 'Full details are unavailable.' }, 409);
+        if (url.endsWith('/events/2/full-details')) return json({}, 500);
+        if (url.endsWith('/events/3/full-details')) throw new Error('Network offline');
+        return json([ev({ id: 1, event_title: 'First', event_status: 'Planning' }), ev({ id: 2, event_title: 'Second', event_status: 'Planning' }), ev({ id: 3, event_title: 'Third', event_status: 'Planning' })]);
+      });
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      const open = async (name, expected) => {
+        const row = (await screen.findByText(name)).closest('tr');
+        fireEvent.click(within(row).getByRole('button', { name: 'View full event details' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Full event details' });
+        expect(await within(dialog).findByRole('alert')).toHaveTextContent(expected);
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Close full details' }));
+      };
+      await open('First', 'Full details are unavailable.');
+      await open('Second', 'Unable to load full event details.');
+      await open('Third', 'Unable to load full event details. (Network offline)');
+    });
+
+  tc('FE-COORD-082', 'CoordinatorAssignment (change request processing)', 'A processed change request returns no processing summary.',
+    'Processing succeeds and the success message does not require a summary.',
+    { kind: 'Edge', steps: '1. Expand an approved significant request. 2. Process it. 3. Return Processed without a summary.' },
+    async () => {
+      const f = await openChangeRequests(
+        [changeReq({ review_status: 'Approved', processing_status: 'Awaiting processing', impact: significantImpact() })],
+        (url, options) => url.endsWith('/process') && options.method === 'POST'
+          ? json({ change_request: { id: 11, processing_status: 'Processed', processed_at: '2026-10-05T10:00:00Z', processing_summary: null } })
+          : null,
+      );
+      await viewRequest('Morning Gala');
+      fireEvent.click(screen.getByRole('button', { name: 'Process change' }));
+      expect(await screen.findByText('Change request processed.')).toBeInTheDocument();
+      expect(callsTo(f, '/event-change-requests/11/process', 'POST')).toHaveLength(1);
+    });
+
+  tc('FE-COORD-083', 'CoordinatorAssignment (proposal selection fallbacks)', 'Stored proposal selections are blank or not strings.',
+    'The change form treats unsupported or blank stored selections as empty arrays.',
+    { kind: 'Edge', data: 'equipment_required = blank string; facilities_required = null', steps: '1. Open Request changes. 2. Submit without changing the selection fields. 3. Inspect the payload.' },
+    async () => {
+      const f = mockFetch((url) => url.endsWith('/change-requests')
+        ? json({ id: 43, event_id: 1 })
+        : json([ev({ event_status: 'Approved', equipment_required: '   ', facilities_required: null })]));
+      render(<CoordinatorAssignment user={ORGANISER} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Request changes' }));
+      fireEvent.change(screen.getByRole('textbox', { name: 'Change summary for the event coordinator' }), { target: { value: 'Keep the current setup.' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send for coordinator approval' }));
+      await waitFor(() => expect(callsTo(f, '/requests/1/change-requests', 'POST')).toHaveLength(1));
+      const body = JSON.parse(callsTo(f, '/requests/1/change-requests', 'POST')[0][1].body);
+      expect(body.equipment_required).toEqual([]);
+      expect(body.facilities_required).toEqual([]);
+    });
+
   tc('FE-COORD-065', 'CoordinatorAssignment (API base URL)', 'VITE_API_URL points at a deployed backend.', 'Requests go to the configured backend instead of localhost.',
     { data: 'VITE_API_URL = https://api.example.test/api', steps: '1. Set VITE_API_URL and reload the module. 2. Render as Event Coordinator.' },
     async () => {
@@ -1064,3 +1170,4 @@ describe('CoordinatorAssignment', () => {
     });
 
 });
+

@@ -74,6 +74,9 @@ const SECTIONS = [
   { n: '6.16', title: 'Tentative venue holds (Venue Staff, Event Coordinator)', prefixes: ['FE-VHOLD', 'BE-VHOLD'],
     intro: 'Stories 22.1 and 22.2. Feature code: VHOLD. Venue staff place a hold with a future expiry on a pending venue request and can remove it; approval converts the hold into the confirmed booking and rejection releases it. An unexpired hold makes the venue unavailable for overlapping times (including setup and teardown) in approval checks, new requests, the calendar and the coordinator\'s venue list, which shows each venue as Confirmed, On Hold (with expiry), Expired or Available. A hold past its expiry is treated as Expired at once and never as a booking; the coordinator must submit a new request. Placing, removing, reminding (24 hours before expiry) and expiring holds, with their notifications, are verified separately by test/venue_holds_sql.mjs.',
     fe: 'frontend/src/__tests__/VenueHolds.test.jsx', be: 'test/test_be_venue_holds.py' },
+  { n: '6.17', title: 'Full Event Details', prefixes: ['FE-EDETAIL'],
+    intro: 'Feature code: EDETAIL. Covers the shared Full Event Details component used to display complete event information, including event requirements, approved venues, reserved equipment and operational safety check details.',
+    fe: 'frontend/src/__tests__/FullEventDetails.test.jsx', be: 'none (shared frontend display component)' },
 ];
 
 // Listed in §4. A new feature code needs an entry here as well as a section above.
@@ -84,7 +87,7 @@ const CODES = {
   VCAT: 'venue catalogue', EQREQ: 'equipment request', EQUPD: 'equipment update', EQAVAIL: 'equipment availability',
   EQRES: 'equipment reservation', VCAL: 'venue availability calendar', SP2: 'Sprint 2 attendee registration and notifications',
   EVCHG: 'significant event changes and change-request processing', SAFETY: 'operational feasibility check',
-  VHOLD: 'tentative venue holds',
+  VHOLD: 'tentative venue holds',  EDETAIL: 'full event details',
 };
 
 // ---- load + validate -------------------------------------------------------------------
