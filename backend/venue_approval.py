@@ -14,9 +14,7 @@ from venue_holds import (
 )
 
 router = APIRouter()
-REJECTED = "Rejected"
 NEEDS_RECHECK = "Needs Recheck"
-ALTERNATIVE_OFFERED = "Alternative Offered"
 
 # Event Details columns that may hold accessibility once the booking-request
 # feature writes it there; the first one present wins over the booking row.
